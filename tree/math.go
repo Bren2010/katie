@@ -1,0 +1,154 @@
+package tree
+
+// log2 returns the exponent of the largest power of 2 less than x.
+func log2(x int) int {
+	if x == 0 {
+		return 0
+	}
+
+	k := 0
+	for (x >> k) > 0 {
+		k += 1
+	}
+	return k - 1
+}
+
+// level returns the level of a node in the tree. Leaves are level 0, their
+// parents are level 1, and so on.
+func level(x int) int {
+	if (x & 1) == 0 {
+		return 0
+	}
+
+	k := 0
+	for ((x >> k) & 1) == 1 {
+		k += 1
+	}
+	return k
+}
+
+// nodeWidth returns the number of nodes needed to store a tree with n leaves.
+func nodeWidth(n int) int {
+	if n == 0 {
+		return 0
+	}
+	return 2*(n-1) + 1
+}
+
+// root returns the id of the root node of a tree with n leaves.
+func root(n int) int {
+	w := nodeWidth(n)
+	return (1 << log2(w)) - 1
+}
+
+// left returns the left child of an intermediate node.
+func left(x int) int {
+	k := level(x)
+	if k == 0 {
+		panic("leaf node has no children")
+	}
+	return x ^ (1 << (k - 1))
+}
+
+func rightStep(x int) int {
+	k := level(x)
+	if k == 0 {
+		panic("leaf node has no children")
+	}
+	return x ^ (3 << (k - 1))
+}
+
+// right returns the right child of an intermediate node.
+func right(x, n int) int {
+	r := rightStep(x)
+	w := nodeWidth(n)
+	for r >= w {
+		r = left(r)
+	}
+	return r
+}
+
+func parentStep(x int) int {
+	k := level(x)
+	b := (x >> (k + 1)) & 1
+	return (x | (1 << k)) ^ (b << (k + 1))
+}
+
+// parent returns the id of the parent node x, if there are n nodes in the tree
+// total.
+func parent(x, n int) int {
+	if x == root(n) {
+		panic("root node has no parent")
+	}
+
+	width := nodeWidth(n)
+	p := parentStep(x)
+	for p >= width {
+		p = parentStep(p)
+	}
+	return p
+}
+
+// sibling returns the other child of the node's parent.
+func sibling(x, n int) int {
+	p := parent(x, n)
+	if x < p {
+		return right(p, n)
+	} else {
+		return left(p)
+	}
+}
+
+// directPath returns the direct path of a node, ordered from leaf to root.
+func directPath(x, n int) []int {
+	r := root(n)
+	if x == r {
+		return []int{}
+	}
+
+	d := []int{}
+	for x != r {
+		x = parent(x, n)
+		d = append(d, x)
+	}
+	return d
+}
+
+// copath returns the copath of a node, ordered from leaf to root.
+func copath(x, n int) []int {
+	if x == root(n) {
+		return []int{}
+	}
+
+	d := directPath(x, n)
+	d = append([]int{x}, d...)
+	d = d[:len(d)-1]
+	for i := 0; i < len(d); i++ {
+		d[i] = sibling(d[i], n)
+	}
+
+	return d
+}
+
+// isFullSubtree returns true if node x represents a full subtree.
+func isFullSubtree(x, n int) bool {
+	rightmost := 2 * (n - 1)
+	expected := x + (1 << level(x)) - 1
+
+	return expected <= rightmost
+}
+
+// fullSubtrees returns the list of full subtrees that x consists of.
+func fullSubtrees(x, n int) []int {
+	out := []int{}
+
+	for {
+		if isFullSubtree(x, n) {
+			out = append(out, x)
+			return out
+		} else {
+			out = append(out, left(x))
+			x = right(x, n)
+		}
+	}
+}
