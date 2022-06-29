@@ -1,10 +1,15 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+
+	"github.com/JumpPrivacy/katie/crypto/vrf"
+	"github.com/JumpPrivacy/katie/crypto/vrf/p256"
 
 	"gopkg.in/yaml.v2"
 )
@@ -29,6 +34,12 @@ type TLSConfig struct {
 
 type APIConfig struct {
 	HomeRedirect string `yaml:"home"`
+
+	SigningKey string `yaml:"signing-key"` // 32 byte hex-encoded seed for the signing private key.
+	signingKey ed25519.PrivateKey
+
+	VRFKey string `yaml:"vrf-key"` // PEM encoded VRF private key.
+	vrfKey vrf.PrivateKey
 }
 
 func ReadConfig(filename string) (*Config, error) {
@@ -45,8 +56,14 @@ func ReadConfig(filename string) (*Config, error) {
 	// Check that all required fields are populated.
 	if parsed.ServerAddr == "" {
 		return nil, fmt.Errorf("field not provided: addr")
+	} else if parsed.APIConfig == nil {
+		return nil, fmt.Errorf("field not provided: api")
 	} else if parsed.APIConfig.HomeRedirect == "" {
 		return nil, fmt.Errorf("field not provided: api.home")
+	} else if parsed.APIConfig.SigningKey == "" {
+		return nil, fmt.Errorf("field not provided: api.signing-key")
+	} else if parsed.APIConfig.VRFKey == "" {
+		return nil, fmt.Errorf("field not provided: api.vrf-key")
 	}
 
 	// Parse TLS config if necessary.
@@ -69,6 +86,20 @@ func ReadConfig(filename string) (*Config, error) {
 			ClientAuth:   tls.RequireAndVerifyClientCert,
 			ClientCAs:    certPool,
 		}
+	}
+
+	// Parse cryptographic keys.
+	seed, err := hex.DecodeString(parsed.APIConfig.SigningKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse signing key: %v", err)
+	} else if len(seed) != ed25519.SeedSize {
+		return nil, fmt.Errorf("signing key is wrong size: wanted=%v, got=%v", ed25519.SeedSize, len(seed))
+	}
+	parsed.APIConfig.signingKey = ed25519.NewKeyFromSeed(seed)
+
+	parsed.APIConfig.vrfKey, err = p256.NewVRFSignerFromPEM([]byte(parsed.APIConfig.VRFKey))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse vrf key: %v", err)
 	}
 
 	return &parsed, nil
