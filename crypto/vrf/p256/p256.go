@@ -84,7 +84,7 @@ func H1(m []byte) (x, y *big.Int) {
 		h.Write(m)
 		r := []byte{2} // Set point encoding to "compressed", y=0.
 		r = h.Sum(r)
-		x, y = Unmarshal(curve, r[:byteLen+1])
+		x, y = elliptic.UnmarshalCompressed(curve, r[:byteLen+1])
 		i++
 	}
 	return
