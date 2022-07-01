@@ -1,14 +1,12 @@
-package tree
+// Package prefix implements a Merkle prefix tree.
+package prefix
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strconv"
 )
-
-// TODO: Look into more efficient storage format for prefix tree nodes.
 
 // buildKey returns a slice starting and ending with other slices, `prefix` and
 // `suffix`, separated by byte `b`.
@@ -29,7 +27,7 @@ func parsePrefix(id string) []byte {
 	return raw
 }
 
-func prefixTreeHash(leaf bool, left, right []byte) []byte {
+func treeHash(leaf bool, left, right []byte) []byte {
 	input := make([]byte, 1+len(left)+len(right))
 	if leaf {
 		input[0] = 1
@@ -41,35 +39,35 @@ func prefixTreeHash(leaf bool, left, right []byte) []byte {
 	return output[:]
 }
 
-func prefixLeafHash(suffix, value []byte) []byte {
-	return prefixTreeHash(true, suffix, value)
+func leafHash(suffix, value []byte) []byte {
+	return treeHash(true, suffix, value)
 }
 
-func prefixParentHash(left, right []byte) []byte {
-	return prefixTreeHash(false, left, right)
+func parentHash(left, right []byte) []byte {
+	return treeHash(false, left, right)
 }
 
-type prefixNode interface {
-	isPrefixNode()
+type treeNode interface {
+	isTreeNode()
 }
 
-type prefixLeafNode struct {
+type leafNode struct {
 	suffix, value []byte
 }
 
-func (n prefixLeafNode) isPrefixNode() {}
+func (n leafNode) isTreeNode() {}
 
-type prefixParentNode struct {
+type parentNode struct {
 	hash []byte
 }
 
-func (n prefixParentNode) isPrefixNode() {}
+func (n parentNode) isTreeNode() {}
 
 // prefixChunk is a helper struct that handles parsing the data in a chunk.
 type prefixChunk struct {
 	prefix []byte
 	cache  [16][]byte
-	elems  map[byte]prefixNode
+	elems  map[byte]treeNode
 }
 
 func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
@@ -82,7 +80,7 @@ func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
 	}
 	data = data[16*32:]
 
-	elems := make(map[byte]prefixNode)
+	elems := make(map[byte]treeNode)
 	for len(data) > 0 {
 		if len(data) < 2 {
 			return nil, fmt.Errorf("invalid data in slice")
@@ -102,7 +100,7 @@ func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
 			value := data[2+suffixLen : 2+suffixLen+32]
 			data = data[2+suffixLen+32:]
 
-			elems[b] = prefixLeafNode{suffix: suffix, value: value}
+			elems[b] = leafNode{suffix: suffix, value: value}
 		} else if data[1] == 1 {
 			// Parent node: Just hash.
 			if len(data) < 2+32 {
@@ -111,7 +109,7 @@ func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
 			hash := data[2 : 2+32]
 			data = data[2+32:]
 
-			elems[b] = prefixParentNode{hash: hash}
+			elems[b] = parentNode{hash: hash}
 		} else {
 			return nil, fmt.Errorf("unexpected value in slice")
 		}
@@ -124,10 +122,10 @@ func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
 	}, nil
 }
 
-func newEmptyPrefixChunk(prefix []byte) *prefixChunk {
+func newEmptyChunk(prefix []byte) *prefixChunk {
 	value := make([]byte, 32)
 	for i := 0; i < 4; i++ {
-		value = prefixParentHash(value, value)
+		value = parentHash(value, value)
 	}
 	buf := make([]byte, 32*16)
 	for i := 0; i < 16; i++ {
@@ -145,7 +143,7 @@ func newEmptyPrefixChunk(prefix []byte) *prefixChunk {
 func (pc *prefixChunk) updateCache(b byte) {
 	b = b >> 4
 	bits := fmt.Sprintf("%04b", b)
-	pc.cache[b] = prefixParentHash(
+	pc.cache[b] = parentHash(
 		pc._hash(bits+"0"),
 		pc._hash(bits+"1"),
 	)
@@ -187,23 +185,23 @@ func (pc *prefixChunk) _hash(b string) []byte {
 			panic(err)
 		}
 		elem, ok := pc.elems[byte(n)]
-		if ok {
+		if !ok {
 			return make([]byte, 32)
 		}
 		switch elem := elem.(type) {
-		case prefixLeafNode:
-			return prefixLeafHash(elem.suffix, elem.value)
-		case prefixParentNode:
+		case leafNode:
+			return leafHash(elem.suffix, elem.value)
+		case parentNode:
 			return elem.hash
 		default:
 			panic("unreachable")
 		}
 	}
 
-	return prefixParentHash(pc._hash(b+"0"), pc._hash(b+"1"))
+	return parentHash(pc._hash(b+"0"), pc._hash(b+"1"))
 }
 
-// marshal returns the serialize chunk.
+// marshal returns the serialized chunk.
 func (pc *prefixChunk) marshal() []byte {
 	out := make([]byte, 0)
 
@@ -220,21 +218,21 @@ func (pc *prefixChunk) marshal() []byte {
 		}
 
 		switch elem := elem.(type) {
-		case prefixLeafNode:
+		case leafNode:
 			piece := make([]byte, 2+len(elem.suffix)+32)
 			piece[0] = byte(i)
 			piece[1] = 0
-			copy(piece[2:2+len(suffix)], elem.suffix)
-			copy(piece[2+len(suffix):], elem.value)
+			copy(piece[2:2+len(elem.suffix)], elem.suffix)
+			copy(piece[2+len(elem.suffix):], elem.value)
 
-			out = append(out, piece)
-		case prefixParentNode:
+			out = append(out, piece...)
+		case parentNode:
 			piece := make([]byte, 34)
 			piece[0] = byte(i)
 			piece[1] = 1
 			copy(piece[2:34], elem.hash)
 
-			out = append(out, piece)
+			out = append(out, piece...)
 		default:
 			panic("unreachable")
 		}
@@ -242,6 +240,60 @@ func (pc *prefixChunk) marshal() []byte {
 
 	return out
 }
+
+// chunkSet is a helper struct for directing operations that span multiple
+// prefixChunks, like search and insertion.
+type chunkSet struct {
+	chunks   map[string]*prefixChunk
+	modified map[string]struct{}
+}
+
+func newChunkSet(chunks map[string][]byte) (*chunkSet, error) {
+	out := &chunkSet{
+		chunks:   make(map[string]*prefixChunk),
+		modified: make(map[string]struct{}),
+	}
+
+	for id, data := range chunks {
+		prefix, err := hex.DecodeString(id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse id: %v", id)
+		}
+		chunk, err := newPrefixChunk(prefix, data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse chunk: %v: %v", id, err)
+		}
+		out.chunks[id] = chunk
+	}
+
+	return out, nil
+}
+
+// func (s *chunkSet) search(key []byte) (PrefixTreeSearch, error) {
+// 	// Walk down the path looking for the right leaf node and building our
+// 	// inclusion/non-inclusion proof.
+// 	id := "root"
+// 	proof := make([][]byte, 0)
+//
+// 	for i := 0; i < len(key); i++ {
+// 		chunk, ok := s.chunks[id]
+// 		if !ok {
+// 			if i == 0 {
+// 				// The root doesn't exist yet which is fine.
+// 				return nil, nil
+// 			} else {
+// 				// An intermediate doesn't exist.
+// 				return nil, fmt.Errorf("expected chunk was not found")
+// 			}
+// 		}
+// 	}
+// }
+//
+// type PrefixTreeSearch interface {
+// 	isPrefixTreeSearch()
+// }
+//
+// type
 
 // PrefixTree represents the roof of a Merkle prefix tree that can provide
 // inclusion and non-inclusion proofs.
