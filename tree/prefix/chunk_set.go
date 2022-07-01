@@ -20,11 +20,11 @@ func newChunkSet(chunks map[string][]byte) (*chunkSet, error) {
 	}
 
 	for id, data := range chunks {
-		prefix, err := hex.DecodeString(id)
+		prefix, err := parsePrefix(id)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse id: %v", id)
+			return nil, err
 		}
-		chunk, err := newPrefixChunk(prefix, data)
+		chunk, err := newPrefixChunk(len(id)%2 == 1, prefix, data)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse chunk: %v: %v", id, err)
 		}
@@ -40,9 +40,10 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 	// Walk down the path looking for the right leaf node and building our
 	// inclusion/non-inclusion proof.
 	id := "root"
+	fullKey := hex.EncodeToString(key)
 	proof := make([][]byte, 0)
 
-	for i := 0; i < len(key); i++ {
+	for i := 0; i < len(fullKey); i++ {
 		chunk, ok := s.chunks[id]
 		if !ok {
 			if i == 0 { // The root doesn't exist yet which is fine.
@@ -51,14 +52,14 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 			return nil, fmt.Errorf("expected chunk was not found")
 		}
 
-		b := key[len(chunk.prefix)]
+		b := getNextNibble(key, len(chunk.prefix), chunk.half)
 		proof = append(proof, chunk.proof(b)...)
 
 		elem, ok := chunk.elems[b]
 		if !ok {
 			return nonInclusionParent{proof: proof}, nil
 		} else if elem.typ == leafNode {
-			cand := buildKey(chunk.prefix, b, elem.inner)
+			cand := buildKey(chunk.prefix, b, elem.inner, chunk.half)
 
 			if bytes.Equal(key, cand) {
 				return inclusionProof{proof: proof}, nil
@@ -68,7 +69,7 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 				suffix: elem.inner,
 			}, nil
 		} else if elem.typ == parentNode {
-			id = hex.EncodeToString(key[0 : i+1])
+			id = fullKey[0 : i+1]
 		} else {
 			panic("unreachable")
 		}
@@ -77,7 +78,8 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 	panic("unexpected error condition")
 }
 
-// insert executes a search for `key` in the tree and adds it if it doesn't.
+// insert executes a search for `key` in the tree and adds it if it doesn't
+// already exist.
 func (s *chunkSet) insert(key []byte) ([]byte, error) {
 	if _, ok := s.chunks["root"]; !ok {
 		s.chunks["root"] = newEmptyChunk(make([]byte, 0))
@@ -87,27 +89,22 @@ func (s *chunkSet) insert(key []byte) ([]byte, error) {
 
 func (s *chunkSet) _insert(id string, key []byte) ([]byte, error) {
 	chunk := s.chunks[id]
-	if !bytes.Equal(chunk.prefix, key[:len(chunk.prefix)]) {
-		return nil, fmt.Errorf("key does not belong in this chunk")
-	}
-
-	b := key[len(chunk.prefix)]
+	b := getNextNibble(key, len(chunk.prefix), chunk.half)
 	elem, ok := chunk.elems[b]
 	if !ok {
-		// This byte isn't already in the chunk so we can just add it.
+		// This nibble isn't already in the chunk so we can just add it.
 		chunk.elems[b] = &treeNode{
 			typ:   leafNode,
-			inner: key[len(chunk.prefix)+1:],
+			inner: buildSuffix(key, len(chunk.prefix), chunk.half),
 		}
 	} else if elem.typ == leafNode {
 		// Reconstruct the key that's here already.
-		oldKey := buildKey(chunk.prefix, b, elem.inner)
+		oldKey := buildKey(chunk.prefix, b, elem.inner, chunk.half)
 
 		// Check that the new key is different from what's already here to
 		// avoid inserting a duplicate.
 		if !bytes.Equal(key, oldKey) {
-			newPrefix := append(chunk.prefix, b)
-			newId := hex.EncodeToString(newPrefix)
+			newPrefix, newId := buildPrefix(chunk.prefix, b, chunk.half)
 			if _, ok := s.chunks[newId]; ok {
 				return nil, fmt.Errorf("chunk should not exist yet")
 			}
@@ -126,7 +123,7 @@ func (s *chunkSet) _insert(id string, key []byte) ([]byte, error) {
 			chunk.elems[b] = &treeNode{typ: parentNode, inner: h}
 		}
 	} else if elem.typ == parentNode {
-		newId := hex.EncodeToString(append(chunk.prefix, b))
+		_, newId := buildPrefix(chunk.prefix, b, chunk.half)
 		h, err := s._insert(newId, key)
 		if err != nil {
 			return nil, err
@@ -135,7 +132,6 @@ func (s *chunkSet) _insert(id string, key []byte) ([]byte, error) {
 	} else {
 		panic("unreachable")
 	}
-	chunk.updateCache(b)
 
 	s.modified[id] = struct{}{}
 	return chunk.hash(), nil
