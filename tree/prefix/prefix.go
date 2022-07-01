@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+
+	"github.com/JumpPrivacy/katie/db"
 )
 
 // buildKey returns a slice starting and ending with other slices, `prefix` and
@@ -48,20 +50,46 @@ func parentHash(left, right []byte) []byte {
 }
 
 type treeNode interface {
-	isTreeNode()
+	// sum returns the tree hash of the node.
+	sum() []byte
+	// marshal returns the serialized node contents for storage in the database.
+	marshal(b byte) []byte
 }
 
 type leafNode struct {
 	suffix, value []byte
 }
 
-func (n leafNode) isTreeNode() {}
+func (n leafNode) sum() []byte {
+	return leafHash(n.suffix, n.value)
+}
+
+func (n leafNode) marshal(b byte) []byte {
+	out := make([]byte, 2+len(n.suffix)+32)
+	out[0] = b
+	out[1] = 0
+	copy(out[2:2+len(n.suffix)], n.suffix)
+	copy(out[2+len(n.suffix):], n.value)
+
+	return out
+}
 
 type parentNode struct {
 	hash []byte
 }
 
-func (n parentNode) isTreeNode() {}
+func (n parentNode) sum() []byte {
+	return n.hash
+}
+
+func (n parentNode) marshal(b byte) []byte {
+	out := make([]byte, 34)
+	out[0] = b
+	out[1] = 1
+	copy(out[2:34], n.hash)
+
+	return out
+}
 
 // prefixChunk is a helper struct that handles parsing the data in a chunk.
 type prefixChunk struct {
@@ -188,14 +216,7 @@ func (pc *prefixChunk) _hash(b string) []byte {
 		if !ok {
 			return make([]byte, 32)
 		}
-		switch elem := elem.(type) {
-		case leafNode:
-			return leafHash(elem.suffix, elem.value)
-		case parentNode:
-			return elem.hash
-		default:
-			panic("unreachable")
-		}
+		return elem.sum()
 	}
 
 	return parentHash(pc._hash(b+"0"), pc._hash(b+"1"))
@@ -216,26 +237,7 @@ func (pc *prefixChunk) marshal() []byte {
 		if !ok {
 			continue
 		}
-
-		switch elem := elem.(type) {
-		case leafNode:
-			piece := make([]byte, 2+len(elem.suffix)+32)
-			piece[0] = byte(i)
-			piece[1] = 0
-			copy(piece[2:2+len(elem.suffix)], elem.suffix)
-			copy(piece[2+len(elem.suffix):], elem.value)
-
-			out = append(out, piece...)
-		case parentNode:
-			piece := make([]byte, 34)
-			piece[0] = byte(i)
-			piece[1] = 1
-			copy(piece[2:34], elem.hash)
-
-			out = append(out, piece...)
-		default:
-			panic("unreachable")
-		}
+		out = append(out, elem.marshal(byte(i))...)
 	}
 
 	return out
@@ -269,34 +271,166 @@ func newChunkSet(chunks map[string][]byte) (*chunkSet, error) {
 	return out, nil
 }
 
-// func (s *chunkSet) search(key []byte) (PrefixTreeSearch, error) {
-// 	// Walk down the path looking for the right leaf node and building our
-// 	// inclusion/non-inclusion proof.
-// 	id := "root"
-// 	proof := make([][]byte, 0)
-//
-// 	for i := 0; i < len(key); i++ {
-// 		chunk, ok := s.chunks[id]
-// 		if !ok {
-// 			if i == 0 {
-// 				// The root doesn't exist yet which is fine.
-// 				return nil, nil
-// 			} else {
-// 				// An intermediate doesn't exist.
-// 				return nil, fmt.Errorf("expected chunk was not found")
-// 			}
-// 		}
-// 	}
-// }
-//
-// type PrefixTreeSearch interface {
-// 	isPrefixTreeSearch()
-// }
-//
-// type
+// search executes a search for `key` through the tree, assuming all necessary
+// chunks are already loaded into the ChunkSet.
+func (s *chunkSet) search(key []byte) (SearchResult, error) {
+	// Walk down the path looking for the right leaf node and building our
+	// inclusion/non-inclusion proof.
+	id := "root"
+	proof := make([][]byte, 0)
 
-// PrefixTree represents the roof of a Merkle prefix tree that can provide
-// inclusion and non-inclusion proofs.
-type PrefixTree struct{}
+	for i := 0; i < len(key); i++ {
+		chunk, ok := s.chunks[id]
+		if !ok {
+			if i == 0 { // The root doesn't exist yet which is fine.
+				return nil, nil
+			}
+			// An intermediate doesn't exist.
+			return nil, fmt.Errorf("expected chunk was not found")
+		}
 
-func NewPrefixTree() {}
+		b := key[len(chunk.prefix)]
+		proof = append(proof, chunk.proof(b)...)
+
+		elem, ok := chunk.elems[b]
+		if !ok {
+			return nonInclusionParent{proof: proof}, nil
+		}
+		switch elem := elem.(type) {
+		case leafNode:
+			cand := buildKey(chunk.prefix, b, elem.suffix)
+
+			if bytes.Equal(key, cand) {
+				return inclusionProof{
+					proof: proof,
+					value: elem.value,
+				}, nil
+			}
+			return nonInclusionLeaf{
+				proof:  proof,
+				suffix: elem.suffix,
+				value:  elem.value,
+			}, nil
+
+		case parentNode:
+			id = hex.EncodeToString(key[0 : i+1])
+
+		default:
+			panic("unreachable")
+		}
+	}
+
+	panic("unexpected error condition")
+}
+
+// insert executes a search for `key` in the tree and adds it if it doesn't
+// exist or replaces the existing value if it does.
+func (s *chunkSet) insert(key, value []byte) {
+	if _, ok := s.chunks["root"]; !ok {
+		s.chunks["root"] = newEmptyChunk(make([]byte, 0))
+	}
+	return s._insert("root", key, value)
+}
+
+func (s *chunkSet) _insert(id string, key, value []byte) ([]byte, error) {
+	chunk := s.chunks[id]
+	if !bytes.Equal(chunk.prefix, key[:len(chunk.prefix)]) {
+		return nil, fmt.Errorf("key does not belong in this chunk")
+	}
+
+	b := key[len(chunk.prefix)]
+	elem, ok := chunk.elems[b]
+	if !ok {
+		// This byte isn't already in the chunk so we can just add it.
+		chunk.elems[b] = leafNode{
+			suffix: key[len(chunk.prefix)+1:],
+			value:  value,
+		}
+	} else {
+		switch elem := elem.(type) {
+		case leafNode:
+			// Reconstruct the key/value pair that's here already.
+			oldKey := buildKey(chunk.prefix, b, elem.suffix)
+			oldValue := elem.value
+
+			// Compare the key/value pair that's already here with what we want
+			// to insert to determine how to continue.
+			if bytes.Equal(key, oldKey) {
+				// The keys are the same so we just need to replace the value.
+				chunk.elems[b] = leafNode{
+					suffix: elem.suffix,
+					value:  value,
+				}
+			} else {
+				// The keys are different so we need to merge them into a new
+				// parent.
+				newPrefix := append(chunk.prefix, b)
+				newId := hex.EncodeToString(newPrefix)
+				if _, ok := s.chunks[newId]; ok {
+					return nil, fmt.Errorf("chunk should not exist yet")
+				}
+				s.chunks[newId] = newEmptyChunk(newPrefix)
+
+				// Add the old key/value pair to the chunk.
+				if _, err := s._insert(newId, oldKey, oldValue); err != nil {
+					return nil, err
+				}
+				// Add the new key/value pair.
+				if _, err := s._insert(newId, key, value); err != nil {
+					return nil, err
+				}
+
+				chunk.elems[b] = parentNode{hash: h}
+			}
+
+		case parentNode:
+			newId := hex.EncodeToString(append(chunk.prefix, b))
+			h, err := s._insert(newId, key, value)
+			if err != nil {
+				return nil, err
+			}
+			chunk.elems[b] = parentNode{hash: h}
+
+		default:
+			panic("unreachable")
+		}
+	}
+	chunk.updateCache(b)
+
+	s.modified[id] = struct{}{}
+	return chunk.hash(), nil
+}
+
+// marshal returns a map of serialized chunks, for any chunks which have been
+// changed.
+func (s *chunkSet) marshal() map[string][]byte {
+	out := make(map[string][]byte)
+
+	for id, _ := range s.modified {
+		out[id] = s.chunks[id].marshal()
+	}
+
+	return out
+}
+
+type SearchResult interface{}
+
+// nonInclusionParent is a proof of non-inclusion based on showing a null link
+// in a parent node where the search path would normally proceed.
+type nonInclusionParent struct {
+	proof [][]byte
+}
+
+// nonInclusionLeaf is a proof of non-inclusion based on showing a leaf node for
+// a different key where the search path would normally proceed.
+type nonInclusionLeaf struct {
+	proof  [][]byte
+	suffix []byte
+	value  []byte
+}
+
+// inclusionLeaf is a proof of inclusion containing the leaf value.
+type inclusionLeaf struct {
+	proof [][]byte
+	value []byte
+}
