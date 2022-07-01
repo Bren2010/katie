@@ -47,8 +47,7 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 		if !ok {
 			if i == 0 { // The root doesn't exist yet which is fine.
 				return nil, nil
-			}
-			// An intermediate doesn't exist.
+			} // An intermediate doesn't exist.
 			return nil, fmt.Errorf("expected chunk was not found")
 		}
 
@@ -58,27 +57,19 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 		elem, ok := chunk.elems[b]
 		if !ok {
 			return nonInclusionParent{proof: proof}, nil
-		}
-		switch elem := elem.(type) {
-		case leafNode:
-			cand := buildKey(chunk.prefix, b, elem.suffix)
+		} else if elem.typ == leafNode {
+			cand := buildKey(chunk.prefix, b, elem.inner)
 
 			if bytes.Equal(key, cand) {
-				return inclusionLeaf{
-					proof: proof,
-					value: elem.value,
-				}, nil
+				return inclusionProof{proof: proof}, nil
 			}
 			return nonInclusionLeaf{
 				proof:  proof,
-				suffix: elem.suffix,
-				value:  elem.value,
+				suffix: elem.inner,
 			}, nil
-
-		case parentNode:
+		} else if elem.typ == parentNode {
 			id = hex.EncodeToString(key[0 : i+1])
-
-		default:
+		} else {
 			panic("unreachable")
 		}
 	}
@@ -86,16 +77,15 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 	panic("unexpected error condition")
 }
 
-// insert executes a search for `key` in the tree and adds it if it doesn't
-// exist or replaces the existing value if it does.
-func (s *chunkSet) insert(key, value []byte) ([]byte, error) {
+// insert executes a search for `key` in the tree and adds it if it doesn't.
+func (s *chunkSet) insert(key []byte) ([]byte, error) {
 	if _, ok := s.chunks["root"]; !ok {
 		s.chunks["root"] = newEmptyChunk(make([]byte, 0))
 	}
-	return s._insert("root", key, value)
+	return s._insert("root", key)
 }
 
-func (s *chunkSet) _insert(id string, key, value []byte) ([]byte, error) {
+func (s *chunkSet) _insert(id string, key []byte) ([]byte, error) {
 	chunk := s.chunks[id]
 	if !bytes.Equal(chunk.prefix, key[:len(chunk.prefix)]) {
 		return nil, fmt.Errorf("key does not belong in this chunk")
@@ -105,59 +95,45 @@ func (s *chunkSet) _insert(id string, key, value []byte) ([]byte, error) {
 	elem, ok := chunk.elems[b]
 	if !ok {
 		// This byte isn't already in the chunk so we can just add it.
-		chunk.elems[b] = leafNode{
-			suffix: key[len(chunk.prefix)+1:],
-			value:  value,
+		chunk.elems[b] = &treeNode{
+			typ:   leafNode,
+			inner: key[len(chunk.prefix)+1:],
 		}
-	} else {
-		switch elem := elem.(type) {
-		case leafNode:
-			// Reconstruct the key/value pair that's here already.
-			oldKey := buildKey(chunk.prefix, b, elem.suffix)
-			oldValue := elem.value
+	} else if elem.typ == leafNode {
+		// Reconstruct the key that's here already.
+		oldKey := buildKey(chunk.prefix, b, elem.inner)
 
-			// Compare the key/value pair that's already here with what we want
-			// to insert to determine how to continue.
-			if bytes.Equal(key, oldKey) {
-				// The keys are the same so we just need to replace the value.
-				chunk.elems[b] = leafNode{
-					suffix: elem.suffix,
-					value:  value,
-				}
-			} else {
-				// The keys are different so we need to merge them into a new
-				// parent.
-				newPrefix := append(chunk.prefix, b)
-				newId := hex.EncodeToString(newPrefix)
-				if _, ok := s.chunks[newId]; ok {
-					return nil, fmt.Errorf("chunk should not exist yet")
-				}
-				s.chunks[newId] = newEmptyChunk(newPrefix)
-
-				// Add the old key/value pair to the chunk.
-				if _, err := s._insert(newId, oldKey, oldValue); err != nil {
-					return nil, err
-				}
-				// Add the new key/value pair.
-				h, err := s._insert(newId, key, value)
-				if err != nil {
-					return nil, err
-				}
-
-				chunk.elems[b] = parentNode{hash: h}
+		// Check that the new key is different from what's already here to
+		// avoid inserting a duplicate.
+		if !bytes.Equal(key, oldKey) {
+			newPrefix := append(chunk.prefix, b)
+			newId := hex.EncodeToString(newPrefix)
+			if _, ok := s.chunks[newId]; ok {
+				return nil, fmt.Errorf("chunk should not exist yet")
 			}
+			s.chunks[newId] = newEmptyChunk(newPrefix)
 
-		case parentNode:
-			newId := hex.EncodeToString(append(chunk.prefix, b))
-			h, err := s._insert(newId, key, value)
+			// Add the old key to the chunk.
+			if _, err := s._insert(newId, oldKey); err != nil {
+				return nil, err
+			}
+			// Add the new key.
+			h, err := s._insert(newId, key)
 			if err != nil {
 				return nil, err
 			}
-			chunk.elems[b] = parentNode{hash: h}
 
-		default:
-			panic("unreachable")
+			chunk.elems[b] = &treeNode{typ: parentNode, inner: h}
 		}
+	} else if elem.typ == parentNode {
+		newId := hex.EncodeToString(append(chunk.prefix, b))
+		h, err := s._insert(newId, key)
+		if err != nil {
+			return nil, err
+		}
+		chunk.elems[b] = &treeNode{typ: parentNode, inner: h}
+	} else {
+		panic("unreachable")
 	}
 	chunk.updateCache(b)
 

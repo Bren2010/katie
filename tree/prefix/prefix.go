@@ -1,4 +1,5 @@
-// Package prefix implements a Merkle prefix tree.
+// Package prefix implements a Merkle prefix tree that supports proofs of
+// inclusion and non-inclusion.
 package prefix
 
 type SearchResult interface{}
@@ -14,11 +15,9 @@ type nonInclusionParent struct {
 type nonInclusionLeaf struct {
 	proof  [][]byte
 	suffix []byte
-	value  []byte
 }
 
-// inclusionLeaf is a proof of inclusion containing the leaf value.
-type inclusionLeaf struct {
+// inclusionProof is a proof of inclusion.
+type inclusionProof struct {
 	proof [][]byte
-	value []byte
 }

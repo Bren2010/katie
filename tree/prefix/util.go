@@ -28,7 +28,9 @@ func parsePrefix(id string) []byte {
 func treeHash(leaf bool, left, right []byte) []byte {
 	input := make([]byte, 1+len(left)+len(right))
 	if leaf {
-		input[0] = 1
+		input[0] = byte(leafNode)
+	} else {
+		input[0] = byte(parentNode)
 	}
 	copy(input[1:1+len(left)], left)
 	copy(input[1+len(left):], right)
@@ -37,8 +39,8 @@ func treeHash(leaf bool, left, right []byte) []byte {
 	return output[:]
 }
 
-func leafHash(suffix, value []byte) []byte {
-	return treeHash(true, suffix, value)
+func leafHash(suffix []byte) []byte {
+	return treeHash(true, suffix, nil)
 }
 
 func parentHash(left, right []byte) []byte {

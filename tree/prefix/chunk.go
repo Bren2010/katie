@@ -5,44 +5,35 @@ import (
 	"strconv"
 )
 
-type treeNode interface {
-	// sum returns the tree hash of the node.
-	sum() []byte
-	// marshal returns the serialized node contents for storage in the database.
-	marshal(b byte) []byte
+type treeNodeType byte
+
+const (
+	leafNode   treeNodeType = 0
+	parentNode              = 1
+)
+
+type treeNode struct {
+	typ   treeNodeType
+	inner []byte
 }
 
-type leafNode struct {
-	suffix, value []byte
+func (n *treeNode) sum() []byte {
+	switch n.typ {
+	case leafNode:
+		return leafHash(n.inner)
+	case parentNode:
+		return n.inner
+	default:
+		panic("unreachable")
+	}
 }
 
-func (n leafNode) sum() []byte {
-	return leafHash(n.suffix, n.value)
-}
-
-func (n leafNode) marshal(b byte) []byte {
-	out := make([]byte, 2+len(n.suffix)+32)
+// marshal returns the serialized node contents for storage in the database.
+func (n *treeNode) marshal(b byte) []byte {
+	out := make([]byte, 2+len(n.inner))
 	out[0] = b
-	out[1] = 0
-	copy(out[2:2+len(n.suffix)], n.suffix)
-	copy(out[2+len(n.suffix):], n.value)
-
-	return out
-}
-
-type parentNode struct {
-	hash []byte
-}
-
-func (n parentNode) sum() []byte {
-	return n.hash
-}
-
-func (n parentNode) marshal(b byte) []byte {
-	out := make([]byte, 34)
-	out[0] = b
-	out[1] = 1
-	copy(out[2:34], n.hash)
+	out[1] = byte(n.typ)
+	copy(out[2:], n.inner)
 
 	return out
 }
@@ -51,7 +42,7 @@ func (n parentNode) marshal(b byte) []byte {
 type prefixChunk struct {
 	prefix []byte
 	cache  [16][]byte
-	elems  map[byte]treeNode
+	elems  map[byte]*treeNode
 }
 
 func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
@@ -64,7 +55,7 @@ func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
 	}
 	data = data[16*32:]
 
-	elems := make(map[byte]treeNode)
+	elems := make(map[byte]*treeNode)
 	for len(data) > 0 {
 		if len(data) < 2 {
 			return nil, fmt.Errorf("invalid data in slice")
@@ -73,30 +64,24 @@ func newPrefixChunk(prefix, data []byte) (*prefixChunk, error) {
 		if _, ok := elems[b]; ok {
 			return nil, fmt.Errorf("duplicate entries")
 		}
+		t := treeNodeType(data[1])
 
-		if data[1] == 0 {
-			// Leaf node: Suffix and then value.
-			suffixLen := 32 - len(prefix) - 1
-			if len(data) < 2+suffixLen+32 {
-				return nil, fmt.Errorf("not enough data in slice")
-			}
-			suffix := data[2 : 2+suffixLen]
-			value := data[2+suffixLen : 2+suffixLen+32]
-			data = data[2+suffixLen+32:]
-
-			elems[b] = leafNode{suffix: suffix, value: value}
-		} else if data[1] == 1 {
-			// Parent node: Just hash.
-			if len(data) < 2+32 {
-				return nil, fmt.Errorf("not enough data in slice")
-			}
-			hash := data[2 : 2+32]
-			data = data[2+32:]
-
-			elems[b] = parentNode{hash: hash}
+		var innerLen int
+		if t == leafNode {
+			innerLen = 32 - len(prefix) - 1
+		} else if t == parentNode {
+			innerLen = 32
 		} else {
 			return nil, fmt.Errorf("unexpected value in slice")
 		}
+
+		if len(data) < 2+innerLen {
+			return nil, fmt.Errorf("not enough data in slice")
+		}
+		inner := data[2 : 2+innerLen]
+		data = data[2+innerLen:]
+
+		elems[b] = &treeNode{typ: t, inner: inner}
 	}
 
 	return &prefixChunk{
