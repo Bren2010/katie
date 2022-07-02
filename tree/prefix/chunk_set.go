@@ -82,7 +82,7 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 // already exist.
 func (s *chunkSet) insert(key []byte) ([]byte, error) {
 	if _, ok := s.chunks["root"]; !ok {
-		s.chunks["root"] = newEmptyChunk(make([]byte, 0))
+		s.chunks["root"] = newEmptyChunk(false, make([]byte, 0))
 	}
 	return s._insert("root", key)
 }
@@ -108,7 +108,7 @@ func (s *chunkSet) _insert(id string, key []byte) ([]byte, error) {
 			if _, ok := s.chunks[newId]; ok {
 				return nil, fmt.Errorf("chunk should not exist yet")
 			}
-			s.chunks[newId] = newEmptyChunk(newPrefix)
+			s.chunks[newId] = newEmptyChunk(!chunk.half, newPrefix)
 
 			// Add the old key to the chunk.
 			if _, err := s._insert(newId, oldKey); err != nil {

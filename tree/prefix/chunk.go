@@ -147,7 +147,7 @@ func (pc *prefixChunk) _isEmpty(b string) bool {
 		if !ok {
 			panic("could not find nibble")
 		}
-		_, ok := pc.elems[n]
+		_, ok = pc.elems[n]
 		return !ok
 	}
 

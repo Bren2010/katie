@@ -1,7 +1,6 @@
 package prefix
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -23,6 +22,7 @@ func buildKey(prefix []byte, b byte, suffix []byte, half bool) []byte {
 	return out
 }
 
+// buildPrefix returns the prefix `prefix` appended with the nibble `b`.
 func buildPrefix(prefix []byte, b byte, half bool) ([]byte, string) {
 	if half {
 		out := make([]byte, len(prefix))
@@ -39,6 +39,7 @@ func buildPrefix(prefix []byte, b byte, half bool) ([]byte, string) {
 	return out, id[:len(id)-1]
 }
 
+// buildSuffix returns the suffix of `key` after `fullBytes` of a prefix.
 func buildSuffix(key []byte, fullBytes int, half bool) []byte {
 	if half {
 		out := make([]byte, len(key)-fullBytes+1)
@@ -56,7 +57,7 @@ func buildSuffix(key []byte, fullBytes int, half bool) []byte {
 // key used in the database.
 func parsePrefix(id string) ([]byte, error) {
 	if id == "root" {
-		return make([]byte, 0)
+		return make([]byte, 0), nil
 	}
 	paddedId := id
 	if len(paddedId)%2 == 1 {
