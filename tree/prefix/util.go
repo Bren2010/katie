@@ -6,6 +6,11 @@ import (
 	"fmt"
 )
 
+// Throughout all of these helper functions, the `half` argument indicates
+// whether or not the `prefix` argument ends in a "half" byte (a nibble). Or in
+// the case of buildSuffix and getNextNibble, if the prefix being removed from
+// `key` ends in a nibble.
+
 // buildKey returns a slice starting and ending with other slices, `prefix` and
 // `suffix`, separated by a nibble `b`.
 func buildKey(prefix []byte, b byte, suffix []byte, half bool) []byte {
