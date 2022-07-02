@@ -80,16 +80,18 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 
 // insert executes a search for `key` in the tree and adds it if it doesn't
 // already exist.
-func (s *chunkSet) insert(key []byte) ([]byte, error) {
+func (s *chunkSet) insert(key []byte) ([]byte, int, error) {
 	if _, ok := s.chunks["root"]; !ok {
 		s.chunks["root"] = newEmptyChunk(false, make([]byte, 0))
 	}
 	return s._insert("root", key)
 }
 
-func (s *chunkSet) _insert(id string, key []byte) ([]byte, error) {
+func (s *chunkSet) _insert(id string, key []byte) ([]byte, int, error) {
+	height := 1
 	chunk := s.chunks[id]
 	b := getNextNibble(key, len(chunk.prefix), chunk.half)
+
 	elem, ok := chunk.elems[b]
 	if !ok {
 		// This nibble isn't already in the chunk so we can just add it.
@@ -106,35 +108,37 @@ func (s *chunkSet) _insert(id string, key []byte) ([]byte, error) {
 		if !bytes.Equal(key, oldKey) {
 			newPrefix, newId := buildPrefix(chunk.prefix, b, chunk.half)
 			if _, ok := s.chunks[newId]; ok {
-				return nil, fmt.Errorf("chunk should not exist yet")
+				return nil, 0, fmt.Errorf("chunk should not exist yet")
 			}
 			s.chunks[newId] = newEmptyChunk(!chunk.half, newPrefix)
 
 			// Add the old key to the chunk.
-			if _, err := s._insert(newId, oldKey); err != nil {
-				return nil, err
+			if _, _, err := s._insert(newId, oldKey); err != nil {
+				return nil, 0, err
 			}
 			// Add the new key.
-			h, err := s._insert(newId, key)
+			h, subHeight, err := s._insert(newId, key)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 
 			chunk.elems[b] = &treeNode{typ: parentNode, inner: h}
+			height += subHeight
 		}
 	} else if elem.typ == parentNode {
 		_, newId := buildPrefix(chunk.prefix, b, chunk.half)
-		h, err := s._insert(newId, key)
+		h, subHeight, err := s._insert(newId, key)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		chunk.elems[b] = &treeNode{typ: parentNode, inner: h}
+		height += subHeight
 	} else {
 		panic("unreachable")
 	}
 
 	s.modified[id] = struct{}{}
-	return chunk.hash(), nil
+	return chunk.hash(), height, nil
 }
 
 // marshal returns a map of serialized chunks, for any chunks which have been
