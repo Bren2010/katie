@@ -98,3 +98,117 @@ func TestSearchInclusionProof(t *testing.T) {
 		verifyInclusionProof(root, leaves[i], res.(inclusionProof))
 	}
 }
+
+func TestSearchNonInclusionProof(t *testing.T) {
+	tree := NewTree(db.NewMemoryTx(), 0)
+
+	key := random()
+	root, _, err := tree.Insert(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// By leaf.
+	key2 := random()
+	key2[0] = key[0] ^ byte(1<<3)
+	res, err := tree.Search(key2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyNonInclusionLeafProof(root, key2, res.(nonInclusionLeaf))
+
+	// By parent.
+	key3 := random()
+	key3[0] = key[0] ^ byte(1<<4)
+	res, err = tree.Search(key3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyNonInclusionParentProof(root, key3, res.(nonInclusionParent))
+}
+
+func TestInsert(t *testing.T) {
+	tx := db.NewMemoryTx()
+	tree := NewTree(tx, 0)
+
+	key := random()  // Reference key.
+	key2 := random() // Different from reference from the first nibble.
+	if (key[0] >> 4) == (key2[0] >> 4) {
+		key2[0] ^= 0x10
+	}
+	key3 := random() // Same for the first nibble then differs at second.
+	key3[0] = (key[0] & 0xf0) | (key3[0] & 0x0f)
+	if key[0] == key3[0] {
+		key3[0] ^= 0x01
+	}
+	key4 := random() // Same for the first 16 bytes then differs at next nibble.
+	copy(key4[:16], key[:16])
+	if (key[16] >> 4) == (key4[16] >> 4) {
+		key4[16] ^= 0x10
+	}
+
+	// Insert first item: one new db entry.
+	root, _, err := tree.Insert(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := tree.Search(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyInclusionProof(root, key, res.(inclusionProof))
+	assert(len(res.(inclusionProof).proof) == 4)
+	assert(len(tx.Data) == 1)
+
+	// Different first nibble: no new db entry.
+	root, _, err = tree.Insert(key2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = tree.Search(key2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyInclusionProof(root, key2, res.(inclusionProof))
+	assert(len(res.(inclusionProof).proof) == 4)
+	assert(len(tx.Data) == 1)
+
+	// Same first nibble as another: new db entry.
+	root, _, err = tree.Insert(key3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = tree.Search(key3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyInclusionProof(root, key3, res.(inclusionProof))
+	assert(len(res.(inclusionProof).proof) == 8)
+	assert(len(tx.Data) == 2)
+
+	// Many bytes in common: many new db entries.
+	root, _, err = tree.Insert(key4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = tree.Search(key4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyInclusionProof(root, key4, res.(inclusionProof))
+	assert(len(res.(inclusionProof).proof) == 132)
+	assert(len(tx.Data) == 33)
+
+	// Duplicate entry: do nothing.
+	root, _, err = tree.Insert(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = tree.Search(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyInclusionProof(root, key, res.(inclusionProof))
+	assert(len(res.(inclusionProof).proof) == 132)
+	assert(len(tx.Data) == 33)
+}

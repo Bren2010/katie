@@ -11,18 +11,18 @@ type Tx interface {
 // MemoryTx implements the Tx interface over an in-memory map, mostly for
 // testing use-cases.
 type MemoryTx struct {
-	data map[string][]byte
+	Data map[string][]byte
 }
 
 func NewMemoryTx() *MemoryTx {
-	return &MemoryTx{data: make(map[string][]byte)}
+	return &MemoryTx{Data: make(map[string][]byte)}
 }
 
 func (m *MemoryTx) BatchGet(keys []string) (map[string][]byte, error) {
 	out := make(map[string][]byte)
 
 	for _, key := range keys {
-		if d, ok := m.data[key]; ok {
+		if d, ok := m.Data[key]; ok {
 			out[key] = d
 		}
 	}
@@ -34,7 +34,7 @@ func (m *MemoryTx) BatchPut(data map[string][]byte) error {
 	for key, d := range data {
 		buf := make([]byte, len(d))
 		copy(buf, d)
-		m.data[key] = buf
+		m.Data[key] = buf
 	}
 	return nil
 }
