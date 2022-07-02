@@ -46,15 +46,11 @@ func buildPrefix(prefix []byte, b byte, half bool) ([]byte, string) {
 
 // buildSuffix returns the suffix of `key` after `fullBytes` of a prefix.
 func buildSuffix(key []byte, fullBytes int, half bool) []byte {
-	if half {
-		out := make([]byte, len(key)-fullBytes+1)
-		copy(out, key[fullBytes-1:])
-		out[0] &= 0xf
-		return out
-	}
-
 	out := make([]byte, len(key)-fullBytes)
 	copy(out, key[fullBytes:])
+	if !half {
+		out[0] &= 0xf
+	}
 	return out
 }
 

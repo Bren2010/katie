@@ -47,9 +47,9 @@ func TestBuildPrefix(t *testing.T) {
 }
 
 func TestBuildSuffix(t *testing.T) {
-	suffix1 := buildSuffix(testKey1, 17, true)
-	assert(bytes.Equal(testKey3[16:], suffix1))
+	suffix1 := buildSuffix(testKey1, 16, true)
+	assert(bytes.Equal(testKey1[16:], suffix1))
 
-	suffix2 := buildSuffix(testKey1, 17, false)
-	assert(bytes.Equal(testKey1[17:], suffix2))
+	suffix2 := buildSuffix(testKey1, 16, false)
+	assert(bytes.Equal(testKey3[16:], suffix2))
 }

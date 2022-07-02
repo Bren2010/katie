@@ -44,7 +44,7 @@ func verifyInclusionProof(root, key []byte, res inclusionProof) {
 	n := len(res.proof)
 	assert(n > 0 && n%4 == 0)
 
-	leaf := leafHash(buildSuffix(key, (n+4)/8, n%8 == 4))
+	leaf := leafHash(buildSuffix(key, n/8, n%8 == 0))
 	verifyProof(root, key, leaf, res.proof)
 }
 
@@ -59,7 +59,7 @@ func verifyNonInclusionLeafProof(root, key []byte, res nonInclusionLeaf) {
 		assert(res.suffix[0]>>4 == 0)
 	}
 	assert(!bytes.Equal(
-		buildSuffix(key, (n+4)/8, n%8 == 4),
+		buildSuffix(key, n/8, n%8 == 0),
 		res.suffix,
 	))
 	verifyProof(root, key, leafHash(res.suffix), res.proof)
