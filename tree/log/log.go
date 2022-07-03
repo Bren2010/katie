@@ -258,7 +258,7 @@ func NewTree(tx db.Tx) *Tree {
 
 // fetch loads the chunks for the requested nodes from the database. It returns
 // an error if not all chunks are found.
-func (t *Tree) fetch(nodes []int) (map[int][]byte, error) {
+func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 	dedup := make(map[int]struct{})
 	for _, id := range nodes {
 		dedup[chunk(id)] = struct{}{}
@@ -286,7 +286,34 @@ func (t *Tree) fetch(nodes []int) (map[int][]byte, error) {
 		}
 		dataInt[id] = raw
 	}
-	return dataInt, nil
+	return newChunkSet(n, dataInt)
+}
+
+// Get returns the value of log entry number `x` along with its proof of
+// inclusion.
+func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
+	if n == 0 {
+		return nil, nil, nil
+	}
+
+	// Fetch the leaf we want, along with its copath.
+	leaf := 2 * x
+	nodes := append([]int{leaf}, copath(leaf, n)...)
+
+	set, err := t.fetch(n, nodes)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Extract the information we need and return.
+	value := set.get(leaf)
+
+	proof := make([][]byte, 0)
+	for i := 1; i < len(nodes); i++ {
+		proof = append(proof, set.get(nodes[i]))
+	}
+
+	return value, proof, nil
 }
 
 // GetConsistencyProof returns a proof that the current log with n elements is
@@ -309,11 +336,7 @@ func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
 	lastSubtrees := fullSubtrees(last, n)
 
 	// Load the nodes from `lookup` and `lastSubtrees` and build a chunk set.
-	data, err := t.fetch(append(lookup, lastSubtrees...))
-	if err != nil {
-		return nil, err
-	}
-	set, err := newChunkSet(n, data)
+	set, err := t.fetch(n, append(lookup, lastSubtrees...))
 	if err != nil {
 		return nil, err
 	}
@@ -336,4 +359,72 @@ func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
 		}
 	}
 	return proof, nil
+}
+
+func (t *Tree) store(data map[int][]byte) error {
+	out := make(map[string][]byte, len(data))
+	for id, raw := range data {
+		out[strconv.Itoa(id)] = raw
+	}
+	return t.tx.BatchPut(out)
+}
+
+// Append adds a new element to the end of the log and returns the new root
+// value. n is the current value; after this operation is complete, methods to
+// this class should be called with n+1.
+func (t *Tree) Append(n int, value []byte) ([]byte, error) {
+	// Calculate the set of nodes that we'll need to update / create.
+	leaf := 2 * n
+	path := make([]int, 1)
+	path[0] = leaf
+	for _, id := range directPath(leaf, n+1) {
+		if level(id)%4 == 0 {
+			path = append(path, id)
+		}
+	}
+
+	alreadyExists := make(map[int]struct{})
+	if n > 0 {
+		alreadyExists[chunk(leaf-2)] = struct{}{}
+		for _, id := range directPath(leaf-2, n) {
+			alreadyExists[chunk(id)] = struct{}{}
+		}
+	}
+
+	updateChunks := make([]int, 0) // These are dedup'ed by fetch.
+	createChunks := make(map[int]struct{})
+	for _, id := range path {
+		id = chunk(id)
+		if _, ok := alreadyExists[id]; ok {
+			updateChunks = append(updateChunks, id)
+		} else {
+			createChunks[id] = struct{}{}
+		}
+	}
+
+	// Fetch the chunks we'll need to update along with nodes we'll need to know
+	// to compute the new root or updated intermediates.
+	set, err := t.fetch(n+1, append(updateChunks, copath(leaf, n+1)...))
+	if err != nil {
+		return nil, err
+	}
+
+	// Add any new chunks to the set and set the correct hashes everywhere.
+	for id, _ := range createChunks {
+		set.add(id)
+	}
+
+	set.set(leaf, value)
+	for i := 1; i < len(path); i++ {
+		x := path[i]
+		l, r := left(x), right(x, n+1)
+
+		intermediate := treeHash((l&1) == 0, set.get(l), (r&1) == 0, set.get(r))
+		set.set(x, intermediate)
+	}
+
+	if err := t.store(set.marshal()); err != nil {
+		return nil, err
+	}
+	return set.get(root(n + 1)), nil
 }
