@@ -1,4 +1,9 @@
-package tree
+package log
+
+import (
+	"crypto/sha256"
+	"fmt"
+)
 
 // log2 returns the exponent of the largest power of 2 less than x.
 func log2(x int) int {
@@ -184,4 +189,43 @@ func subProof(m, n int, b bool) []int {
 	}
 	proof = append([]int{left(root(n))}, proof...)
 	return proof
+}
+
+// chunk takes a node id as input and returns the id of the chunk that the node
+// would be stored in, in the database.
+//
+// Chunks store 8 consecutive nodes from the same level of the tree,
+// representing a subtree of height 4. The chunk is identified by the root of
+// this subtree.
+func chunk(x int) int {
+	c := x
+	for level(c)%4 != 3 {
+		c = parentStep(c)
+	}
+	return c
+}
+
+// treeHash returns the intermediate hash of left and right.
+//
+// Both must be 32 bytes. leftLeaf is true if the left hash is a leaf and
+// rightLeaf is true if the right hash is a leaf.
+func treeHash(leftLeaf bool, left []byte, rightLeaf bool, right []byte) []byte {
+	if len(left) != 32 {
+		panic(fmt.Errorf("left hash is wrong length: %v", len(left)))
+	} else if len(right) != 32 {
+		panic(fmt.Errorf("right hash is wrong length: %v", len(right)))
+	}
+
+	input := make([]byte, 66)
+	if !leftLeaf {
+		input[0] = 1
+	}
+	copy(input[1:33], left[:])
+	if !rightLeaf {
+		input[33] = 1
+	}
+	copy(input[34:66], right[:])
+
+	output := sha256.Sum256(input)
+	return output[:]
 }
