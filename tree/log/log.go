@@ -3,6 +3,7 @@ package tree
 import (
 	"crypto/sha256"
 	"fmt"
+	"strconv"
 
 	"github.com/JumpPrivacy/katie/db"
 )
@@ -245,17 +246,94 @@ func (s *chunkSet) marshal() map[int][]byte {
 	return out
 }
 
-// LogTree is an implementation of a Merkle tree where the leaves are the only
-// nodes that store data and all new data is added to the right-most edge of the
-// tree.
-//
-// It can prove that the most recent value is included in the root, it can prove
-// that the current root is an extension of a previous root, and it provides the
-// ability to add new data thereby creating a new root.
-type LogTree struct {
+// Tree is an implementation of a Merkle tree where all new data is added to the
+// right-most edge of the tree.
+type Tree struct {
 	tx db.Tx
 }
 
-func NewLogTree(tx db.Tx) *LogTree {
-	return &LogTree{tx: tx}
+func NewTree(tx db.Tx) *Tree {
+	return &Tree{tx: tx}
+}
+
+// fetch loads the chunks for the requested nodes from the database. It returns
+// an error if not all chunks are found.
+func (t *Tree) fetch(nodes []int) (map[int][]byte, error) {
+	dedup := make(map[int]struct{})
+	for _, id := range nodes {
+		dedup[chunk(id)] = struct{}{}
+	}
+	strs := make([]string, 0, len(dedup))
+	for id, _ := range dedup {
+		strs = append(strs, strconv.Itoa(id))
+	}
+
+	data, err := t.tx.BatchGet(strs)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range strs {
+		if _, ok := data[id]; !ok {
+			return nil, fmt.Errorf("not all expected chunks were found in the database")
+		}
+	}
+
+	dataInt := make(map[int][]byte, len(data))
+	for idStr, raw := range data {
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return nil, err
+		}
+		dataInt[id] = raw
+	}
+	return dataInt, nil
+}
+
+// GetConsistencyProof returns a proof that the current log with n elements is
+// an extension of a previous log root with m elements, 0 < m < n.
+func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
+	if m <= 0 {
+		return nil, fmt.Errorf("first parameter must be greater than zero")
+	} else if m >= n {
+		return nil, fmt.Errorf("second parameter must be greater than first")
+	}
+
+	// Compute the list of nodes that our output will consist of.
+	nodes := consistencyProof(m, n)
+
+	// Compute the list of nodes to read from the database, which has a special
+	// case for the ragged right edge of the tree.
+	lookup := make([]int, len(nodes)-1)
+	copy(lookup, nodes)
+	last := nodes[len(nodes)-1]
+	lastSubtrees := fullSubtrees(last, n)
+
+	// Load the nodes from `lookup` and `lastSubtrees` and build a chunk set.
+	data, err := t.fetch(append(lookup, lastSubtrees...))
+	if err != nil {
+		return nil, err
+	}
+	set, err := newChunkSet(n, data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Manually calculate the last hash.
+	isLeaf := (lastSubtrees[len(lastSubtrees)-1] & 1) == 0
+	hash := set.get(lastSubtrees[len(lastSubtrees)-1])
+	for i := len(lastSubtrees) - 2; i >= 0; i-- {
+		hash = treeHash(false, set.get(lastSubtrees[i]), isLeaf, hash)
+		isLeaf = false
+	}
+
+	// Extract the information we need and return.
+	proof := make([][]byte, 0)
+	for i := 0; i < len(nodes); i++ {
+		if nodes[i] == last {
+			proof = append(proof, hash)
+		} else {
+			proof = append(proof, set.get(nodes[i]))
+		}
+	}
+	return proof, nil
 }
