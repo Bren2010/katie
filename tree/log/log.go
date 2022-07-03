@@ -3,6 +3,8 @@ package tree
 import (
 	"crypto/sha256"
 	"fmt"
+
+	"github.com/JumpPrivacy/katie/db"
 )
 
 // chunk takes a node id as input and returns the id of the chunk that the node
@@ -114,7 +116,7 @@ func (c *nodeChunk) findIndex(x int) int {
 	return index
 }
 
-// get returns the hash of node x, if it exists in this chunk.
+// get returns the hash of node x.
 func (c *nodeChunk) get(x, n int, set *chunkSet) []byte {
 	i := c.findIndex(x)
 	if i == -1 {
@@ -126,9 +128,9 @@ func (c *nodeChunk) get(x, n int, set *chunkSet) []byte {
 	l, r := left(x), right(x, n)
 	c.nodes[i] = treeHash(
 		(l&1) == 0,
-		set.get(l, n),
+		set.get(l),
 		(r&1) == 0,
-		set.get(r, n),
+		set.get(r),
 	)
 
 	return c.nodes[i]
@@ -177,13 +179,83 @@ func (c *nodeChunk) marshal() []byte {
 	return raw
 }
 
-// // LogTree is an implementation of a Merkle tree where the leaves are the only
-// // nodes that store data and all new data is added to the right-most edge of the
-// // tree.
-// type LogTree struct {
-// 	conn db.Conn
-// }
+// chunkSet is a helper struct for directing operations to the correct nodeChunk
+// in a set.
+type chunkSet struct {
+	n        int
+	chunks   map[int]*nodeChunk
+	modified map[int]struct{}
+}
+
+func newChunkSet(n int, data map[int][]byte) (*chunkSet, error) {
+	chunks := make(map[int]*nodeChunk)
+	for id, raw := range data {
+		c, err := newChunk(id, raw)
+		if err != nil {
+			return nil, err
+		}
+		chunks[id] = c
+	}
+
+	return &chunkSet{
+		n:        n,
+		chunks:   chunks,
+		modified: make(map[int]struct{}),
+	}, nil
+}
+
+// get returns the hash of node x.
+func (s *chunkSet) get(x int) []byte {
+	c, ok := s.chunks[chunk(x)]
+	if !ok {
+		panic("requested hash is not available in this chunk set")
+	}
+	return c.get(x, s.n, s)
+}
+
+// add initializes a new empty chunk for node x.
+func (s *chunkSet) add(x int) {
+	id := chunk(x)
+	if _, ok := s.chunks[id]; ok {
+		panic("cannot add chunk that already exists in set")
+	}
+	c, err := newChunk(id, make([]byte, 0))
+	if err != nil {
+		panic(err)
+	}
+	s.chunks[id] = c
+}
+
+// set changes node x to the given value.
+func (s *chunkSet) set(x int, value []byte) {
+	id := chunk(x)
+	c, ok := s.chunks[id]
+	if !ok {
+		panic("requested hash is not available in this chunk set")
+	}
+	c.set(x, value)
+	s.modified[id] = struct{}{}
+}
+
+func (s *chunkSet) marshal() map[int][]byte {
+	out := make(map[int][]byte, 0)
+	for id, _ := range s.modified {
+		out[id] = s.chunks[id].marshal()
+	}
+	return out
+}
+
+// LogTree is an implementation of a Merkle tree where the leaves are the only
+// nodes that store data and all new data is added to the right-most edge of the
+// tree.
 //
-// func NewLogTree(conn db.Conn) *LogTree {
-// 	return &LogTree{conn: conn}
-// }
+// It can prove that the most recent value is included in the root, it can prove
+// that the current root is an extension of a previous root, and it provides the
+// ability to add new data thereby creating a new root.
+type LogTree struct {
+	tx db.Tx
+}
+
+func NewLogTree(tx db.Tx) *LogTree {
+	return &LogTree{tx: tx}
+}
