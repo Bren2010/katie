@@ -50,31 +50,62 @@ func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 	return newChunkSet(n, dataInt)
 }
 
+// fetchHashes takes a list of node ids as input and returns the hashes of those
+// nodes in the same order. It automatically handles special-casing for the
+// ragged right edge of the tree.
+func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
+	lookup := make([]int, 0)
+	rightEdge := make(map[int][]int)
+
+	for _, id := range nodes {
+		if isFullSubtree(id, n) {
+			lookup = append(lookup, id)
+		} else {
+			subtrees := fullSubtrees(id, n)
+			rightEdge[id] = subtrees
+			lookup = append(lookup, subtrees...)
+		}
+	}
+
+	set, err := t.fetch(n, lookup)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([][]byte, 0, len(nodes))
+	for _, id := range nodes {
+		if subtrees, ok := rightEdge[id]; ok {
+			// Manually calculate the intermediate.
+			isLeaf := (subtrees[len(subtrees)-1] & 1) == 0
+			hash := set.get(subtrees[len(subtrees)-1])
+			for i := len(subtrees) - 2; i >= 0; i-- {
+				hash = treeHash(false, set.get(subtrees[i]), isLeaf, hash)
+				isLeaf = false
+			}
+			out = append(out, hash)
+		} else {
+			out = append(out, set.get(id))
+		}
+	}
+	return out, nil
+}
+
 // Get returns the value of log entry number `x` along with its proof of
 // inclusion.
 func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
 	if n == 0 {
 		return nil, nil, nil
+	} else if x >= n {
+		return nil, nil, fmt.Errorf("can not get leaf beyond right edge of tree")
 	}
-
-	// Fetch the leaf we want, along with its copath.
 	leaf := 2 * x
 	nodes := append([]int{leaf}, copath(leaf, n)...)
 
-	set, err := t.fetch(n, nodes)
+	hashes, err := t.fetchHashes(n, nodes)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// Extract the information we need and return.
-	value := set.get(leaf)
-
-	proof := make([][]byte, 0)
-	for i := 1; i < len(nodes); i++ {
-		proof = append(proof, set.get(nodes[i]))
-	}
-
-	return value, proof, nil
+	return hashes[0], hashes[1:], nil
 }
 
 // GetConsistencyProof returns a proof that the current log with n elements is
@@ -85,41 +116,7 @@ func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
 	} else if m >= n {
 		return nil, fmt.Errorf("second parameter must be greater than first")
 	}
-
-	// Compute the list of nodes that our output will consist of.
-	nodes := consistencyProof(m, n)
-
-	// Compute the list of nodes to read from the database, which has a special
-	// case for the ragged right edge of the tree.
-	lookup := make([]int, len(nodes)-1)
-	copy(lookup, nodes)
-	last := nodes[len(nodes)-1]
-	lastSubtrees := fullSubtrees(last, n)
-
-	// Load the nodes from `lookup` and `lastSubtrees` and build a chunk set.
-	set, err := t.fetch(n, append(lookup, lastSubtrees...))
-	if err != nil {
-		return nil, err
-	}
-
-	// Manually calculate the last hash.
-	isLeaf := (lastSubtrees[len(lastSubtrees)-1] & 1) == 0
-	hash := set.get(lastSubtrees[len(lastSubtrees)-1])
-	for i := len(lastSubtrees) - 2; i >= 0; i-- {
-		hash = treeHash(false, set.get(lastSubtrees[i]), isLeaf, hash)
-		isLeaf = false
-	}
-
-	// Extract the information we need and return.
-	proof := make([][]byte, 0)
-	for i := 0; i < len(nodes); i++ {
-		if nodes[i] == last {
-			proof = append(proof, hash)
-		} else {
-			proof = append(proof, set.get(nodes[i]))
-		}
-	}
-	return proof, nil
+	return t.fetchHashes(n, consistencyProof(m, n))
 }
 
 func (t *Tree) store(data map[int][]byte) error {
