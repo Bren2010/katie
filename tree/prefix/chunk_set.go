@@ -78,6 +78,9 @@ func (s *chunkSet) search(key []byte) (SearchResult, error) {
 	panic("unexpected error condition")
 }
 
+// TODO: Think about how insert behaves in error conditions and how to keep
+// robust.
+
 // insert executes a search for `key` in the tree and adds it if it doesn't
 // already exist.
 func (s *chunkSet) insert(key []byte) ([]byte, int, error) {

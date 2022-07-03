@@ -152,3 +152,36 @@ func fullSubtrees(x, n int) []int {
 		}
 	}
 }
+
+// consistencyProof returns the list of node ids to return for a consistency
+// proof between m and n.
+func consistencyProof(m, n int) []int {
+	// Algorithm from RFC 6962.
+	return subProof(m, n, true)
+}
+
+func subProof(m, n int, b bool) []int {
+	if m == n {
+		if b {
+			return []int{}
+		}
+		return []int{root(m)} // m is a power of two.
+	}
+
+	k := 1 << log2(n)
+	if k == n {
+		k = k / 2
+	}
+	if m <= k {
+		proof := subProof(m, k, b)
+		proof = append(proof, right(root(n), n))
+		return proof
+	}
+
+	proof := subProof(m-k, n-k, false)
+	for i := 0; i < len(proof); i++ {
+		proof[i] = proof[i] + 2*k
+	}
+	proof = append([]int{left(root(n))}, proof...)
+	return proof
+}
