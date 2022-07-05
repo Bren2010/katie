@@ -2,7 +2,6 @@ package log
 
 import (
 	"crypto/sha256"
-	"fmt"
 )
 
 // log2 returns the exponent of the largest power of 2 less than x.
@@ -206,26 +205,28 @@ func chunk(x int) int {
 }
 
 // treeHash returns the intermediate hash of left and right.
-//
-// Both must be 32 bytes. leftLeaf is true if the left hash is a leaf and
-// rightLeaf is true if the right hash is a leaf.
-func treeHash(leftLeaf bool, left []byte, rightLeaf bool, right []byte) []byte {
-	if len(left) != 32 {
-		panic(fmt.Errorf("left hash is wrong length: %v", len(left)))
-	} else if len(right) != 32 {
-		panic(fmt.Errorf("right hash is wrong length: %v", len(right)))
+func treeHash(left, right *nodeData) []byte {
+	if err := left.validate(); err != nil {
+		panic(err)
+	} else if err := right.validate(); err != nil {
+		panic(err)
 	}
 
-	input := make([]byte, 66)
-	if !leftLeaf {
-		input[0] = 1
-	}
-	copy(input[1:33], left[:])
-	if !rightLeaf {
-		input[33] = 1
-	}
-	copy(input[34:66], right[:])
-
+	input := append(left.marshal(), right.marshal()...)
 	output := sha256.Sum256(input)
 	return output[:]
+}
+
+// Parents returns a slice containing the height of each parent of the n-th
+// element added to a log.
+//
+// This information helps applications decide what additional data to store in
+// the parent nodes of the next Append operation.
+func Parents(n int) []int {
+	path := directPath(2*n, n+1)
+	heights := make([]int, len(path))
+	for i, x := range path {
+		heights[i] = level(x)
+	}
+	return heights
 }

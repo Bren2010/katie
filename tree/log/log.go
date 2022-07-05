@@ -19,7 +19,7 @@ func NewTree(tx db.Tx) *Tree {
 
 // fetch loads the chunks for the requested nodes from the database. It returns
 // an error if not all chunks are found.
-func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
+func (t *Tree) fetch(n int, nodes []int, getParents bool) (*chunkSet, [][]byte, error) {
 	dedup := make(map[int]struct{})
 	for _, id := range nodes {
 		dedup[chunk(id)] = struct{}{}
@@ -28,26 +28,53 @@ func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 	for id, _ := range dedup {
 		strs = append(strs, strconv.Itoa(id))
 	}
+	var parentKey string
+	if getParents {
+		parentKey = "p" + strconv.Itoa(n)
+		strs = append(strs, parentKey)
+	}
 
 	data, err := t.tx.BatchGet(strs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, id := range strs {
 		if _, ok := data[id]; !ok {
-			return nil, fmt.Errorf("not all expected chunks were found in the database")
+			return nil, nil, fmt.Errorf("not all expected data was found in the database")
 		}
 	}
 
+	// Parse parents.
+	var parents [][]byte
+	if getParents {
+		raw := data[parentKey]
+		if len(raw) != 32*len(Parents(n)) {
+			return nil, nil, fmt.Errorf("log entry is malformed")
+		}
+		for len(raw) > 0 {
+			parents = append(parents, raw[:32])
+			raw = raw[32:]
+		}
+	}
+
+	// Parse chunk set.
 	dataInt := make(map[int][]byte, len(data))
 	for idStr, raw := range data {
+		if idStr == parentKey {
+			continue
+		}
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		dataInt[id] = raw
 	}
-	return newChunkSet(n, dataInt)
+	set, err := newChunkSet(n, dataInt)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return set, parents, nil
 }
 
 // fetchHashes takes a list of node ids as input and returns the hashes of those
@@ -67,7 +94,7 @@ func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
 		}
 	}
 
-	set, err := t.fetch(n, lookup)
+	set, parents, err := t.fetch(n, lookup, true)
 	if err != nil {
 		return nil, err
 	}
@@ -76,15 +103,21 @@ func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
 	for _, id := range nodes {
 		if subtrees, ok := rightEdge[id]; ok {
 			// Manually calculate the intermediate.
-			isLeaf := (subtrees[len(subtrees)-1] & 1) == 0
-			hash := set.get(subtrees[len(subtrees)-1])
-			for i := len(subtrees) - 2; i >= 0; i-- {
-				hash = treeHash(false, set.get(subtrees[i]), isLeaf, hash)
-				isLeaf = false
+			nd := &nodeData{
+				leaf:  (subtrees[len(subtrees)-1] & 1) == 0,
+				hash:  set.get(subtrees[len(subtrees)-1]).hash,
+				value: parents[0],
 			}
-			out = append(out, hash)
+			for i := len(subtrees) - 2; i >= 0; i-- {
+				nd = &nodeData{
+					leaf:  false,
+					hash:  treeHash(set.get(subtrees[i]), nd),
+					value: parents[len(subtrees)-1-i],
+				}
+			}
+			out = append(out, nd.hash)
 		} else {
-			out = append(out, set.get(id))
+			out = append(out, set.get(id).hash)
 		}
 	}
 	return out, nil
@@ -119,26 +152,43 @@ func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
 	return t.fetchHashes(n, consistencyProof(m, n))
 }
 
-func (t *Tree) store(data map[int][]byte) error {
+func (t *Tree) store(n int, data map[int][]byte, parents [][]byte) error {
 	out := make(map[string][]byte, len(data))
+
 	for id, raw := range data {
 		out[strconv.Itoa(id)] = raw
 	}
+
+	rawParents := make([]byte, 0, 32*len(parents))
+	for _, raw := range parents {
+		rawParents = append(rawParents, raw...)
+	}
+	out["p"+strconv.Itoa(n)] = rawParents
+
 	return t.tx.BatchPut(out)
 }
 
 // Append adds a new element to the end of the log and returns the new root
 // value. n is the current value; after this operation is complete, methods to
 // this class should be called with n+1.
-func (t *Tree) Append(n int, value []byte) ([]byte, error) {
+func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
+	if expected := len(Parents(n)); expected != len(parents) {
+		return nil, fmt.Errorf("wrong number of parent node values given: wanted=%v, got=%v", expected, len(parents))
+	} else if len(value) != 32 {
+		return nil, fmt.Errorf("value has wrong length: %v", len(value))
+	}
+	for _, val := range parents {
+		if len(val) != 32 {
+			return nil, fmt.Errorf("parent value has wrong length: %v", len(val))
+		}
+	}
+
 	// Calculate the set of nodes that we'll need to update / create.
 	leaf := 2 * n
 	path := make([]int, 1)
 	path[0] = leaf
 	for _, id := range directPath(leaf, n+1) {
-		if level(id)%4 == 0 {
-			path = append(path, id)
-		}
+		path = append(path, id)
 	}
 
 	alreadyExists := make(map[int]struct{})
@@ -162,7 +212,7 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 
 	// Fetch the chunks we'll need to update along with nodes we'll need to know
 	// to compute the new root or updated intermediates.
-	set, err := t.fetch(n+1, append(updateChunks, copath(leaf, n+1)...))
+	set, _, err := t.fetch(n+1, append(updateChunks, copath(leaf, n+1)...), false)
 	if err != nil {
 		return nil, err
 	}
@@ -172,17 +222,30 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 		set.add(id)
 	}
 
-	set.set(leaf, value)
+	set.set(leaf, nil, value)
 	for i := 1; i < len(path); i++ {
 		x := path[i]
 		l, r := left(x), right(x, n+1)
 
-		intermediate := treeHash((l&1) == 0, set.get(l), (r&1) == 0, set.get(r))
-		set.set(x, intermediate)
+		if level(x)%4 == 0 {
+			intermediate := treeHash(set.get(l), set.get(r))
+			set.set(x, intermediate, parents[i-1])
+		} else {
+			set.set(x, nil, parents[i-1])
+		}
 	}
 
-	if err := t.store(set.marshal()); err != nil {
+	// Calculate filtered list of parent values for the log entry.
+	filteredParents := make([][]byte, 0)
+	for i, val := range parents {
+		if !isFullSubtree(path[i+1], n+1) {
+			filteredParents = append(filteredParents, val)
+		}
+	}
+
+	// Commit to database and return new root.
+	if err := t.store(n, set.marshal(), filteredParents); err != nil {
 		return nil, err
 	}
-	return set.get(root(n + 1)), nil
+	return set.get(root(n + 1)).hash, nil
 }

@@ -4,38 +4,58 @@ import (
 	"fmt"
 )
 
+type nodeData struct {
+	leaf  bool
+	hash  []byte
+	value []byte
+}
+
+func (nd *nodeData) validate() error {
+	if nd.leaf {
+		if len(nd.hash) != 0 {
+			return fmt.Errorf("leaf hash is wrong length: %v", len(nd.hash))
+		} else if len(nd.value) != 32 {
+			return fmt.Errorf("leaf value is wrong length: %v", len(nd.value))
+		}
+	} else {
+		if len(nd.hash) != 32 {
+			return fmt.Errorf("parent hash is wrong length: %v", len(nd.hash))
+		} else if len(nd.value) != 32 {
+			return fmt.Errorf("parent value is wrong length: %v", len(nd.value))
+		}
+	}
+	return nil
+}
+
+func (nd *nodeData) marshal() []byte {
+	if nd.leaf {
+		out := make([]byte, 33)
+		out[0] = 0
+		copy(out[1:33], nd.value)
+		return out
+	} else {
+		out := make([]byte, 65)
+		out[0] = 1
+		copy(out[1:33], nd.hash)
+		copy(out[33:65], nd.value)
+		return out
+	}
+}
+
+func (nd *nodeData) isEmpty() bool {
+	return nd.hash == nil && nd.value == nil
+}
+
 // nodeChunk is a helper struct that handles computing/caching the intermediate
 // nodes of a chunk.
 type nodeChunk struct {
 	ids   []int
-	nodes [][]byte
+	nodes []*nodeData
 }
 
 func newChunk(id int, data []byte) (*nodeChunk, error) {
-	if len(data) > 256 {
+	if len(data) > 736 {
 		return nil, fmt.Errorf("chunk is too large: %v", len(data))
-	} else if len(data)%32 != 0 {
-		return nil, fmt.Errorf("chunk has an unexpected size: %v", len(data))
-	}
-
-	// Split data into leaves.
-	leaves := make([][]byte, 0)
-	for i := 0; i < len(data); i += 32 {
-		leaf := make([]byte, 32)
-		copy(leaf, data[i:i+32])
-		leaves = append(leaves, leaf)
-	}
-	// Convert leaves array into nodes array by adding space for parent nodes.
-	nodes := make([][]byte, 0)
-	for i := 0; i < 8; i++ {
-		if i < len(leaves) {
-			nodes = append(nodes, leaves[i])
-		} else {
-			nodes = append(nodes, nil)
-		}
-		if i != 7 {
-			nodes = append(nodes, nil)
-		}
 	}
 
 	// Create a map that shows the node id represented by each element of the
@@ -58,6 +78,40 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 	ids[12] = left(ids[13])
 	ids[14] = rightStep(ids[13])
 
+	// Parse the serialized data.
+	nodes := make([]*nodeData, 0)
+
+	for len(data) > 0 {
+		if len(data) < 64 {
+			return nil, fmt.Errorf("unable to parse chunk")
+		}
+		nodes = append(nodes, &nodeData{
+			leaf:  (ids[len(nodes)] & 1) == 0,
+			hash:  data[:32],
+			value: data[32:64],
+		})
+		data = data[64:]
+
+		if len(data) == 0 {
+			break
+		} else if len(data) < 96 { // 32 for parent, plus 64 for next leaf (parent can not be last)
+			return nil, fmt.Errorf("unable to parse chunk")
+		}
+		nodes = append(nodes, &nodeData{
+			leaf:  false,
+			hash:  nil,
+			value: data[:32],
+		})
+		data = data[32:]
+	}
+	for len(nodes) < 15 {
+		nodes = append(nodes, &nodeData{
+			leaf:  (ids[len(nodes)] & 1) == 0,
+			hash:  nil,
+			value: nil,
+		})
+	}
+
 	return &nodeChunk{ids: ids, nodes: nodes}, nil
 }
 
@@ -75,66 +129,70 @@ func (c *nodeChunk) findIndex(x int) int {
 }
 
 // get returns the hash of node x.
-func (c *nodeChunk) get(x, n int, set *chunkSet) []byte {
+func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 	i := c.findIndex(x)
 	if i == -1 {
 		panic("requested hash not available in this chunk")
-	} else if c.nodes[i] != nil {
+	} else if c.nodes[i].hash != nil {
 		return c.nodes[i]
 	}
 
 	l, r := left(x), right(x, n)
-	c.nodes[i] = treeHash(
-		(l&1) == 0,
-		set.get(l),
-		(r&1) == 0,
-		set.get(r),
-	)
+	c.nodes[i].hash = treeHash(set.get(l), set.get(r))
 
 	return c.nodes[i]
 }
 
-// set updates the hash of node x to be the given value.
-func (c *nodeChunk) set(x int, value []byte) {
+// set updates node x to contain the given hash and value.
+func (c *nodeChunk) set(x int, hash, value []byte) {
 	i := c.findIndex(x)
 	if i == -1 {
 		panic("requested hash not available in this chunk")
-	} else if len(value) != 32 {
-		panic("chunk values must be exactly 32 bytes")
+	}
+	nd := &nodeData{
+		leaf:  (x & 1) == 0,
+		hash:  hash,
+		value: value,
+	}
+	if err := nd.validate(); err != nil {
+		panic(err)
 	}
 
-	c.nodes[i] = value
+	c.nodes[i] = nd
 	for i != 7 {
 		i = parentStep(i)
-		c.nodes[i] = nil
+		c.nodes[i].hash = nil
 	}
 }
 
 // marshal returns the serialized chunk.
 func (c *nodeChunk) marshal() []byte {
-	leaves := make([][]byte, 0)
+	out := make([]byte, 0)
 
 	for i := 0; i < len(c.nodes); i += 2 {
-		if c.nodes[i] != nil {
-			leaves = append(leaves, c.nodes[i])
+		if c.nodes[i].hash != nil {
+			out = append(out, c.nodes[i].hash...)
+			out = append(out, c.nodes[i].value...)
+
+			if i != len(c.nodes)-1 && c.nodes[i+1].value != nil {
+				if c.nodes[i+2].isEmpty() {
+					panic("chunk has gaps")
+				}
+				out = append(out, c.nodes[i+1].value...)
+			}
 			continue
 		}
 
-		// Check that there are no other populated leaves.
+		// Check that there are no other populated nodes.
 		for i < len(c.nodes) {
-			if c.nodes[i] != nil {
+			if !c.nodes[i].isEmpty() {
 				panic("chunk has gaps")
 			}
-			i += 2
+			i++
 		}
-		break
 	}
 
-	raw := make([]byte, 32*len(leaves))
-	for i := 0; i < len(leaves); i++ {
-		copy(raw[i*32:(i+1)*32], leaves[i])
-	}
-	return raw
+	return out
 }
 
 // chunkSet is a helper struct for directing operations to the correct nodeChunk
@@ -162,8 +220,8 @@ func newChunkSet(n int, data map[int][]byte) (*chunkSet, error) {
 	}, nil
 }
 
-// get returns the hash of node x.
-func (s *chunkSet) get(x int) []byte {
+// get returns node x.
+func (s *chunkSet) get(x int) *nodeData {
 	c, ok := s.chunks[chunk(x)]
 	if !ok {
 		panic("requested hash is not available in this chunk set")
@@ -185,13 +243,13 @@ func (s *chunkSet) add(x int) {
 }
 
 // set changes node x to the given value.
-func (s *chunkSet) set(x int, value []byte) {
+func (s *chunkSet) set(x int, hash, value []byte) {
 	id := chunk(x)
 	c, ok := s.chunks[id]
 	if !ok {
 		panic("requested hash is not available in this chunk set")
 	}
-	c.set(x, value)
+	c.set(x, hash, value)
 	s.modified[id] = struct{}{}
 }
 
