@@ -20,7 +20,7 @@ func log2(x int) int {
 // level returns the level of a node in the tree. Leaves are level 0, their
 // parents are level 1, and so on.
 func level(x int) int {
-	if (x & 1) == 0 {
+	if isLeaf(x) {
 		return 0
 	}
 
@@ -229,4 +229,23 @@ func Parents(n int) []int {
 		heights[i] = level(x)
 	}
 	return heights
+}
+
+// filteredParents returns the number of entries from `Parents` that correspond
+// to non-full subtrees.
+func filteredParents(n int) int {
+	path := directPath(2*n, n+1)
+
+	out := 0
+	for _, id := range path {
+		if !isFullSubtree(id, n+1) {
+			out += 1
+		}
+	}
+	return out
+}
+
+// isLeaf returns true if x is the id of a leaf node.
+func isLeaf(x int) bool {
+	return (x & 1) == 0
 }

@@ -123,7 +123,7 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 	}
 	for len(nodes) < 15 {
 		nodes = append(nodes, &nodeData{
-			leaf:  (ids[len(nodes)] & 1) == 0,
+			leaf:  isLeaf(ids[len(nodes)]),
 			hash:  nil,
 			value: nil,
 		})
@@ -153,7 +153,7 @@ func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 	i := c.findIndex(x)
 	if i == -1 {
 		panic("requested hash not available in this chunk")
-	} else if (x&1) == 0 || c.nodes[i].hash != nil {
+	} else if isLeaf(x) || c.nodes[i].hash != nil {
 		return c.nodes[i]
 	}
 
@@ -170,7 +170,7 @@ func (c *nodeChunk) set(x int, hash, value []byte) {
 		panic("requested hash not available in this chunk")
 	}
 	nd := &nodeData{
-		leaf:  (x & 1) == 0,
+		leaf:  isLeaf(x),
 		hash:  hash,
 		value: value,
 	}

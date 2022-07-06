@@ -7,6 +7,14 @@ import (
 	"github.com/JumpPrivacy/katie/db"
 )
 
+// Proof wraps all of the information necessary to verify a proof of
+// inclusion/consistency for the log.
+type Proof struct {
+	Hashes        [][]byte // The copath hashes.
+	Values        [][]byte // The copath values.
+	Intermediates [][]byte // The intermediate node values.
+}
+
 // Tree is an implementation of a Merkle tree where all new data is added to the
 // right-most edge of the tree.
 type Tree struct {
@@ -30,7 +38,7 @@ func (t *Tree) fetch(n int, nodes []int, getParents bool) (*chunkSet, [][]byte, 
 	}
 	var parentKey string
 	if getParents {
-		parentKey = "p" + strconv.Itoa(n)
+		parentKey = "p" + strconv.Itoa(n-1)
 		strs = append(strs, parentKey)
 	}
 
@@ -48,7 +56,7 @@ func (t *Tree) fetch(n int, nodes []int, getParents bool) (*chunkSet, [][]byte, 
 	var parents [][]byte
 	if getParents {
 		raw := data[parentKey]
-		if len(raw) != 32*len(Parents(n)) {
+		if len(raw) != 32*filteredParents(n-1) {
 			return nil, nil, fmt.Errorf("log entry is malformed")
 		}
 		for len(raw) > 0 {
@@ -77,10 +85,10 @@ func (t *Tree) fetch(n int, nodes []int, getParents bool) (*chunkSet, [][]byte, 
 	return set, parents, nil
 }
 
-// fetchHashes takes a list of node ids as input and returns the hashes of those
+// fetchNodes takes a list of node ids as input and returns the data for those
 // nodes in the same order. It automatically handles special-casing for the
 // ragged right edge of the tree.
-func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
+func (t *Tree) fetchNodes(n int, nodes []int) ([]*nodeData, error) {
 	lookup := make([]int, 0)
 	rightEdge := make(map[int][]int)
 
@@ -99,7 +107,7 @@ func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
 		return nil, err
 	}
 
-	out := make([][]byte, 0, len(nodes))
+	out := make([]*nodeData, 0, len(nodes))
 	for _, id := range nodes {
 		if subtrees, ok := rightEdge[id]; ok {
 			// Manually calculate the intermediate.
@@ -111,9 +119,9 @@ func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
 					value: parents[len(subtrees)-2-i],
 				}
 			}
-			out = append(out, nd.reduce())
+			out = append(out, nd)
 		} else {
-			out = append(out, set.get(id).reduce())
+			out = append(out, set.get(id))
 		}
 	}
 	return out, nil
@@ -121,32 +129,46 @@ func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
 
 // Get returns the value of log entry number `x` along with its proof of
 // inclusion.
-func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
+func (t *Tree) Get(x, n int) ([]byte, *Proof, error) {
 	if n == 0 {
 		return nil, nil, nil
 	} else if x >= n {
 		return nil, nil, fmt.Errorf("can not get leaf beyond right edge of tree")
 	}
-	leaf := 2 * x
-	nodes := append([]int{leaf}, copath(leaf, n)...)
 
-	hashes, err := t.fetchHashes(n, nodes)
+	leaf := 2 * x
+	copathNodes := copath(leaf, n)
+	pathNodes := directPath(leaf, n)
+	pathNodes = pathNodes[:len(pathNodes)-1] // Remove root.
+	lookup := append([]int{leaf}, append(copathNodes, pathNodes...)...)
+
+	nds, err := t.fetchNodes(n, lookup)
 	if err != nil {
 		return nil, nil, err
 	}
-	return hashes[0], hashes[1:], nil
+
+	proof := &Proof{}
+	for i, _ := range copathNodes {
+		proof.Hashes = append(proof.Hashes, nds[1+i].hash)
+		proof.Values = append(proof.Values, nds[1+i].value)
+	}
+	for i, _ := range pathNodes {
+		proof.Intermediates = append(proof.Intermediates, nds[1+len(copathNodes)+i].value)
+	}
+
+	return nds[0].value, proof, nil
 }
 
-// GetConsistencyProof returns a proof that the current log with n elements is
-// an extension of a previous log root with m elements, 0 < m < n.
-func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
-	if m <= 0 {
-		return nil, fmt.Errorf("first parameter must be greater than zero")
-	} else if m >= n {
-		return nil, fmt.Errorf("second parameter must be greater than first")
-	}
-	return t.fetchHashes(n, consistencyProof(m, n))
-}
+// // GetConsistencyProof returns a proof that the current log with n elements is
+// // an extension of a previous log root with m elements, 0 < m < n.
+// func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
+// 	if m <= 0 {
+// 		return nil, fmt.Errorf("first parameter must be greater than zero")
+// 	} else if m >= n {
+// 		return nil, fmt.Errorf("second parameter must be greater than first")
+// 	}
+// 	return t.fetchHashes(n, consistencyProof(m, n))
+// }
 
 func (t *Tree) store(n int, data map[int][]byte, parents [][]byte) error {
 	out := make(map[string][]byte, len(data))
