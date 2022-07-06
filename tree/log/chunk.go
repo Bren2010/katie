@@ -82,10 +82,10 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 	ids[14] = rightStep(ids[13])
 
 	// Parse the serialized data.
-	isLeaf := level(id) == 3
+	leafChunk := level(id) == 3
 	nodes := make([]*nodeData, 0)
 	nodeSize := 64
-	if isLeaf {
+	if leafChunk {
 		nodeSize = 32
 	}
 
@@ -93,7 +93,7 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 		if len(data) < nodeSize {
 			return nil, fmt.Errorf("unable to parse chunk")
 		}
-		if isLeaf {
+		if leafChunk {
 			nodes = append(nodes, &nodeData{
 				leaf:  true,
 				hash:  nil,
@@ -111,7 +111,7 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 
 		if len(data) == 0 {
 			break
-		} else if len(data) < 32+nodeSize { // Plus nodeSize because a parent can't be last.
+		} else if len(data) < 32 {
 			return nil, fmt.Errorf("unable to parse chunk")
 		}
 		nodes = append(nodes, &nodeData{
@@ -186,16 +186,13 @@ func (c *nodeChunk) set(x int, hash, value []byte) {
 func (c *nodeChunk) marshal() []byte {
 	out := make([]byte, 0)
 
-	for i := 0; i < len(c.nodes); i += 2 {
-		if c.nodes[i].value != nil {
-			out = append(out, c.nodes[i].hash...)
-			out = append(out, c.nodes[i].value...)
-
-			if i != len(c.nodes)-1 && c.nodes[i+1].value != nil {
-				if c.nodes[i+2].isEmpty() {
-					panic("chunk has gaps")
-				}
-				out = append(out, c.nodes[i+1].value...)
+	for i := 0; i < len(c.nodes); i++ {
+		if !c.nodes[i].isEmpty() {
+			if i%2 == 0 {
+				out = append(out, c.nodes[i].hash...)
+				out = append(out, c.nodes[i].value...)
+			} else {
+				out = append(out, c.nodes[i].value...)
 			}
 			continue
 		}
