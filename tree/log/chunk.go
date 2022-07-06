@@ -10,13 +10,6 @@ type nodeData struct {
 	value []byte
 }
 
-func (nd *nodeData) reduce() []byte {
-	if nd.leaf {
-		return nd.value
-	}
-	return nd.hash
-}
-
 func (nd *nodeData) validate() error {
 	if nd.leaf {
 		if len(nd.hash) != 0 {

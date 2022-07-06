@@ -264,6 +264,8 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 	// Commit to database and return new root.
 	if err := t.store(n, set.marshal(), filteredParents); err != nil {
 		return nil, err
+	} else if n == 0 {
+		return value, nil
 	}
-	return set.get(root(n + 1)).reduce(), nil
+	return set.get(root(n + 1)).hash, nil
 }
