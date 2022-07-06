@@ -2,6 +2,7 @@ package log
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/JumpPrivacy/katie/db"
@@ -13,6 +14,15 @@ type InclusionProof struct {
 	Hashes        [][]byte // The copath hashes.
 	Values        [][]byte // The copath values.
 	Intermediates [][]byte // The intermediate node values.
+}
+
+// ConsistencyProof wraps a proof that one version of the log is an extension of
+// a past version of the log.
+type ConsistencyProof struct {
+	Hashes         [][]byte // Hashes along consistency path.
+	Values         [][]byte // Values along consistency path, for more recent revision.
+	Intermediates  [][]byte // Intermediate values for computing more recent revision.
+	IntermediatesM [][]byte // Intermediate values for computing less recent revision.
 }
 
 // Tree is an implementation of a Merkle tree where all new data is added to the
@@ -182,28 +192,67 @@ func (t *Tree) Get(x, n int) ([]byte, *InclusionProof, error) {
 
 // GetConsistencyProof returns a proof that the current log with n elements is
 // an extension of a previous log root with m elements, 0 < m < n.
-func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
+func (t *Tree) GetConsistencyProof(m, n int) (*ConsistencyProof, error) {
 	if m <= 0 {
 		return nil, fmt.Errorf("first parameter must be greater than zero")
 	} else if m >= n {
 		return nil, fmt.Errorf("second parameter must be greater than first")
 	}
 
-	nds := consistencyProof(m, n)
-	root := root(n)
-	parents := make([]int, 0)
-	for _, id := range nds {
-		if p := parent(id, n); p != root {
-			parents = append(parents, p)
+	ids := consistencyProof(m, n)
+
+	// Build the set of intermediate nodes needed to compute root(n) by taking
+	// the parent of each node in the consistency proof path, deduplicating, and
+	// sorting by level (to match how the values will be used in verification).
+	rootN := root(n)
+	parentsMap := make(map[int]struct{})
+	for _, id := range ids {
+		if p := parent(id, n); p != rootN {
+			if _, ok := parentsMap[p]; !ok {
+				parentsMap[p] = struct{}{}
+			}
 		}
 	}
+	parents := make([]int, 0)
+	for id, _ := range parentsMap {
+		parents = append(parents, id)
+	}
+	sort.Sort(byLevel(parents))
 
-	all := append(nds, parents...)
-	values, hashes, log, err := t.fetchSpecific(n, all, nds, m-1)
+	hids := noLeaves(ids)
+	vids := append(ids, parents...)
+
+	// Determine if we need to specifically fetch the value for root(m) because
+	// m is a power of 2.
+	rootM := root(m)
+	isFull := isFullSubtree(rootM, m)
+
+	logEntry := m - 1
+	if isFull {
+		logEntry = -1
+		vids = append([]int{rootM}, vids...)
+	}
+
+	// Fetch everything from the database in one roundtrip.
+	values, hashes, log, err := t.fetchSpecific(n, vids, hids, logEntry)
 	if err != nil {
 		return nil, err
 	}
-	return append(hashes, append(log, values...)...), nil
+
+	// Clean up the IntermediatesM value.
+	if isFull {
+		log = [][]byte{values[0]}
+		values = values[1:]
+	} else if len(log) > 0 {
+		log = log[:len(log)-1]
+	}
+
+	return &ConsistencyProof{
+		Hashes:         hashes,
+		Values:         values[:len(ids)],
+		Intermediates:  values[len(ids):],
+		IntermediatesM: log,
+	}, nil
 }
 
 func (t *Tree) store(n int, data map[int][]byte, parents [][]byte) error {

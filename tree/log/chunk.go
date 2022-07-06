@@ -4,6 +4,8 @@ import (
 	"fmt"
 )
 
+// nodeData is the primary wrapper struct for representing a single node (leaf
+// or intermediate) in the tree.
 type nodeData struct {
 	leaf  bool
 	hash  []byte
@@ -134,16 +136,13 @@ func (c *nodeChunk) findIndex(x int) int {
 			return i
 		}
 	}
-
-	return -1
+	panic("requested hash not available in this chunk")
 }
 
 // get returns the data of node x with the hash populated.
 func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 	i := c.findIndex(x)
-	if i == -1 {
-		panic("requested hash not available in this chunk")
-	} else if isLeaf(x) || c.nodes[i].hash != nil {
+	if isLeaf(x) || c.nodes[i].hash != nil {
 		return c.nodes[i]
 	}
 
@@ -156,24 +155,18 @@ func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 // getValue returns just the value of node x.
 func (c *nodeChunk) getValue(x int) []byte {
 	i := c.findIndex(x)
-	if i == -1 {
-		panic("requested hash not available in this chunk")
-	}
 	return c.nodes[i].value
 }
 
 // set updates node x to contain the given hash and value.
 func (c *nodeChunk) set(x int, hash, value []byte) {
-	i := c.findIndex(x)
-	if i == -1 {
-		panic("requested hash not available in this chunk")
-	}
 	nd := &nodeData{
 		leaf:  isLeaf(x),
 		hash:  hash,
 		value: value,
 	}
 
+	i := c.findIndex(x)
 	c.nodes[i] = nd
 	for i != 7 {
 		i = parentStep(i)

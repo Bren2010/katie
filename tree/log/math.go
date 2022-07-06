@@ -259,3 +259,10 @@ func noLeaves(input []int) (output []int) {
 	}
 	return
 }
+
+// byLevel implements sort.Interface on a slice of node ids, sorting by level.
+type byLevel []int
+
+func (bl byLevel) Len() int           { return len(bl) }
+func (bl byLevel) Less(i, j int) bool { return level(bl[i]) < level(bl[j]) }
+func (bl byLevel) Swap(i, j int)      { bl[i], bl[j] = bl[j], bl[i] }
