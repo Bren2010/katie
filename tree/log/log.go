@@ -103,21 +103,17 @@ func (t *Tree) fetchHashes(n int, nodes []int) ([][]byte, error) {
 	for _, id := range nodes {
 		if subtrees, ok := rightEdge[id]; ok {
 			// Manually calculate the intermediate.
-			nd := &nodeData{
-				leaf:  (subtrees[len(subtrees)-1] & 1) == 0,
-				hash:  set.get(subtrees[len(subtrees)-1]).hash,
-				value: parents[0],
-			}
+			nd := set.get(subtrees[len(subtrees)-1])
 			for i := len(subtrees) - 2; i >= 0; i-- {
 				nd = &nodeData{
 					leaf:  false,
 					hash:  treeHash(set.get(subtrees[i]), nd),
-					value: parents[len(subtrees)-1-i],
+					value: parents[len(subtrees)-2-i],
 				}
 			}
-			out = append(out, nd.hash)
+			out = append(out, nd.reduce())
 		} else {
-			out = append(out, set.get(id).hash)
+			out = append(out, set.get(id).reduce())
 		}
 	}
 	return out, nil
@@ -247,5 +243,5 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 	if err := t.store(n, set.marshal(), filteredParents); err != nil {
 		return nil, err
 	}
-	return set.get(root(n + 1)).hash, nil
+	return set.get(root(n + 1)).reduce(), nil
 }
