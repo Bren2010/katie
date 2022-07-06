@@ -249,3 +249,13 @@ func filteredParents(n int) int {
 	}
 	return out
 }
+
+// noLeaves returns `input` with all leaf nodes removed.
+func noLeaves(input []int) (output []int) {
+	for _, id := range input {
+		if !isLeaf(id) {
+			output = append(output, id)
+		}
+	}
+	return
+}

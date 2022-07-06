@@ -26,34 +26,41 @@ func dup(in []byte) []byte {
 
 // verifyInclusionProof checks that `proof` is a valid inclusion proof for
 // `value` at position `x` in a tree with the given root.
-func verifyInclusionProof(x, n int, value []byte, proof *Proof, root []byte) {
+func verifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) {
+	for _, elem := range proof {
+		assert(len(elem) == 32)
+	}
+
 	x = 2 * x
 	path := copath(x, n)
-	assert(len(path) == len(proof.Hashes))
-	assert(len(path) == len(proof.Values))
-	assert(len(path) == len(proof.Intermediates)+1)
+
+	pn := len(path)
+	pnl := len(noLeaves(path))
+	assert(len(proof) == pnl+2*pn-1)
+
+	hashes := proof[:pnl]
+	values := proof[pnl : pnl+pn]
+	intermediates := proof[pnl+pn:]
 
 	proofNodes := make([]*nodeData, len(path))
+	j := 0
 	for i := 0; i < len(path); i++ {
-		proofNodes[i] = &nodeData{
-			leaf:  isLeaf(path[i]),
-			hash:  proof.Hashes[i],
-			value: proof.Values[i],
+		leaf := isLeaf(path[i])
+
+		var h []byte
+		if !leaf {
+			h = hashes[j]
+			j++
 		}
-		if proofNodes[i].leaf {
-			assert(proofNodes[i].hash == nil)
-		} else {
-			assert(len(proofNodes[i].hash) == 32)
-		}
-		assert(len(proofNodes[i].value) == 32)
+
+		proofNodes[i] = &nodeData{leaf: leaf, hash: h, value: values[i]}
 	}
 
 	acc := &nodeData{leaf: true, hash: nil, value: value}
 	for i, nd := range proofNodes {
 		var val []byte
 		if i != len(proofNodes)-1 {
-			val = proof.Intermediates[i]
-			assert(len(val) == 32)
+			val = intermediates[i]
 		}
 		var hash []byte
 		if x < path[i] {
@@ -111,16 +118,20 @@ func TestGet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			// Check that correct value was given and inclusion proof works.
 			assert(bytes.Equal(value, nodes[2*x]))
 			verifyInclusionProof(x, n, value, proof, root)
+
 			// Check that the copath/intermediate values match as well.
-			for i, id := range copath(2*x, n) {
-				assert(bytes.Equal(proof.Values[i], nodes[id]))
+			cpath := copath(2*x, n)
+			pnl := len(noLeaves(cpath))
+			for i, id := range cpath {
+				assert(bytes.Equal(proof[pnl+i], nodes[id]))
 			}
 			dpath := directPath(2*x, n)
 			for i, id := range dpath[:len(dpath)-1] {
-				assert(bytes.Equal(proof.Intermediates[i], nodes[id]))
+				assert(bytes.Equal(proof[pnl+len(cpath)+i], nodes[id]))
 			}
 		}
 	}

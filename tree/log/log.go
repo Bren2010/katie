@@ -158,8 +158,9 @@ func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
 	dpath := directPath(leaf, n)
 	dpath = dpath[:len(dpath)-1] // Remove root.
 
-	all := append([]int{leaf}, append(cpath, dpath...)...)
-	values, hashes, _, err := t.fetchSpecific(n, all, cpath, -1)
+	vids := append([]int{leaf}, append(cpath, dpath...)...)
+	hids := noLeaves(cpath)
+	values, hashes, _, err := t.fetchSpecific(n, vids, hids, -1)
 	if err != nil {
 		return nil, nil, err
 	}
