@@ -4,6 +4,11 @@ import (
 	"crypto/sha256"
 )
 
+// isLeaf returns true if x is the id of a leaf node.
+func isLeaf(x int) bool {
+	return (x & 1) == 0
+}
+
 // log2 returns the exponent of the largest power of 2 less than x.
 func log2(x int) int {
 	if x == 0 {
@@ -243,9 +248,4 @@ func filteredParents(n int) int {
 		}
 	}
 	return out
-}
-
-// isLeaf returns true if x is the id of a leaf node.
-func isLeaf(x int) bool {
-	return (x & 1) == 0
 }

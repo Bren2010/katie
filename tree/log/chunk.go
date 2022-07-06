@@ -129,19 +129,16 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 }
 
 func (c *nodeChunk) findIndex(x int) int {
-	index := -1
-
 	for i := 0; i < len(c.ids); i++ {
 		if c.ids[i] == x {
-			index = i
-			break
+			return i
 		}
 	}
 
-	return index
+	return -1
 }
 
-// get returns the hash of node x.
+// get returns the data of node x with the hash populated.
 func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 	i := c.findIndex(x)
 	if i == -1 {
@@ -154,6 +151,15 @@ func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 	c.nodes[i].hash = treeHash(set.get(l), set.get(r))
 
 	return c.nodes[i]
+}
+
+// getValue returns just the value of node x.
+func (c *nodeChunk) getValue(x int) []byte {
+	i := c.findIndex(x)
+	if i == -1 {
+		panic("requested hash not available in this chunk")
+	}
+	return c.nodes[i].value
 }
 
 // set updates node x to contain the given hash and value.
@@ -234,6 +240,15 @@ func (s *chunkSet) get(x int) *nodeData {
 		panic("requested hash is not available in this chunk set")
 	}
 	return c.get(x, s.n, s)
+}
+
+// getValue returns just the value of node x.
+func (s *chunkSet) getValue(x int) []byte {
+	c, ok := s.chunks[chunk(x)]
+	if !ok {
+		panic("requested hash is not available in this chunk set")
+	}
+	return c.getValue(x)
 }
 
 // add initializes a new empty chunk for node x.
