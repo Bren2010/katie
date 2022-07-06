@@ -7,6 +7,14 @@ import (
 	"github.com/JumpPrivacy/katie/db"
 )
 
+// IncusionProof wraps all of the information necessary to verify a proof of
+// inclusion for the log.
+type InclusionProof struct {
+	Hashes        [][]byte // The copath hashes.
+	Values        [][]byte // The copath values.
+	Intermediates [][]byte // The intermediate node values.
+}
+
 // Tree is an implementation of a Merkle tree where all new data is added to the
 // right-most edge of the tree.
 type Tree struct {
@@ -146,7 +154,7 @@ func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byt
 
 // Get returns the value of log entry number `x` along with its proof of
 // inclusion.
-func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
+func (t *Tree) Get(x, n int) ([]byte, *InclusionProof, error) {
 	if n == 0 {
 		return nil, nil, nil
 	} else if x >= n {
@@ -164,7 +172,12 @@ func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return values[0], append(hashes, values[1:]...), nil
+
+	return values[0], &InclusionProof{
+		Hashes:        hashes,
+		Values:        values[1 : 1+len(cpath)],
+		Intermediates: values[1+len(cpath):],
+	}, nil
 }
 
 // GetConsistencyProof returns a proof that the current log with n elements is
