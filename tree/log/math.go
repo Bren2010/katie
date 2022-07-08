@@ -236,15 +236,15 @@ func Parents(n int) []int {
 	return heights
 }
 
-// filteredParents returns the number of entries from `Parents` that correspond
-// to non-full subtrees.
-func filteredParents(n int) int {
+// filteredParents returns the entries from `Parents` that correspond to
+// non-full subtrees.
+func filteredParents(n int) []int {
 	path := directPath(2*n, n+1)
 
-	out := 0
+	out := make([]int, 0)
 	for _, id := range path {
 		if !isFullSubtree(id, n+1) {
-			out += 1
+			out = append(out, id)
 		}
 	}
 	return out

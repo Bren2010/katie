@@ -64,7 +64,7 @@ func (t *Tree) fetch(n int, nodes, logs []int) (*chunkSet, map[int][][]byte, err
 	logEntries := make(map[int][][]byte)
 	for _, id := range logs {
 		raw := data["p"+strconv.Itoa(id)]
-		expected := filteredParents(id)
+		expected := len(filteredParents(id))
 		if len(raw) != 32*expected {
 			return nil, nil, fmt.Errorf("log entry is malformed")
 		}
@@ -129,9 +129,17 @@ func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byt
 	parents := logs[n-1]
 
 	// Extract the values we want to return.
+	rightValues := make(map[int][]byte)
+	for i, id := range filteredParents(n - 1) {
+		rightValues[id] = logs[n-1][i]
+	}
 	valuesOut := make([][]byte, len(values))
 	for i, id := range values {
-		valuesOut[i] = set.getValue(id)
+		if rightValue, ok := rightValues[id]; ok {
+			valuesOut[i] = rightValue
+		} else {
+			valuesOut[i] = set.getValue(id)
+		}
 	}
 
 	// Extract the hashes we want to return.

@@ -333,6 +333,15 @@ func TestConsistencyProof(t *testing.T) {
 				t.Fatal(err)
 			}
 			verifyConsistencyProof(m, n, proof, roots[m-1], roots[n-1])
+
+			if m > 1 {
+				p := mrand.Intn(m-1) + 1
+				proof, err := tree.GetConsistencyProof(p, m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				verifyConsistencyProof(p, m, proof, roots[p-1], roots[m-1])
+			}
 		}
 	}
 }
