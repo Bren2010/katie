@@ -182,7 +182,9 @@ func (t *Tree) Get(x, n int) ([]byte, *InclusionProof, error) {
 	leaf := 2 * x
 	cpath := copath(leaf, n)
 	dpath := directPath(leaf, n)
-	dpath = dpath[:len(dpath)-1] // Remove root.
+	if len(dpath) > 0 {
+		dpath = dpath[:len(dpath)-1] // Remove root.
+	}
 
 	vids := append([]int{leaf}, append(cpath, dpath...)...)
 	hids := noLeaves(cpath)

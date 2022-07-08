@@ -140,7 +140,11 @@ func verifyInclusionProof(x, n int, value []byte, proof *InclusionProof, root []
 	pnl := len(noLeaves(path))
 	assert(len(proof.Hashes) == pnl)
 	assert(len(proof.Values) == pn)
-	assert(len(proof.Intermediates) == pn-1)
+	if pn == 0 {
+		assert(len(proof.Intermediates) == 0)
+	} else {
+		assert(len(proof.Intermediates) == pn-1)
+	}
 
 	proofNodes := make([]*nodeData, len(path))
 	j := 0
@@ -173,7 +177,11 @@ func verifyInclusionProof(x, n int, value []byte, proof *InclusionProof, root []
 		x = path[i]
 	}
 
-	assert(bytes.Equal(acc.hash, root))
+	if acc.leaf {
+		assert(bytes.Equal(acc.value, root))
+	} else {
+		assert(bytes.Equal(acc.hash, root))
+	}
 }
 
 func verifyConsistencyProof(m, n int, proof *ConsistencyProof, mRoot, nRoot []byte) {
@@ -239,12 +247,31 @@ func verifyConsistencyProof(m, n int, proof *ConsistencyProof, mRoot, nRoot []by
 func TestInclusionProof(t *testing.T) {
 	tree := NewTree(db.NewMemoryTx())
 	calc := NewSimpleRootCalculator()
+	var nodes [][]byte
 
-	var (
-		nodes [][]byte
-		root  []byte
-		err   error
-	)
+	checkTree := func(x, n int, root []byte, latest bool) {
+		value, proof, err := tree.Get(x, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Check that correct value was given and inclusion proof works.
+		assert(bytes.Equal(value, nodes[2*x]))
+		verifyInclusionProof(x, n, value, proof, root)
+
+		// Check that the copath/intermediate values match as well.
+		if latest {
+			for i, id := range copath(2*x, n) {
+				assert(bytes.Equal(proof.Values[i], nodes[id]))
+			}
+			dpath := directPath(2*x, n)
+			for i, id := range dpath[:len(dpath)-1] {
+				assert(bytes.Equal(proof.Intermediates[i], nodes[id]))
+			}
+		}
+	}
+
+	var roots [][]byte
 	for i := 0; i < 2000; i++ {
 		path := directPath(2*i, i+1)
 
@@ -263,10 +290,11 @@ func TestInclusionProof(t *testing.T) {
 		}
 
 		// Append to the tree.
-		root, err = tree.Append(i, leaf, parents)
+		root, err := tree.Append(i, leaf, parents)
 		if err != nil {
 			t.Fatal(err)
 		}
+		roots = append(roots, dup(root))
 		n := i + 1
 
 		calc.Add(leaf, parents)
@@ -278,23 +306,11 @@ func TestInclusionProof(t *testing.T) {
 		}
 		for j := 0; j < 5; j++ {
 			x := mrand.Intn(n)
-			value, proof, err := tree.Get(x, n)
-			if err != nil {
-				t.Fatal(err)
-			}
+			checkTree(x, n, root, true)
 
-			// Check that correct value was given and inclusion proof works.
-			assert(bytes.Equal(value, nodes[2*x]))
-			verifyInclusionProof(x, n, value, proof, root)
-
-			// Check that the copath/intermediate values match as well.
-			for i, id := range copath(2*x, n) {
-				assert(bytes.Equal(proof.Values[i], nodes[id]))
-			}
-			dpath := directPath(2*x, n)
-			for i, id := range dpath[:len(dpath)-1] {
-				assert(bytes.Equal(proof.Intermediates[i], nodes[id]))
-			}
+			m := mrand.Intn(n-1) + 1
+			x = mrand.Intn(m)
+			checkTree(x, m, roots[m-1], false)
 		}
 	}
 }
