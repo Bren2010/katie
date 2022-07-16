@@ -4,6 +4,19 @@ import (
 	"fmt"
 )
 
+// The prefix tree implementation is designed to work with a standard key-value
+// database, though this means that we're unable to query old versions of the
+// tree. The prefix tree is stored in the database in "chunks", which are
+// 16-node-wide (which means 4-node-deep) subtrees. Only leaf nodes of the
+// subtree are stored, though these subtree leaves may actually be either leaves
+// or intermediates in the context of the full tree.
+//
+// Each node is serialized individually and stored concatenated. The first
+// nibble of a serialized node is whether it's a leaf or parent node, the second
+// nibble is the prefix that the node corresponds to, and the rest is a 32-byte
+// opaque value. If the node is a leaf, then it's the leaf value; if the node is
+// a parent, then it's the tree hash of the subtree rooted at that node.
+
 var nibbleTable = map[string]byte{
 	"0000": 0,
 	"0001": 1,
@@ -48,10 +61,9 @@ func (n *treeNode) sum() []byte {
 
 // marshal returns the serialized node contents for storage in the database.
 func (n *treeNode) marshal(b byte) []byte {
-	out := make([]byte, 2+len(n.inner))
-	out[0] = b
-	out[1] = byte(n.typ)
-	copy(out[2:], n.inner)
+	out := make([]byte, 1+len(n.inner))
+	out[0] = (byte(n.typ) << 4) | b
+	copy(out[1:], n.inner)
 
 	return out
 }
@@ -67,16 +79,13 @@ func newPrefixChunk(half bool, prefix, data []byte) (*prefixChunk, error) {
 	elems := make(map[byte]*treeNode)
 
 	for len(data) > 0 {
-		if len(data) < 2 {
+		if len(data) < 1 {
 			return nil, fmt.Errorf("invalid data in slice")
 		}
-		b := data[0]
+		t, b := treeNodeType(data[0]>>4), data[0]&0xf
 		if _, ok := elems[b]; ok {
 			return nil, fmt.Errorf("duplicate entries")
-		} else if (b >> 4) != 0 {
-			return nil, fmt.Errorf("invalid data in slice")
 		}
-		t := treeNodeType(data[1])
 
 		var innerLen int
 		if t == leafNode {
@@ -87,11 +96,11 @@ func newPrefixChunk(half bool, prefix, data []byte) (*prefixChunk, error) {
 			return nil, fmt.Errorf("unexpected value in slice")
 		}
 
-		if len(data) < 2+innerLen {
+		if len(data) < 1+innerLen {
 			return nil, fmt.Errorf("not enough data in slice")
 		}
-		inner := data[2 : 2+innerLen]
-		data = data[2+innerLen:]
+		inner := data[1 : 1+innerLen]
+		data = data[1+innerLen:]
 
 		elems[b] = &treeNode{typ: t, inner: inner}
 	}
