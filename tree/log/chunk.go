@@ -4,6 +4,22 @@ import (
 	"fmt"
 )
 
+// The log tree implementation is designed to work with a standard key-value
+// database. The tree is stored in the database in "chunks", which are
+// 8-node-wide (or 4-node-deep) subtrees. Chunks are addressed by the id of the
+// root node in the chunk.
+//
+// Each node is serialized individually and stored concatenated. The most recent
+// stored value of all nodes is stored. If the leaf of a subtree represents an
+// intermediate node in the context of the full tree, then the hash of the
+// subtree rooted at that node is also stored.
+//
+// The implementation also stores "log entries", one for each new element added
+// to the log, containing the values of any non-full subtrees between the leaf
+// and the global root. Log entries help recompute how the tree looked in past
+// revisions, since non-full subtrees may have their value overridden by the
+// addition of later entries.
+
 // nodeData is the primary wrapper struct for representing a single node (leaf
 // or intermediate) in the tree.
 type nodeData struct {

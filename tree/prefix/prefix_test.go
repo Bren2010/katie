@@ -44,7 +44,10 @@ func TestSearchInclusionProof(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verifyInclusionProof(root, leaves[i], res.(inclusionProof))
+		err = verifyInclusionProof(root, leaves[i], res.(inclusionProof))
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -64,7 +67,10 @@ func TestSearchNonInclusionProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyNonInclusionLeafProof(root, key2, res.(nonInclusionLeaf))
+	err = verifyNonInclusionLeafProof(root, key2, res.(nonInclusionLeaf))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// By parent.
 	key3 := random()
@@ -73,7 +79,10 @@ func TestSearchNonInclusionProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyNonInclusionParentProof(root, key3, res.(nonInclusionParent))
+	err = verifyNonInclusionParentProof(root, key3, res.(nonInclusionParent))
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestInsert(t *testing.T) {
@@ -105,7 +114,10 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyInclusionProof(root, key, res.(inclusionProof))
+	err = verifyInclusionProof(root, key, res.(inclusionProof))
+	if err != nil {
+		t.Fatal(err)
+	}
 	assert(len(res.(inclusionProof).proof) == 4)
 	assert(len(tx.Data) == 1)
 
@@ -118,7 +130,10 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyInclusionProof(root, key2, res.(inclusionProof))
+	err = verifyInclusionProof(root, key2, res.(inclusionProof))
+	if err != nil {
+		t.Fatal(err)
+	}
 	assert(len(res.(inclusionProof).proof) == 4)
 	assert(len(tx.Data) == 1)
 
@@ -131,7 +146,10 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyInclusionProof(root, key3, res.(inclusionProof))
+	err = verifyInclusionProof(root, key3, res.(inclusionProof))
+	if err != nil {
+		t.Fatal(err)
+	}
 	assert(len(res.(inclusionProof).proof) == 8)
 	assert(len(tx.Data) == 2)
 
@@ -144,7 +162,10 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyInclusionProof(root, key4, res.(inclusionProof))
+	err = verifyInclusionProof(root, key4, res.(inclusionProof))
+	if err != nil {
+		t.Fatal(err)
+	}
 	assert(len(res.(inclusionProof).proof) == 132)
 	assert(len(tx.Data) == 33)
 
@@ -157,7 +178,10 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyInclusionProof(root, key, res.(inclusionProof))
+	err = verifyInclusionProof(root, key, res.(inclusionProof))
+	if err != nil {
+		t.Fatal(err)
+	}
 	assert(len(res.(inclusionProof).proof) == 132)
 	assert(len(tx.Data) == 33)
 }

@@ -7,9 +7,10 @@ import (
 // The prefix tree implementation is designed to work with a standard key-value
 // database, though this means that we're unable to query old versions of the
 // tree. The prefix tree is stored in the database in "chunks", which are
-// 16-node-wide (which means 4-node-deep) subtrees. Only leaf nodes of the
-// subtree are stored, though these subtree leaves may actually be either leaves
-// or intermediates in the context of the full tree.
+// 16-node-wide (or 5-node-deep) subtrees. Chunks are addressed by the prefix
+// that leads to the root of their subtree. Only leaf nodes of the subtree are
+// stored, though these subtree leaves may actually be either leaves or
+// intermediates in the context of the full tree.
 //
 // Each node is serialized individually and stored concatenated. The first
 // nibble of a serialized node is whether it's a leaf or parent node, the second

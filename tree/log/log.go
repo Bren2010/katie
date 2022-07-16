@@ -42,7 +42,7 @@ func (t *Tree) fetch(n int, nodes, logs []int) (*chunkSet, map[int][][]byte, err
 	for _, id := range nodes {
 		dedup[chunk(id)] = struct{}{}
 	}
-	strs := make([]string, 0, len(dedup))
+	strs := make([]string, 0, len(dedup)+len(logs))
 	for id, _ := range dedup {
 		strs = append(strs, strconv.Itoa(id))
 	}
@@ -77,7 +77,7 @@ func (t *Tree) fetch(n int, nodes, logs []int) (*chunkSet, map[int][][]byte, err
 	}
 
 	// Parse chunk set.
-	dataInt := make(map[int][]byte, len(data))
+	dataInt := make(map[int][]byte, len(data)-len(logs))
 	for idStr, raw := range data {
 		if idStr[0] == 'p' {
 			continue
