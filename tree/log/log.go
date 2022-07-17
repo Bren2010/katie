@@ -11,18 +11,18 @@ import (
 // IncusionProof wraps all of the information necessary to verify a proof of
 // inclusion for the log.
 type InclusionProof struct {
-	Hashes        [][]byte // The copath hashes.
-	Values        [][]byte // The copath values.
-	Intermediates [][]byte // The intermediate node values.
+	Hashes        [][]byte `json:"hashes"` // The copath hashes.
+	Values        [][]byte `json:"values"` // The copath values.
+	Intermediates [][]byte `json:"inter"`  // The intermediate node values.
 }
 
 // ConsistencyProof wraps a proof that one version of the log is an extension of
 // a past version of the log.
 type ConsistencyProof struct {
-	Hashes         [][]byte // Hashes along consistency path.
-	Values         [][]byte // Values along consistency path, for more recent revision.
-	Intermediates  [][]byte // Intermediate values for computing more recent revision.
-	IntermediatesM [][]byte // Intermediate values for computing less recent revision.
+	Hashes         [][]byte `json:"hashes"`  // Hashes along consistency path.
+	Values         [][]byte `json:"values"`  // Values along consistency path, for more recent revision.
+	Intermediates  [][]byte `json:"inter"`   // Intermediate values for computing more recent revision.
+	IntermediatesM [][]byte `json:"inter-m"` // Intermediate values for computing less recent revision.
 }
 
 // Tree is an implementation of a Merkle tree where all new data is added to the

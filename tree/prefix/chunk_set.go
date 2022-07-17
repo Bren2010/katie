@@ -36,7 +36,7 @@ func newChunkSet(chunks map[string][]byte) (*chunkSet, error) {
 
 // search executes a search for `key` through the tree, assuming all necessary
 // chunks are already loaded into the ChunkSet.
-func (s *chunkSet) search(key []byte) (SearchResult, error) {
+func (s *chunkSet) search(key []byte) (interface{}, error) {
 	// Walk down the path looking for the right leaf node and building our
 	// inclusion/non-inclusion proof.
 	id := "root"

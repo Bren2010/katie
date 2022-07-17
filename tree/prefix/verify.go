@@ -67,14 +67,14 @@ func verifyNonInclusionParentProof(root, key []byte, res nonInclusionParent) err
 
 // Verify takes a search result `res` as input, which was returned by searching
 // for `key` in a tree with root `root`, and returns an error if it's invalid.
-func Verify(root, key []byte, res SearchResult) error {
-	switch res := res.(type) {
+func Verify(root, key []byte, res *SearchResult) error {
+	switch inner := res.inner.(type) {
 	case inclusionProof:
-		return verifyInclusionProof(root, key, res)
+		return verifyInclusionProof(root, key, inner)
 	case nonInclusionLeaf:
-		return verifyNonInclusionLeafProof(root, key, res)
+		return verifyNonInclusionLeafProof(root, key, inner)
 	case nonInclusionParent:
-		return verifyNonInclusionParentProof(root, key, res)
+		return verifyNonInclusionParentProof(root, key, inner)
 	default:
 		return errors.New("unknown proof type")
 	}

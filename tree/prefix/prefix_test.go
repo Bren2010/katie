@@ -44,7 +44,7 @@ func TestSearchInclusionProof(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = verifyInclusionProof(root, leaves[i], res.(inclusionProof))
+		err = verifyInclusionProof(root, leaves[i], res.inner.(inclusionProof))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +67,7 @@ func TestSearchNonInclusionProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyNonInclusionLeafProof(root, key2, res.(nonInclusionLeaf))
+	err = verifyNonInclusionLeafProof(root, key2, res.inner.(nonInclusionLeaf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestSearchNonInclusionProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyNonInclusionParentProof(root, key3, res.(nonInclusionParent))
+	err = verifyNonInclusionParentProof(root, key3, res.inner.(nonInclusionParent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,11 +114,11 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyInclusionProof(root, key, res.(inclusionProof))
+	err = verifyInclusionProof(root, key, res.inner.(inclusionProof))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert(len(res.(inclusionProof).proof) == 4)
+	assert(len(res.inner.(inclusionProof).proof) == 4)
 	assert(len(tx.Data) == 1)
 
 	// Different first nibble: no new db entry.
@@ -130,11 +130,11 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyInclusionProof(root, key2, res.(inclusionProof))
+	err = verifyInclusionProof(root, key2, res.inner.(inclusionProof))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert(len(res.(inclusionProof).proof) == 4)
+	assert(len(res.inner.(inclusionProof).proof) == 4)
 	assert(len(tx.Data) == 1)
 
 	// Same first nibble as another: new db entry.
@@ -146,11 +146,11 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyInclusionProof(root, key3, res.(inclusionProof))
+	err = verifyInclusionProof(root, key3, res.inner.(inclusionProof))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert(len(res.(inclusionProof).proof) == 8)
+	assert(len(res.inner.(inclusionProof).proof) == 8)
 	assert(len(tx.Data) == 2)
 
 	// Many bytes in common: many new db entries.
@@ -162,11 +162,11 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyInclusionProof(root, key4, res.(inclusionProof))
+	err = verifyInclusionProof(root, key4, res.inner.(inclusionProof))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert(len(res.(inclusionProof).proof) == 132)
+	assert(len(res.inner.(inclusionProof).proof) == 132)
 	assert(len(tx.Data) == 33)
 
 	// Duplicate entry: do nothing.
@@ -178,10 +178,10 @@ func TestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyInclusionProof(root, key, res.(inclusionProof))
+	err = verifyInclusionProof(root, key, res.inner.(inclusionProof))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert(len(res.(inclusionProof).proof) == 132)
+	assert(len(res.inner.(inclusionProof).proof) == 132)
 	assert(len(tx.Data) == 33)
 }
