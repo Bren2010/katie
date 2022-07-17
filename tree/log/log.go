@@ -28,10 +28,10 @@ type ConsistencyProof struct {
 // Tree is an implementation of a Merkle tree where all new data is added to the
 // right-most edge of the tree.
 type Tree struct {
-	tx db.Tx
+	tx db.KvStore
 }
 
-func NewTree(tx db.Tx) *Tree {
+func NewTree(tx db.KvStore) *Tree {
 	return &Tree{tx: tx}
 }
 

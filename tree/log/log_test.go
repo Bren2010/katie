@@ -25,7 +25,7 @@ func dup(in []byte) []byte {
 }
 
 func TestInclusionProof(t *testing.T) {
-	tree := NewTree(db.NewMemoryTx())
+	tree := NewTree(db.NewMemoryKv())
 	calc := newSimpleRootCalculator()
 	var nodes [][]byte
 
@@ -103,7 +103,7 @@ func TestInclusionProof(t *testing.T) {
 }
 
 func TestConsistencyProof(t *testing.T) {
-	tree := NewTree(db.NewMemoryTx())
+	tree := NewTree(db.NewMemoryKv())
 
 	var roots [][]byte
 	for i := 0; i < 2000; i++ {

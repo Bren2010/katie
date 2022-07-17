@@ -1,24 +1,24 @@
 // Package db implements database wrappers that match a common interface.
 package db
 
-// Tx is the interface for an internally-consistent transaction with a database.
-// Transactions are guaranteed to be all-or-nothing.
-type Tx interface {
+// KvStore is the interface for an internally-consistent transaction with a
+// key-value database.
+type KvStore interface {
 	BatchGet(keys []string) (data map[string][]byte, err error)
 	BatchPut(data map[string][]byte) error
 }
 
-// MemoryTx implements the Tx interface over an in-memory map, mostly for
+// MemoryKv implements the KvStore interface over an in-memory map, mostly for
 // testing use-cases.
-type MemoryTx struct {
+type MemoryKv struct {
 	Data map[string][]byte
 }
 
-func NewMemoryTx() *MemoryTx {
-	return &MemoryTx{Data: make(map[string][]byte)}
+func NewMemoryKv() *MemoryKv {
+	return &MemoryKv{Data: make(map[string][]byte)}
 }
 
-func (m *MemoryTx) BatchGet(keys []string) (map[string][]byte, error) {
+func (m *MemoryKv) BatchGet(keys []string) (map[string][]byte, error) {
 	out := make(map[string][]byte)
 
 	for _, key := range keys {
@@ -30,7 +30,7 @@ func (m *MemoryTx) BatchGet(keys []string) (map[string][]byte, error) {
 	return out, nil
 }
 
-func (m *MemoryTx) BatchPut(data map[string][]byte) error {
+func (m *MemoryKv) BatchPut(data map[string][]byte) error {
 	for key, d := range data {
 		buf := make([]byte, len(d))
 		copy(buf, d)

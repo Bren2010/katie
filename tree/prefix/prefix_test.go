@@ -24,7 +24,7 @@ func dup(in []byte) []byte {
 
 func TestSearchInclusionProof(t *testing.T) {
 	var (
-		tree   = NewTree(db.NewMemoryTx(), 0)
+		tree   = NewTree(db.NewMemoryKv(), 0)
 		leaves = make([][]byte, 0)
 
 		root []byte
@@ -52,7 +52,7 @@ func TestSearchInclusionProof(t *testing.T) {
 }
 
 func TestSearchNonInclusionProof(t *testing.T) {
-	tree := NewTree(db.NewMemoryTx(), 0)
+	tree := NewTree(db.NewMemoryKv(), 0)
 
 	key := random()
 	root, _, err := tree.Insert(key)
@@ -86,7 +86,7 @@ func TestSearchNonInclusionProof(t *testing.T) {
 }
 
 func TestInsert(t *testing.T) {
-	tx := db.NewMemoryTx()
+	tx := db.NewMemoryKv()
 	tree := NewTree(tx, 0)
 
 	key := random()  // Reference key.

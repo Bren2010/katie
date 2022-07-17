@@ -113,13 +113,13 @@ func (p inclusionProof) Inclusion() bool { return true }
 // Tree is the high-level implementation of the Merkle prefix tree, backed by a
 // connection to a persistent database.
 type Tree struct {
-	tx     db.Tx
+	tx     db.KvStore
 	height int
 }
 
 // NewTree returns a new instance of a prefix tree with the given database
 // transaction and where `height` is the last known max height of the tree.
-func NewTree(tx db.Tx, height int) *Tree {
+func NewTree(tx db.KvStore, height int) *Tree {
 	return &Tree{tx: tx, height: height}
 }
 
