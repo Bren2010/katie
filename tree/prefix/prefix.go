@@ -16,6 +16,12 @@ type SearchResult struct {
 	inner interface{}
 }
 
+type searchResultSchema struct {
+	Typ    string   `json:"type"`
+	Proof  [][]byte `json:"proof"`
+	Suffix []byte   `json:"suffix,omitempty"`
+}
+
 // Inclusion returns true if this is a proof of inclusion and false if this
 // is a proof of non-inclusion.
 func (sr *SearchResult) Inclusion() bool {
@@ -34,20 +40,20 @@ func (sr *SearchResult) Inclusion() bool {
 func (sr *SearchResult) MarshalJSON() ([]byte, error) {
 	switch inner := sr.inner.(type) {
 	case nonInclusionParent:
-		return json.Marshal(map[string]interface{}{
-			"type":  "non-inclusion-parent",
-			"proof": inner.proof,
+		return json.Marshal(searchResultSchema{
+			Typ:   "non-inclusion-parent",
+			Proof: inner.proof,
 		})
 	case nonInclusionLeaf:
-		return json.Marshal(map[string]interface{}{
-			"type":   "non-inclusion-leaf",
-			"proof":  inner.proof,
-			"suffix": inner.suffix,
+		return json.Marshal(searchResultSchema{
+			Typ:    "non-inclusion-leaf",
+			Proof:  inner.proof,
+			Suffix: inner.suffix,
 		})
 	case inclusionProof:
-		return json.Marshal(map[string]interface{}{
-			"type":  "inclusion",
-			"proof": inner.proof,
+		return json.Marshal(searchResultSchema{
+			Typ:   "inclusion",
+			Proof: inner.proof,
 		})
 	default:
 		panic("unreachable")
@@ -55,30 +61,18 @@ func (sr *SearchResult) MarshalJSON() ([]byte, error) {
 }
 
 func (sr *SearchResult) UnmarshalJSON(b []byte) error {
-	val := make(map[string]interface{})
+	val := searchResultSchema{}
 	if err := json.Unmarshal(b, &val); err != nil {
 		return err
 	}
-	t, ok := val["type"].(string)
-	if !ok {
-		return errors.New("unable to parse search result")
-	}
-	p, ok := val["proof"].([][]byte)
-	if !ok {
-		return errors.New("unable to parse search result")
-	}
 
-	switch t {
+	switch val.Typ {
 	case "non-inclusion-parent":
-		sr.inner = nonInclusionParent{proof: p}
+		sr.inner = nonInclusionParent{proof: val.Proof}
 	case "non-inclusion-leaf":
-		s, ok := val["suffix"].([]byte)
-		if !ok {
-			return errors.New("unable to parse search result")
-		}
-		sr.inner = nonInclusionLeaf{proof: p, suffix: s}
+		sr.inner = nonInclusionLeaf{proof: val.Proof, suffix: val.Suffix}
 	case "inclusion":
-		sr.inner = inclusionProof{proof: p}
+		sr.inner = inclusionProof{proof: val.Proof}
 	default:
 		return errors.New("unable to parse search result")
 	}

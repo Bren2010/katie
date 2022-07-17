@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"crypto/rand"
+	"encoding/json"
 
 	"github.com/JumpPrivacy/katie/db"
 )
@@ -44,7 +45,15 @@ func TestSearchInclusionProof(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = verifyInclusionProof(root, leaves[i], res.inner.(inclusionProof))
+		raw, err := json.Marshal(res)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed := &SearchResult{}
+		if err := json.Unmarshal(raw, parsed); err != nil {
+			t.Fatal(err)
+		}
+		err = verifyInclusionProof(root, leaves[i], parsed.inner.(inclusionProof))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +76,15 @@ func TestSearchNonInclusionProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyNonInclusionLeafProof(root, key2, res.inner.(nonInclusionLeaf))
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed := &SearchResult{}
+	if err := json.Unmarshal(raw, parsed); err != nil {
+		t.Fatal(err)
+	}
+	err = verifyNonInclusionLeafProof(root, key2, parsed.inner.(nonInclusionLeaf))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +96,13 @@ func TestSearchNonInclusionProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifyNonInclusionParentProof(root, key3, res.inner.(nonInclusionParent))
+	raw, err = json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	} else if err := json.Unmarshal(raw, parsed); err != nil {
+		t.Fatal(err)
+	}
+	err = verifyNonInclusionParentProof(root, key3, parsed.inner.(nonInclusionParent))
 	if err != nil {
 		t.Fatal(err)
 	}
