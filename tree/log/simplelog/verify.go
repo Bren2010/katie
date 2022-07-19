@@ -1,0 +1,168 @@
+package simplelog
+
+import (
+	"bytes"
+	"errors"
+)
+
+// simpleRootCalculator is an alternative implementation of the root-calculation
+// logic in the log tree which we use to double-check things are implemented
+// correctly.
+type simpleRootCalculator struct {
+	chain []*nodeData
+}
+
+func newSimpleRootCalculator() *simpleRootCalculator {
+	return &simpleRootCalculator{chain: make([]*nodeData, 0)}
+}
+
+func (c *simpleRootCalculator) Add(leaf []byte) {
+	c.Insert(0, leaf)
+}
+
+func (c *simpleRootCalculator) Insert(level int, value []byte) {
+	for len(c.chain) < level+1 {
+		c.chain = append(c.chain, nil)
+	}
+
+	acc := &nodeData{
+		leaf:  level == 0,
+		value: value,
+	}
+
+	i := level
+	for i < len(c.chain) && c.chain[i] != nil {
+		acc = &nodeData{
+			leaf:  false,
+			value: treeHash(c.chain[i], acc),
+		}
+		c.chain[i] = nil
+		i++
+	}
+	if i == len(c.chain) {
+		c.chain = append(c.chain, acc)
+	} else {
+		c.chain[i] = acc
+	}
+}
+
+func (c *simpleRootCalculator) Root() ([]byte, error) {
+	if len(c.chain) == 0 {
+		return nil, errors.New("empty chain")
+	}
+
+	// Find first non-null element of chain.
+	var (
+		rootPos int
+		root    *nodeData
+	)
+	for i := 0; i < len(c.chain); i++ {
+		if c.chain[i] != nil {
+			rootPos = i
+			root = c.chain[i]
+			break
+		}
+	}
+	if root == nil {
+		return nil, errors.New("malformed chain")
+	}
+
+	// Fold the hashes above what we just found into one.
+	for i := rootPos + 1; i < len(c.chain); i++ {
+		if c.chain[i] != nil {
+			root = &nodeData{
+				leaf:  false,
+				value: treeHash(c.chain[i], root),
+			}
+		}
+	}
+
+	return root.value, nil
+}
+
+// VerifyInclusionProof checks that `proof` is a valid inclusion proof for
+// `value` at position `x` in a tree with the given root.
+func VerifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) error {
+	for _, elem := range proof {
+		if len(elem) != 32 {
+			return errors.New("malformed proof")
+		}
+	}
+
+	x = 2 * x
+	path := copath(x, n)
+	if len(proof) != len(path) {
+		return errors.New("malformed proof")
+	}
+
+	acc := &nodeData{leaf: true, value: value}
+	for i := 0; i < len(path); i++ {
+		nd := &nodeData{leaf: isLeaf(path[i]), value: proof[i]}
+
+		var hash []byte
+		if x < path[i] {
+			hash = treeHash(acc, nd)
+		} else {
+			hash = treeHash(nd, acc)
+		}
+
+		acc = &nodeData{leaf: false, value: hash}
+		x = path[i]
+	}
+
+	if !bytes.Equal(acc.value, root) {
+		return errors.New("root does not match proof")
+	}
+	return nil
+}
+
+// VerifyConsistencyProof checks that `proof` is a valid consistency proof
+// between `mRoot` and `nRoot` where `m` < `n`.
+func VerifyConsistencyProof(m, n int, proof [][]byte, mRoot, nRoot []byte) error {
+	for _, elem := range proof {
+		if len(elem) != 32 {
+			return errors.New("malformed proof")
+		}
+	}
+
+	ids := consistencyProof(m, n)
+	calc := newSimpleRootCalculator()
+
+	if len(proof) != len(ids) {
+		return errors.New("malformed proof")
+	}
+
+	// Step 1: Verify that the consistency proof aligns with mRoot.
+	path := fullSubtrees(root(m), m)
+	if len(path) == 1 {
+		// m is a power of two so we don't need to verify anything.
+		calc.Insert(level(root(m)), mRoot)
+	} else {
+		for i := 0; i < len(path); i++ {
+			if ids[i] != path[i] {
+				return errors.New("unexpected error")
+			}
+			calc.Insert(level(path[i]), proof[i])
+		}
+		if root, err := calc.Root(); err != nil {
+			return err
+		} else if !bytes.Equal(mRoot, root) {
+			return errors.New("first root does not match proof")
+		}
+	}
+
+	// Step 2: Verify that the consistency proof aligns with nRoot.
+	i := len(path)
+	if i == 1 {
+		i = 0
+	}
+	for ; i < len(ids); i++ {
+		calc.Insert(level(ids[i]), proof[i])
+	}
+	if root, err := calc.Root(); err != nil {
+		return err
+	} else if !bytes.Equal(nRoot, root) {
+		return errors.New("second root does not match proof")
+	}
+	return nil
+}

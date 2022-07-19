@@ -16,12 +16,6 @@ type SearchResult struct {
 	inner interface{}
 }
 
-type searchResultSchema struct {
-	Typ    string   `json:"type"`
-	Proof  [][]byte `json:"proof"`
-	Suffix []byte   `json:"suffix,omitempty"`
-}
-
 // Inclusion returns true if this is a proof of inclusion and false if this
 // is a proof of non-inclusion.
 func (sr *SearchResult) Inclusion() bool {
@@ -35,6 +29,12 @@ func (sr *SearchResult) Inclusion() bool {
 	default:
 		panic("unreachable")
 	}
+}
+
+type searchResultSchema struct {
+	Typ    string   `json:"type"`
+	Proof  [][]byte `json:"proof"`
+	Suffix []byte   `json:"suffix,omitempty"`
 }
 
 func (sr *SearchResult) MarshalJSON() ([]byte, error) {

@@ -174,7 +174,7 @@ func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byt
 // inclusion.
 func (t *Tree) Get(x, n int) ([]byte, *InclusionProof, error) {
 	if n == 0 {
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("empty tree")
 	} else if x >= n {
 		return nil, nil, fmt.Errorf("can not get leaf beyond right edge of tree")
 	}
