@@ -3,11 +3,26 @@
 package simplelog
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 
 	"github.com/JumpPrivacy/katie/db"
+	"github.com/JumpPrivacy/katie/tree/log/math"
 )
+
+// treeHash returns the intermediate hash of left and right.
+func treeHash(left, right *nodeData) []byte {
+	if err := left.validate(); err != nil {
+		panic(err)
+	} else if err := right.validate(); err != nil {
+		panic(err)
+	}
+
+	input := append(left.marshal(), right.marshal()...)
+	output := sha256.Sum256(input)
+	return output[:]
+}
 
 // Tree is an implementation of a log-based Merkle tree where all new data is
 // added as the right-most leaf.
@@ -24,7 +39,7 @@ func NewTree(tx db.KvStore) *Tree {
 func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 	dedup := make(map[int]struct{})
 	for _, id := range nodes {
-		dedup[chunk(id)] = struct{}{}
+		dedup[math.Chunk(id)] = struct{}{}
 	}
 	strs := make([]string, 0, len(dedup))
 	for id, _ := range dedup {
@@ -66,10 +81,10 @@ func (t *Tree) fetchSpecific(n int, nodes []int) ([][]byte, error) {
 	// Add the nodes that we need to compute the requested hashes.
 	rightEdge := make(map[int][]int)
 	for _, id := range nodes {
-		if isFullSubtree(id, n) {
+		if math.IsFullSubtree(id, n) {
 			lookup = append(lookup, id)
 		} else {
-			subtrees := fullSubtrees(id, n)
+			subtrees := math.FullSubtrees(id, n)
 			rightEdge[id] = subtrees
 			lookup = append(lookup, subtrees...)
 		}
@@ -112,7 +127,7 @@ func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
 	}
 
 	leaf := 2 * x
-	cpath := copath(leaf, n)
+	cpath := math.Copath(leaf, n)
 	data, err := t.fetchSpecific(n, append([]int{leaf}, cpath...))
 	if err != nil {
 		return nil, nil, err
@@ -129,7 +144,7 @@ func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
 	} else if m >= n {
 		return nil, fmt.Errorf("second parameter must be greater than first")
 	}
-	return t.fetchSpecific(n, consistencyProof(m, n))
+	return t.fetchSpecific(n, math.ConsistencyProof(m, n))
 }
 
 // Append adds a new element to the end of the log and returns the new root
@@ -143,22 +158,22 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 	// Calculate the set of nodes that we'll need to update / create.
 	leaf := 2 * n
 	path := []int{leaf}
-	for _, id := range directPath(leaf, n+1) {
+	for _, id := range math.DirectPath(leaf, n+1) {
 		path = append(path, id)
 	}
 
 	alreadyExists := make(map[int]struct{})
 	if n > 0 {
-		alreadyExists[chunk(leaf-2)] = struct{}{}
-		for _, id := range directPath(leaf-2, n) {
-			alreadyExists[chunk(id)] = struct{}{}
+		alreadyExists[math.Chunk(leaf-2)] = struct{}{}
+		for _, id := range math.DirectPath(leaf-2, n) {
+			alreadyExists[math.Chunk(id)] = struct{}{}
 		}
 	}
 
 	updateChunks := make([]int, 0) // These are dedup'ed by fetch.
 	createChunks := make(map[int]struct{})
 	for _, id := range path {
-		id = chunk(id)
+		id = math.Chunk(id)
 		if _, ok := alreadyExists[id]; ok {
 			updateChunks = append(updateChunks, id)
 		} else {
@@ -168,7 +183,7 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 
 	// Fetch the chunks we'll need to update along with nodes we'll need to know
 	// to compute the new root or updated intermediates.
-	set, err := t.fetch(n+1, append(updateChunks, copath(leaf, n+1)...))
+	set, err := t.fetch(n+1, append(updateChunks, math.Copath(leaf, n+1)...))
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +195,8 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 
 	set.set(leaf, value)
 	for _, x := range path[1:] {
-		if level(x)%4 == 0 {
-			l, r := left(x), right(x, n+1)
+		if math.Level(x)%4 == 0 {
+			l, r := math.Left(x), math.Right(x, n+1)
 			intermediate := treeHash(set.get(l), set.get(r))
 			set.set(x, intermediate)
 		}
@@ -198,5 +213,5 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	return set.get(root(n + 1)).value, nil
+	return set.get(math.Root(n + 1)).value, nil
 }

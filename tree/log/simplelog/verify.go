@@ -3,6 +3,8 @@ package simplelog
 import (
 	"bytes"
 	"errors"
+
+	"github.com/JumpPrivacy/katie/tree/log/math"
 )
 
 // simpleRootCalculator is an alternative implementation of the root-calculation
@@ -90,14 +92,14 @@ func VerifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) e
 	}
 
 	x = 2 * x
-	path := copath(x, n)
+	path := math.Copath(x, n)
 	if len(proof) != len(path) {
 		return errors.New("malformed proof")
 	}
 
 	acc := &nodeData{leaf: true, value: value}
 	for i := 0; i < len(path); i++ {
-		nd := &nodeData{leaf: isLeaf(path[i]), value: proof[i]}
+		nd := &nodeData{leaf: math.IsLeaf(path[i]), value: proof[i]}
 
 		var hash []byte
 		if x < path[i] {
@@ -125,7 +127,7 @@ func VerifyConsistencyProof(m, n int, proof [][]byte, mRoot, nRoot []byte) error
 		}
 	}
 
-	ids := consistencyProof(m, n)
+	ids := math.ConsistencyProof(m, n)
 	calc := newSimpleRootCalculator()
 
 	if len(proof) != len(ids) {
@@ -133,16 +135,16 @@ func VerifyConsistencyProof(m, n int, proof [][]byte, mRoot, nRoot []byte) error
 	}
 
 	// Step 1: Verify that the consistency proof aligns with mRoot.
-	path := fullSubtrees(root(m), m)
+	path := math.FullSubtrees(math.Root(m), m)
 	if len(path) == 1 {
 		// m is a power of two so we don't need to verify anything.
-		calc.Insert(level(root(m)), mRoot)
+		calc.Insert(math.Level(math.Root(m)), mRoot)
 	} else {
 		for i := 0; i < len(path); i++ {
 			if ids[i] != path[i] {
 				return errors.New("unexpected error")
 			}
-			calc.Insert(level(path[i]), proof[i])
+			calc.Insert(math.Level(path[i]), proof[i])
 		}
 		if root, err := calc.Root(); err != nil {
 			return err
@@ -157,7 +159,7 @@ func VerifyConsistencyProof(m, n int, proof [][]byte, mRoot, nRoot []byte) error
 		i = 0
 	}
 	for ; i < len(ids); i++ {
-		calc.Insert(level(ids[i]), proof[i])
+		calc.Insert(math.Level(ids[i]), proof[i])
 	}
 	if root, err := calc.Root(); err != nil {
 		return err

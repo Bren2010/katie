@@ -1,12 +1,27 @@
 package log
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strconv"
 
 	"github.com/JumpPrivacy/katie/db"
+	"github.com/JumpPrivacy/katie/tree/log/math"
 )
+
+// treeHash returns the intermediate hash of left and right.
+func treeHash(left, right *nodeData) []byte {
+	if err := left.validate(); err != nil {
+		panic(err)
+	} else if err := right.validate(); err != nil {
+		panic(err)
+	}
+
+	input := append(left.marshal(), right.marshal()...)
+	output := sha256.Sum256(input)
+	return output[:]
+}
 
 // IncusionProof wraps all of the information necessary to verify a proof of
 // inclusion for the log.
@@ -40,7 +55,7 @@ func NewTree(tx db.KvStore) *Tree {
 func (t *Tree) fetch(n int, nodes, logs []int) (*chunkSet, map[int][][]byte, error) {
 	dedup := make(map[int]struct{})
 	for _, id := range nodes {
-		dedup[chunk(id)] = struct{}{}
+		dedup[math.Chunk(id)] = struct{}{}
 	}
 	strs := make([]string, 0, len(dedup)+len(logs))
 	for id, _ := range dedup {
@@ -106,10 +121,10 @@ func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byt
 	// Add the nodes that we need to compute the requested hashes.
 	rightEdge := make(map[int][]int)
 	for _, id := range hashes {
-		if isFullSubtree(id, n) {
+		if math.IsFullSubtree(id, n) {
 			lookup = append(lookup, id)
 		} else {
-			subtrees := fullSubtrees(id, n)
+			subtrees := math.FullSubtrees(id, n)
 			rightEdge[id] = subtrees
 			lookup = append(lookup, subtrees...)
 		}
@@ -180,8 +195,8 @@ func (t *Tree) Get(x, n int) ([]byte, *InclusionProof, error) {
 	}
 
 	leaf := 2 * x
-	cpath := copath(leaf, n)
-	dpath := directPath(leaf, n)
+	cpath := math.Copath(leaf, n)
+	dpath := math.DirectPath(leaf, n)
 	if len(dpath) > 0 {
 		dpath = dpath[:len(dpath)-1] // Remove root.
 	}
@@ -209,15 +224,15 @@ func (t *Tree) GetConsistencyProof(m, n int) (*ConsistencyProof, error) {
 		return nil, fmt.Errorf("second parameter must be greater than first")
 	}
 
-	ids := consistencyProof(m, n)
+	ids := math.ConsistencyProof(m, n)
 
 	// Build the set of intermediate nodes needed to compute root(n) by taking
 	// the parent of each node in the consistency proof path, deduplicating, and
 	// sorting by level (to match how the values will be used in verification).
-	rootN := root(n)
+	rootN := math.Root(n)
 	parentsMap := make(map[int]struct{})
 	for _, id := range ids {
-		if p := parent(id, n); p != rootN {
+		if p := math.Parent(id, n); p != rootN {
 			if _, ok := parentsMap[p]; !ok {
 				parentsMap[p] = struct{}{}
 			}
@@ -234,8 +249,8 @@ func (t *Tree) GetConsistencyProof(m, n int) (*ConsistencyProof, error) {
 
 	// Determine if we need to specifically fetch the value for root(m) because
 	// m is a power of 2.
-	rootM := root(m)
-	isFull := isFullSubtree(rootM, m)
+	rootM := math.Root(m)
+	isFull := math.IsFullSubtree(rootM, m)
 
 	logEntry := m - 1
 	if isFull {
@@ -300,22 +315,22 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 	leaf := 2 * n
 	path := make([]int, 1)
 	path[0] = leaf
-	for _, id := range directPath(leaf, n+1) {
+	for _, id := range math.DirectPath(leaf, n+1) {
 		path = append(path, id)
 	}
 
 	alreadyExists := make(map[int]struct{})
 	if n > 0 {
-		alreadyExists[chunk(leaf-2)] = struct{}{}
-		for _, id := range directPath(leaf-2, n) {
-			alreadyExists[chunk(id)] = struct{}{}
+		alreadyExists[math.Chunk(leaf-2)] = struct{}{}
+		for _, id := range math.DirectPath(leaf-2, n) {
+			alreadyExists[math.Chunk(id)] = struct{}{}
 		}
 	}
 
 	updateChunks := make([]int, 0) // These are dedup'ed by fetch.
 	createChunks := make(map[int]struct{})
 	for _, id := range path {
-		id = chunk(id)
+		id = math.Chunk(id)
 		if _, ok := alreadyExists[id]; ok {
 			updateChunks = append(updateChunks, id)
 		} else {
@@ -325,7 +340,7 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 
 	// Fetch the chunks we'll need to update along with nodes we'll need to know
 	// to compute the new root or updated intermediates.
-	set, _, err := t.fetch(n+1, append(updateChunks, copath(leaf, n+1)...), nil)
+	set, _, err := t.fetch(n+1, append(updateChunks, math.Copath(leaf, n+1)...), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -338,9 +353,9 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 	set.set(leaf, nil, value)
 	for i := 1; i < len(path); i++ {
 		x := path[i]
-		l, r := left(x), right(x, n+1)
+		l, r := math.Left(x), math.Right(x, n+1)
 
-		if level(x)%4 == 0 {
+		if math.Level(x)%4 == 0 {
 			intermediate := treeHash(set.get(l), set.get(r))
 			set.set(x, intermediate, parents[i-1])
 		} else {
@@ -351,7 +366,7 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 	// Calculate filtered list of parent values for the log entry.
 	filteredParents := make([][]byte, 0)
 	for i, val := range parents {
-		if !isFullSubtree(path[i+1], n+1) {
+		if !math.IsFullSubtree(path[i+1], n+1) {
 			filteredParents = append(filteredParents, val)
 		}
 	}
@@ -362,5 +377,50 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 	} else if n == 0 {
 		return value, nil
 	}
-	return set.get(root(n + 1)).hash, nil
+	return set.get(math.Root(n + 1)).hash, nil
 }
+
+// Parents returns a slice containing the height of each parent of the n-th
+// element added to a log.
+//
+// This information helps applications decide what additional data to store in
+// the parent nodes of the next Append operation.
+func Parents(n int) []int {
+	path := math.DirectPath(2*n, n+1)
+	heights := make([]int, len(path))
+	for i, x := range path {
+		heights[i] = math.Level(x)
+	}
+	return heights
+}
+
+// filteredParents returns the entries from `Parents` that correspond to
+// non-full subtrees.
+func filteredParents(n int) []int {
+	path := math.DirectPath(2*n, n+1)
+
+	out := make([]int, 0)
+	for _, id := range path {
+		if !math.IsFullSubtree(id, n+1) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// noLeaves returns `input` with all leaf nodes removed.
+func noLeaves(input []int) (output []int) {
+	for _, id := range input {
+		if !math.IsLeaf(id) {
+			output = append(output, id)
+		}
+	}
+	return
+}
+
+// byLevel implements sort.Interface on a slice of node ids, sorting by level.
+type byLevel []int
+
+func (bl byLevel) Len() int           { return len(bl) }
+func (bl byLevel) Less(i, j int) bool { return math.Level(bl[i]) < math.Level(bl[j]) }
+func (bl byLevel) Swap(i, j int)      { bl[i], bl[j] = bl[j], bl[i] }

@@ -8,7 +8,14 @@ import (
 	mrand "math/rand"
 
 	"github.com/JumpPrivacy/katie/db"
+	"github.com/JumpPrivacy/katie/tree/log/math"
 )
+
+func assert(ok bool) {
+	if !ok {
+		panic("Assertion failed.")
+	}
+}
 
 func random() []byte {
 	out := make([]byte, 32)
@@ -43,10 +50,10 @@ func TestInclusionProof(t *testing.T) {
 
 		// Check that the copath/intermediate values match as well.
 		if latest {
-			for i, id := range copath(2*x, n) {
+			for i, id := range math.Copath(2*x, n) {
 				assert(bytes.Equal(proof.Values[i], nodes[id]))
 			}
-			dpath := directPath(2*x, n)
+			dpath := math.DirectPath(2*x, n)
 			for i, id := range dpath[:len(dpath)-1] {
 				assert(bytes.Equal(proof.Intermediates[i], nodes[id]))
 			}
@@ -55,7 +62,7 @@ func TestInclusionProof(t *testing.T) {
 
 	var roots [][]byte
 	for i := 0; i < 2000; i++ {
-		path := directPath(2*i, i+1)
+		path := math.DirectPath(2*i, i+1)
 
 		// Generate new leaf and parent values.
 		leaf := random()
@@ -107,7 +114,7 @@ func TestConsistencyProof(t *testing.T) {
 
 	var roots [][]byte
 	for i := 0; i < 2000; i++ {
-		path := directPath(2*i, i+1)
+		path := math.DirectPath(2*i, i+1)
 
 		// Generate new leaf and parent values.
 		leaf := random()

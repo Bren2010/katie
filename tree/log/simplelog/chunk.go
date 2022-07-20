@@ -2,6 +2,8 @@ package simplelog
 
 import (
 	"fmt"
+
+	"github.com/JumpPrivacy/katie/tree/log/math"
 )
 
 // The simplelog tree implementation is designed to work with a standard
@@ -53,23 +55,23 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 	// to check it's correct: run with id = 7 and the output is [0, 1, ..., 14].
 	ids := make([]int, 15)
 	ids[7] = id
-	ids[3] = left(ids[7])
-	ids[1] = left(ids[3])
-	ids[0] = left(ids[1])
-	ids[2] = rightStep(ids[1])
-	ids[5] = rightStep(ids[3])
-	ids[4] = left(ids[5])
-	ids[6] = rightStep(ids[5])
-	ids[11] = rightStep(ids[7])
-	ids[9] = left(ids[11])
-	ids[8] = left(ids[9])
-	ids[10] = rightStep(ids[9])
-	ids[13] = rightStep(ids[11])
-	ids[12] = left(ids[13])
-	ids[14] = rightStep(ids[13])
+	ids[3] = math.Left(ids[7])
+	ids[1] = math.Left(ids[3])
+	ids[0] = math.Left(ids[1])
+	ids[2] = math.RightStep(ids[1])
+	ids[5] = math.RightStep(ids[3])
+	ids[4] = math.Left(ids[5])
+	ids[6] = math.RightStep(ids[5])
+	ids[11] = math.RightStep(ids[7])
+	ids[9] = math.Left(ids[11])
+	ids[8] = math.Left(ids[9])
+	ids[10] = math.RightStep(ids[9])
+	ids[13] = math.RightStep(ids[11])
+	ids[12] = math.Left(ids[13])
+	ids[14] = math.RightStep(ids[13])
 
 	// Parse the serialized data.
-	leafChunk := level(id) == 3
+	leafChunk := math.Level(id) == 3
 	nodes := make([]*nodeData, 0)
 
 	for len(data) > 0 {
@@ -87,7 +89,7 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 	}
 	for len(nodes) < 15 {
 		nodes = append(nodes, &nodeData{
-			leaf:  isLeaf(ids[len(nodes)]),
+			leaf:  math.IsLeaf(ids[len(nodes)]),
 			value: nil,
 		})
 	}
@@ -110,11 +112,11 @@ func (c *nodeChunk) findIndex(x int) int {
 // get returns the data of node x with the value populated.
 func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 	i := c.findIndex(x)
-	if isLeaf(x) || !c.nodes[i].isEmpty() {
+	if math.IsLeaf(x) || !c.nodes[i].isEmpty() {
 		return c.nodes[i]
 	}
 
-	l, r := left(x), right(x, n)
+	l, r := math.Left(x), math.Right(x, n)
 	c.nodes[i].value = treeHash(set.get(l), set.get(r))
 
 	return c.nodes[i]
@@ -123,14 +125,14 @@ func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 // set updates node x to contain the given value.
 func (c *nodeChunk) set(x int, value []byte) {
 	nd := &nodeData{
-		leaf:  isLeaf(x),
+		leaf:  math.IsLeaf(x),
 		value: value,
 	}
 
 	i := c.findIndex(x)
 	c.nodes[i] = nd
 	for i != 7 {
-		i = parentStep(i)
+		i = math.ParentStep(i)
 		c.nodes[i].value = nil
 	}
 }
@@ -184,7 +186,7 @@ func newChunkSet(n int, data map[int][]byte) (*chunkSet, error) {
 
 // get returns node x.
 func (s *chunkSet) get(x int) *nodeData {
-	c, ok := s.chunks[chunk(x)]
+	c, ok := s.chunks[math.Chunk(x)]
 	if !ok {
 		panic("requested hash is not available in this chunk set")
 	}
@@ -193,7 +195,7 @@ func (s *chunkSet) get(x int) *nodeData {
 
 // add initializes a new empty chunk for node x.
 func (s *chunkSet) add(x int) {
-	id := chunk(x)
+	id := math.Chunk(x)
 	if _, ok := s.chunks[id]; ok {
 		panic("cannot add chunk that already exists in set")
 	}
@@ -206,7 +208,7 @@ func (s *chunkSet) add(x int) {
 
 // set changes node x to the given value.
 func (s *chunkSet) set(x int, value []byte) {
-	id := chunk(x)
+	id := math.Chunk(x)
 	c, ok := s.chunks[id]
 	if !ok {
 		panic("requested hash is not available in this chunk set")

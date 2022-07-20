@@ -3,6 +3,8 @@ package log
 import (
 	"bytes"
 	"errors"
+
+	"github.com/JumpPrivacy/katie/tree/log/math"
 )
 
 // simpleRootCalculator is an alternative implementation of the root-calculation
@@ -120,7 +122,7 @@ func VerifyInclusionProof(x, n int, value []byte, proof *InclusionProof, root []
 	}
 
 	x = 2 * x
-	path := copath(x, n)
+	path := math.Copath(x, n)
 
 	pn := len(path)
 	pnl := len(noLeaves(path))
@@ -135,7 +137,7 @@ func VerifyInclusionProof(x, n int, value []byte, proof *InclusionProof, root []
 	proofNodes := make([]*nodeData, len(path))
 	j := 0
 	for i := 0; i < len(path); i++ {
-		leaf := isLeaf(path[i])
+		leaf := math.IsLeaf(path[i])
 
 		var h []byte
 		if !leaf {
@@ -182,7 +184,7 @@ func VerifyConsistencyProof(m, n int, proof *ConsistencyProof, mRoot, nRoot []by
 		}
 	}
 
-	ids := consistencyProof(m, n)
+	ids := math.ConsistencyProof(m, n)
 	calc := newSimpleRootCalculator()
 
 	if len(proof.Hashes) != len(noLeaves(ids)) || len(proof.Values) != len(ids) {
@@ -190,10 +192,10 @@ func VerifyConsistencyProof(m, n int, proof *ConsistencyProof, mRoot, nRoot []by
 	}
 
 	// Step 1: Verify that the consistency proof aligns with mRoot.
-	path := fullSubtrees(root(m), m)
+	path := math.FullSubtrees(math.Root(m), m)
 	if len(path) == 1 {
 		// m is a power of two so we don't need to verify anything.
-		calc.Insert(level(root(m)), mRoot, [][]byte{proof.IntermediatesM[0]})
+		calc.Insert(math.Level(math.Root(m)), mRoot, [][]byte{proof.IntermediatesM[0]})
 		if len(proof.IntermediatesM) != 1 {
 			return errors.New("malformed proof")
 		}
@@ -202,10 +204,10 @@ func VerifyConsistencyProof(m, n int, proof *ConsistencyProof, mRoot, nRoot []by
 			if ids[i] != path[i] {
 				return errors.New("unexpected error")
 			}
-			if isLeaf(path[i]) {
-				calc.Insert(level(path[i]), proof.Values[i], nil)
+			if math.IsLeaf(path[i]) {
+				calc.Insert(math.Level(path[i]), proof.Values[i], nil)
 			} else {
-				calc.Insert(level(path[i]), proof.Hashes[0], [][]byte{proof.Values[i]})
+				calc.Insert(math.Level(path[i]), proof.Hashes[0], [][]byte{proof.Values[i]})
 				proof.Hashes = proof.Hashes[1:]
 			}
 		}
@@ -226,10 +228,10 @@ func VerifyConsistencyProof(m, n int, proof *ConsistencyProof, mRoot, nRoot []by
 	}
 	proof.Intermediates = append(proof.Intermediates, nil)
 	for ; i < len(ids); i++ {
-		if isLeaf(ids[i]) {
-			proof.Intermediates = calc.Insert(level(ids[i]), proof.Values[i], proof.Intermediates)
+		if math.IsLeaf(ids[i]) {
+			proof.Intermediates = calc.Insert(math.Level(ids[i]), proof.Values[i], proof.Intermediates)
 		} else {
-			proof.Intermediates = calc.Insert(level(ids[i]), proof.Hashes[0], append([][]byte{proof.Values[i]}, proof.Intermediates...))
+			proof.Intermediates = calc.Insert(math.Level(ids[i]), proof.Hashes[0], append([][]byte{proof.Values[i]}, proof.Intermediates...))
 			proof.Hashes = proof.Hashes[1:]
 		}
 	}
