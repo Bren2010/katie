@@ -1,9 +1,10 @@
 package accumulator
 
 import (
+	"bytes"
 	"fmt"
 
-	"github.com/JumpPrivacy/katie/tree/log/db"
+	"github.com/JumpPrivacy/katie/db"
 	"github.com/JumpPrivacy/katie/tree/log/simplelog"
 )
 
@@ -41,13 +42,13 @@ func (t *Tree) Search(key []byte) (*SearchResult, error) {
 	pos := []int{0}
 	path := make([][]byte, 0)
 	for {
-		key := fmt.Sprintf("t%v", pos[len(pos)-1])
+		k := fmt.Sprintf("t%v", pos[len(pos)-1])
 
-		res, err := t.tx.BatchGet([]string{key})
+		res, err := t.tx.BatchGet([]string{k})
 		if err != nil {
 			return nil, err
 		}
-		raw, ok := res[key]
+		raw, ok := res[k]
 		if !ok {
 			return nil, fmt.Errorf("expected node was not found")
 		}
@@ -69,7 +70,7 @@ func (t *Tree) Search(key []byte) (*SearchResult, error) {
 			found = true
 			break
 		} else if cmp == 1 {
-			if leaf.right == 0 || left.right >= t.n {
+			if leaf.right == 0 || leaf.right >= t.n {
 				break
 			} else {
 				pos = append(pos, leaf.right)
@@ -77,7 +78,7 @@ func (t *Tree) Search(key []byte) (*SearchResult, error) {
 		}
 	}
 
-	proof, err := t.inner.GetBatch(pos)
+	proof, err := t.inner.GetBatch(pos, t.n)
 	if err != nil {
 		return nil, err
 	}
@@ -91,5 +92,5 @@ func (t *Tree) Search(key []byte) (*SearchResult, error) {
 // GetConsistencyProof returns a consistency proof between the current version
 // of this accumulator and a previous one that had `m` nodes.
 func (t *Tree) GetConsistencyProof(m int) ([][]byte, error) {
-	return t.inner.GetConsistency(m, t.n)
+	return t.inner.GetConsistencyProof(m, t.n)
 }
