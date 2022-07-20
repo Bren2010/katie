@@ -136,6 +136,21 @@ func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
 	return data[0], data[1:], nil
 }
 
+// GetBatch returns a batch proof for the given set of log entries.
+func (t *Tree) GetBatch(entries []int, n int) ([][]byte, error) {
+	if n == 0 {
+		return nil, fmt.Errorf("empty tree")
+	} else if len(entries) == 0 {
+		return nil, nil
+	}
+	for _, x := range entries {
+		if x >= n {
+			return nil, fmt.Errorf("can not get leaf beyond right edge of tree")
+		}
+	}
+	return t.fetchSpecific(n, math.BatchCopath(entries, n))
+}
+
 // GetConsistencyProof returns a proof that the current log with n elements is
 // an extension of a previous log root with m elements, 0 < m < n.
 func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {

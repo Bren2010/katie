@@ -44,5 +44,8 @@ func TestMath(t *testing.T) {
 	assert(slicesEq(DirectPath(4, 8), []int{5, 3, 7}))
 	assert(slicesEq(Copath(4, 8), []int{6, 1, 11}))
 
+	assert(slicesEq(BatchCopath([]int{0, 2, 3, 4}, 8), []int{2, 10, 13}))
+	assert(slicesEq(BatchCopath([]int{0, 2, 3}, 8), []int{2, 11}))
+
 	assert(slicesEq(FullSubtrees(7, 6), []int{3, 9}))
 }
