@@ -42,7 +42,7 @@ func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 		dedup[math.Chunk(id)] = struct{}{}
 	}
 	strs := make([]string, 0, len(dedup))
-	for id, _ := range dedup {
+	for id := range dedup {
 		strs = append(strs, strconv.Itoa(id))
 	}
 
@@ -204,7 +204,7 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 	}
 
 	// Add any new chunks to the set and set the correct hashes everywhere.
-	for id, _ := range createChunks {
+	for id := range createChunks {
 		set.add(id)
 	}
 

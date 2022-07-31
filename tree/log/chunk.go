@@ -219,7 +219,7 @@ func (s *chunkSet) set(x int, value []byte) {
 
 func (s *chunkSet) marshal() map[int][]byte {
 	out := make(map[int][]byte, 0)
-	for id, _ := range s.modified {
+	for id := range s.modified {
 		out[id] = s.chunks[id].marshal()
 	}
 	return out
