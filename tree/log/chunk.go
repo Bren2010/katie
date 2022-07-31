@@ -15,12 +15,6 @@ import (
 // stored value of all nodes is stored. If the leaf of a subtree represents an
 // intermediate node in the context of the full tree, then the hash of the
 // subtree rooted at that node is also stored.
-//
-// The implementation also stores "log entries", one for each new element added
-// to the log, containing the values of any non-full subtrees between the leaf
-// and the global root. Log entries help recompute how the tree looked in past
-// revisions, since non-full subtrees may have their value overridden by the
-// addition of later entries.
 
 // nodeData is the primary wrapper struct for representing a single node (leaf
 // or intermediate) in the tree.

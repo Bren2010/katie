@@ -34,10 +34,9 @@ type InclusionProof struct {
 // ConsistencyProof wraps a proof that one version of the log is an extension of
 // a past version of the log.
 type ConsistencyProof struct {
-	Hashes         [][]byte `json:"hashes"`  // Hashes along consistency path.
-	Values         [][]byte `json:"values"`  // Values along consistency path, for more recent revision.
-	Intermediates  [][]byte `json:"inter"`   // Intermediate values for computing more recent revision.
-	IntermediatesM [][]byte `json:"inter-m"` // Intermediate values for computing less recent revision.
+	Hashes        [][]byte `json:"hashes"` // Hashes along consistency path.
+	Values        [][]byte `json:"values"` // Values along consistency path, for more recent revision.
+	Intermediates [][]byte `json:"inter"`  // Intermediate values for computing more recent revision.
 }
 
 // Tree is an implementation of a Merkle tree where all new data is added to the
@@ -52,69 +51,46 @@ func NewTree(tx db.KvStore) *Tree {
 
 // fetch loads the chunks for the requested nodes from the database. It returns
 // an error if not all chunks are found.
-func (t *Tree) fetch(n int, nodes, logs []int) (*chunkSet, map[int][][]byte, error) {
+func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 	dedup := make(map[int]struct{})
 	for _, id := range nodes {
 		dedup[math.Chunk(id)] = struct{}{}
 	}
-	strs := make([]string, 0, len(dedup)+len(logs))
+	strs := make([]string, 0, len(dedup))
 	for id, _ := range dedup {
 		strs = append(strs, strconv.Itoa(id))
-	}
-	for _, id := range logs {
-		strs = append(strs, "p"+strconv.Itoa(id))
 	}
 
 	data, err := t.tx.BatchGet(strs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, id := range strs {
 		if _, ok := data[id]; !ok {
-			return nil, nil, fmt.Errorf("not all expected data was found in the database")
+			return nil, fmt.Errorf("not all expected data was found in the database")
 		}
-	}
-
-	// Parse log entries.
-	logEntries := make(map[int][][]byte)
-	for _, id := range logs {
-		raw := data["p"+strconv.Itoa(id)]
-		expected := len(filteredParents(id))
-		if len(raw) != 32*expected {
-			return nil, nil, fmt.Errorf("log entry is malformed")
-		}
-		parsed := make([][]byte, 0, expected)
-		for len(raw) > 0 {
-			parsed = append(parsed, raw[:32])
-			raw = raw[32:]
-		}
-		logEntries[id] = parsed
 	}
 
 	// Parse chunk set.
-	dataInt := make(map[int][]byte, len(data)-len(logs))
+	dataInt := make(map[int][]byte, len(data))
 	for idStr, raw := range data {
-		if idStr[0] == 'p' {
-			continue
-		}
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		dataInt[id] = raw
 	}
 	set, err := newChunkSet(n, dataInt)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return set, logEntries, nil
+	return set, nil
 }
 
-// fetchSpecific returns the values for the nodes given in `values`, the hashes
-// for the nodes given in `hashes`, and the parsed log entry for entry
-// `logEntry` (or nil if `logEntry` is -1), in that order.
-func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byte, [][]byte, [][]byte, error) {
+// fetchSpecific returns the values for the nodes given in `values` and the
+// hashes for the nodes given in `hashes`, in that order.
+func (t *Tree) fetchSpecific(n int, values, hashes []int) ([][]byte, [][]byte, error) {
 	lookup := make([]int, len(values))
 	copy(lookup, values) // Add the nodes that we need values for.
 
@@ -130,18 +106,11 @@ func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byt
 		}
 	}
 
-	// Determine the set of log entries we need to lookup.
-	entries := []int{n - 1}
-	if logEntry != -1 {
-		entries = append(entries, logEntry)
-	}
-
 	// Load everything from the database in one roundtrip.
-	set, logs, err := t.fetch(n, lookup, entries)
+	set, err := t.fetch(n, lookup)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	parents := logs[n-1]
 
 	// Extract the values we want to return.
 	rightValues := make(map[int][]byte)
@@ -167,7 +136,7 @@ func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byt
 				nd = &nodeData{
 					leaf:  false,
 					hash:  treeHash(set.get(subtrees[i]), nd),
-					value: parents[len(subtrees)-2-i],
+					value: make([]byte, 32),
 				}
 			}
 			hashesOut[i] = nd.hash
@@ -176,13 +145,7 @@ func (t *Tree) fetchSpecific(n int, values, hashes []int, logEntry int) ([][]byt
 		}
 	}
 
-	// Get the log entry we want to return.
-	var logOut [][]byte
-	if logEntry != -1 {
-		logOut = logs[logEntry]
-	}
-
-	return valuesOut, hashesOut, logOut, nil
+	return valuesOut, hashesOut, nil
 }
 
 // Get returns the value of log entry number `x` along with its proof of
@@ -380,18 +343,27 @@ func (t *Tree) Append(n int, value []byte, parents [][]byte) ([]byte, error) {
 	return set.get(math.Root(n + 1)).hash, nil
 }
 
+func fullParents(n int) []int {
+	out := make([]int, 0)
+	for _, x := range math.DirectPath(2*n, n+1) {
+		if math.IsFullSubtree(x, n+1) {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 // Parents returns a slice containing the height of each parent of the n-th
 // element added to a log.
 //
 // This information helps applications decide what additional data to store in
 // the parent nodes of the next Append operation.
 func Parents(n int) []int {
-	path := math.DirectPath(2*n, n+1)
-	heights := make([]int, len(path))
-	for i, x := range path {
-		heights[i] = math.Level(x)
+	out := make([]int, 0)
+	for _, x := range fullParents(n) {
+		out = append(out, math.Level(x))
 	}
-	return heights
+	return out
 }
 
 // filteredParents returns the entries from `Parents` that correspond to
