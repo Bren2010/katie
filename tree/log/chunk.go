@@ -9,55 +9,37 @@ import (
 // The log tree implementation is designed to work with a standard key-value
 // database. The tree is stored in the database in "chunks", which are
 // 8-node-wide (or 4-node-deep) subtrees. Chunks are addressed by the id of the
-// root node in the chunk.
-//
-// Each node is serialized individually and stored concatenated. The most recent
-// stored value of all nodes is stored. If the leaf of a subtree represents an
-// intermediate node in the context of the full tree, then the hash of the
-// subtree rooted at that node is also stored.
+// root node in the chunk. Only the leaf values of each chunk are stored, which
+// in the context of the full tree is either a leaf or a cached intermediate
+// hash. These values are stored concatenated.
 
 // nodeData is the primary wrapper struct for representing a single node (leaf
 // or intermediate) in the tree.
 type nodeData struct {
 	leaf  bool
-	hash  []byte
 	value []byte
 }
 
 func (nd *nodeData) validate() error {
-	if nd.leaf {
-		if len(nd.hash) != 0 {
-			return fmt.Errorf("leaf hash is wrong length: %v", len(nd.hash))
-		} else if len(nd.value) != 32 {
-			return fmt.Errorf("leaf value is wrong length: %v", len(nd.value))
-		}
-	} else {
-		if len(nd.hash) != 32 {
-			return fmt.Errorf("parent hash is wrong length: %v", len(nd.hash))
-		} else if len(nd.value) != 32 {
-			return fmt.Errorf("parent value is wrong length: %v", len(nd.value))
-		}
+	if len(nd.value) != 32 {
+		return fmt.Errorf("node value is wrong length: %v", len(nd.value))
 	}
 	return nil
 }
 
 func (nd *nodeData) marshal() []byte {
+	out := make([]byte, 33)
 	if nd.leaf {
-		out := make([]byte, 33)
 		out[0] = 0
-		copy(out[1:33], nd.value)
-		return out
 	} else {
-		out := make([]byte, 65)
 		out[0] = 1
-		copy(out[1:33], nd.hash)
-		copy(out[33:65], nd.value)
-		return out
 	}
+	copy(out[1:33], nd.value)
+	return out
 }
 
 func (nd *nodeData) isEmpty() bool {
-	return nd.hash == nil && nd.value == nil
+	return nd.value == nil
 }
 
 // nodeChunk is a helper struct that handles computing/caching the intermediate
@@ -91,39 +73,16 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 	// Parse the serialized data.
 	leafChunk := math.Level(id) == 3
 	nodes := make([]*nodeData, 0)
-	nodeSize := 64
-	if leafChunk {
-		nodeSize = 32
-	}
 
 	for len(data) > 0 {
-		if len(data) < nodeSize {
+		if len(data) < 32 {
 			return nil, fmt.Errorf("unable to parse chunk")
 		}
-		if leafChunk {
-			nodes = append(nodes, &nodeData{
-				leaf:  true,
-				hash:  nil,
-				value: data[:32],
-			})
-			data = data[32:]
-		} else {
-			nodes = append(nodes, &nodeData{
-				leaf:  false,
-				hash:  data[:32],
-				value: data[32:64],
-			})
-			data = data[64:]
-		}
-
-		if len(data) == 0 {
-			break
-		} else if len(data) < 32 {
-			return nil, fmt.Errorf("unable to parse chunk")
+		if len(nodes) > 0 {
+			nodes = append(nodes, &nodeData{leaf: false, value: nil})
 		}
 		nodes = append(nodes, &nodeData{
-			leaf:  false,
-			hash:  nil,
+			leaf:  leafChunk,
 			value: data[:32],
 		})
 		data = data[32:]
@@ -131,7 +90,6 @@ func newChunk(id int, data []byte) (*nodeChunk, error) {
 	for len(nodes) < 15 {
 		nodes = append(nodes, &nodeData{
 			leaf:  math.IsLeaf(ids[len(nodes)]),
-			hash:  nil,
 			value: nil,
 		})
 	}
@@ -151,30 +109,23 @@ func (c *nodeChunk) findIndex(x int) int {
 	panic("requested hash not available in this chunk")
 }
 
-// get returns the data of node x with the hash populated.
+// get returns the data of node x with the value populated.
 func (c *nodeChunk) get(x, n int, set *chunkSet) *nodeData {
 	i := c.findIndex(x)
-	if math.IsLeaf(x) || c.nodes[i].hash != nil {
+	if math.IsLeaf(x) || !c.nodes[i].isEmpty() {
 		return c.nodes[i]
 	}
 
 	l, r := math.Left(x), math.Right(x, n)
-	c.nodes[i].hash = treeHash(set.get(l), set.get(r))
+	c.nodes[i].value = treeHash(set.get(l), set.get(r))
 
 	return c.nodes[i]
 }
 
-// getValue returns just the value of node x.
-func (c *nodeChunk) getValue(x int) []byte {
-	i := c.findIndex(x)
-	return c.nodes[i].value
-}
-
-// set updates node x to contain the given hash and value.
-func (c *nodeChunk) set(x int, hash, value []byte) {
+// set updates node x to contain the given value.
+func (c *nodeChunk) set(x int, value []byte) {
 	nd := &nodeData{
 		leaf:  math.IsLeaf(x),
-		hash:  hash,
 		value: value,
 	}
 
@@ -182,7 +133,7 @@ func (c *nodeChunk) set(x int, hash, value []byte) {
 	c.nodes[i] = nd
 	for i != 7 {
 		i = math.ParentStep(i)
-		c.nodes[i].hash = nil
+		c.nodes[i].value = nil
 	}
 }
 
@@ -190,14 +141,9 @@ func (c *nodeChunk) set(x int, hash, value []byte) {
 func (c *nodeChunk) marshal() []byte {
 	out := make([]byte, 0)
 
-	for i := 0; i < len(c.nodes); i++ {
+	for i := 0; i < len(c.nodes); i += 2 {
 		if !c.nodes[i].isEmpty() {
-			if i%2 == 0 {
-				out = append(out, c.nodes[i].hash...)
-				out = append(out, c.nodes[i].value...)
-			} else {
-				out = append(out, c.nodes[i].value...)
-			}
+			out = append(out, c.nodes[i].value...)
 			continue
 		}
 
@@ -247,15 +193,6 @@ func (s *chunkSet) get(x int) *nodeData {
 	return c.get(x, s.n, s)
 }
 
-// getValue returns just the value of node x.
-func (s *chunkSet) getValue(x int) []byte {
-	c, ok := s.chunks[math.Chunk(x)]
-	if !ok {
-		panic("requested hash is not available in this chunk set")
-	}
-	return c.getValue(x)
-}
-
 // add initializes a new empty chunk for node x.
 func (s *chunkSet) add(x int) {
 	id := math.Chunk(x)
@@ -270,13 +207,13 @@ func (s *chunkSet) add(x int) {
 }
 
 // set changes node x to the given value.
-func (s *chunkSet) set(x int, hash, value []byte) {
+func (s *chunkSet) set(x int, value []byte) {
 	id := math.Chunk(x)
 	c, ok := s.chunks[id]
 	if !ok {
 		panic("requested hash is not available in this chunk set")
 	}
-	c.set(x, hash, value)
+	c.set(x, value)
 	s.modified[id] = struct{}{}
 }
 
