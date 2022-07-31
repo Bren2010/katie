@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	mrand "math/rand"
-
-	"github.com/JumpPrivacy/katie/db"
 )
 
 func assert(ok bool) {
@@ -30,8 +28,37 @@ func dup(in []byte) []byte {
 	return out
 }
 
+// memoryStore implements db.LogStore over an in-memory map.
+type memoryStore struct {
+	Data map[int][]byte
+}
+
+func (m *memoryStore) BatchGet(keys []int) (map[int][]byte, error) {
+	out := make(map[int][]byte)
+
+	for _, key := range keys {
+		if d, ok := m.Data[key]; ok {
+			out[key] = d
+		}
+	}
+
+	return out, nil
+}
+
+func (m *memoryStore) BatchPut(data map[int][]byte) error {
+	if m.Data == nil {
+		m.Data = make(map[int][]byte)
+	}
+	for key, d := range data {
+		buf := make([]byte, len(d))
+		copy(buf, d)
+		m.Data[key] = buf
+	}
+	return nil
+}
+
 func TestInclusionProof(t *testing.T) {
-	tree := NewTree(db.NewMemoryKv())
+	tree := NewTree(new(memoryStore))
 	calc := newSimpleRootCalculator()
 	var (
 		nodes [][]byte
@@ -84,7 +111,7 @@ func TestInclusionProof(t *testing.T) {
 }
 
 func TestConsistencyProof(t *testing.T) {
-	tree := NewTree(db.NewMemoryKv())
+	tree := NewTree(new(memoryStore))
 
 	var roots [][]byte
 	for i := 0; i < 2000; i++ {

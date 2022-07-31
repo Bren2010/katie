@@ -5,7 +5,6 @@ package log
 import (
 	"crypto/sha256"
 	"fmt"
-	"strconv"
 
 	"github.com/JumpPrivacy/katie/db"
 	"github.com/JumpPrivacy/katie/tree/log/math"
@@ -27,10 +26,10 @@ func treeHash(left, right *nodeData) []byte {
 // Tree is an implementation of a log-based Merkle tree where all new data is
 // added as the right-most leaf.
 type Tree struct {
-	tx db.KvStore
+	tx db.LogStore
 }
 
-func NewTree(tx db.KvStore) *Tree {
+func NewTree(tx db.LogStore) *Tree {
 	return &Tree{tx: tx}
 }
 
@@ -41,35 +40,26 @@ func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 	for _, id := range nodes {
 		dedup[math.Chunk(id)] = struct{}{}
 	}
-	strs := make([]string, 0, len(dedup))
+	ids := make([]int, 0, len(dedup))
 	for id := range dedup {
-		strs = append(strs, strconv.Itoa(id))
+		ids = append(ids, id)
 	}
 
-	data, err := t.tx.BatchGet(strs)
+	data, err := t.tx.BatchGet(ids)
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range strs {
+	for _, id := range ids {
 		if _, ok := data[id]; !ok {
 			return nil, fmt.Errorf("not all expected data was found in the database")
 		}
 	}
 
 	// Parse chunk set.
-	dataInt := make(map[int][]byte, len(data))
-	for idStr, raw := range data {
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			return nil, err
-		}
-		dataInt[id] = raw
-	}
-	set, err := newChunkSet(n, dataInt)
+	set, err := newChunkSet(n, data)
 	if err != nil {
 		return nil, err
 	}
-
 	return set, nil
 }
 
@@ -219,12 +209,7 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 
 	// Commit to database and return new root.
 	data := set.marshal()
-
-	out := make(map[string][]byte, len(data))
-	for id, raw := range data {
-		out[strconv.Itoa(id)] = raw
-	}
-	if err := t.tx.BatchPut(out); err != nil {
+	if err := t.tx.BatchPut(data); err != nil {
 		return nil, err
 	}
 
