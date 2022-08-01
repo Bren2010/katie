@@ -6,3 +6,10 @@ type LogStore interface {
 	BatchGet(keys []int) (data map[int][]byte, err error)
 	BatchPut(data map[int][]byte) error
 }
+
+// PrefixStore is the interface a prefix tree uses to communicate with its
+// database.
+type PrefixStore interface {
+	Get(key uint64) ([]byte, error)
+	Set(key uint64, raw []byte) error
+}
