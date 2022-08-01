@@ -50,7 +50,7 @@ func TestSearchInclusionProof(t *testing.T) {
 		err  error
 	)
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 200; i++ {
 		key := random()
 		leaves = append(leaves, key)
 		root, _, err = tree.Insert(uint64(len(leaves)-1), key)

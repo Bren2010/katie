@@ -137,11 +137,11 @@ func (t *Tree) search(version uint64, key [32]byte) (*logEntry, error) {
 				path = append(path, entry.path[offset])
 				offset += 1
 			} else {
+				path = append(path, entry.rollup(ptr, offset+1))
 				switch nd := entry.path[offset].(type) {
 				case leafNode:
 					return &logEntry{&nd, path}, nil
 				case parentNode:
-					path = append(path, entry.rollup(ptr, offset+1))
 					ptr, offset = nd.ptr, nd.offset
 				case emptyNode:
 					return &logEntry{nil, path}, nil
@@ -157,7 +157,9 @@ func (t *Tree) search(version uint64, key [32]byte) (*logEntry, error) {
 // Search executes a search for `key` in the requested version of the tree,
 // returning either a proof of inclusion or proof of non-inclusion.
 func (t *Tree) Search(version uint64, key []byte) (*SearchResult, error) {
-	if len(key) != 32 {
+	if version == 0 {
+		return nil, errors.New("tree is empty")
+	} else if len(key) != 32 {
 		return nil, errors.New("key length must be 32 bytes")
 	}
 	key32 := [32]byte{}
