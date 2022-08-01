@@ -156,29 +156,24 @@ func (t *Tree) search(version uint64, key [32]byte) (*logEntry, error) {
 
 // Search executes a search for `key` in the requested version of the tree,
 // returning either a proof of inclusion or proof of non-inclusion.
-func (t *Tree) Search(version uint64, key []byte) ([]byte, *SearchResult, error) {
+func (t *Tree) Search(version uint64, key []byte) (*SearchResult, error) {
 	if len(key) != 32 {
-		return nil, nil, errors.New("key length must be 32 bytes")
+		return nil, errors.New("key length must be 32 bytes")
 	}
 	key32 := [32]byte{}
 	copy(key32[:], key)
 	entry, err := t.search(version, key32)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+
 	proof := entry.proof()
-	root := entry.root()
-
-	var sr *SearchResult
 	if entry.leaf == nil {
-		sr = &SearchResult{nonInclusionParent{proof: proof}}
+		return &SearchResult{nonInclusionParent{proof: proof}}, nil
 	} else if entry.leaf.key != key32 {
-		sr = &SearchResult{nonInclusionLeaf{proof, entry.leaf.key[:], entry.leaf.ctr}}
-	} else {
-		sr = &SearchResult{inclusionProof{proof, entry.leaf.ctr}}
+		return &SearchResult{nonInclusionLeaf{proof, entry.leaf.key[:], entry.leaf.ctr}}, nil
 	}
-
-	return root[:], sr, nil
+	return &SearchResult{inclusionProof{proof, entry.leaf.ctr}}, nil
 }
 
 // Insert adds a new key to the tree or increments its counter if it already
@@ -208,12 +203,8 @@ func (t *Tree) Insert(version uint64, key []byte) ([]byte, *SearchResult, error)
 			for getBit(key32, len(res.path)) == getBit(res.leaf.key, len(res.path)) {
 				res.path = append(res.path, emptyNode{})
 			}
-			if getBit(key32, len(res.path)) {
-				res.path = append(res.path, leafNode{key32, 0})
-			} else {
-				res.path = append(res.path, *res.leaf)
-				res.leaf = &leafNode{key32, 0}
-			}
+			res.path = append(res.path, *res.leaf)
+			res.leaf = &leafNode{key32, 0}
 		} else {
 			res.leaf.ctr += 1
 		}
@@ -223,7 +214,7 @@ func (t *Tree) Insert(version uint64, key []byte) ([]byte, *SearchResult, error)
 	raw, err := entry.Marshal()
 	if err != nil {
 		return nil, nil, err
-	} else if err := t.tx.Set(version, raw); err != nil {
+	} else if err := t.tx.Put(version, raw); err != nil {
 		return nil, nil, err
 	}
 

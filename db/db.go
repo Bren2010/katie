@@ -11,5 +11,5 @@ type LogStore interface {
 // database.
 type PrefixStore interface {
 	Get(key uint64) ([]byte, error)
-	Set(key uint64, raw []byte) error
+	Put(key uint64, data []byte) error
 }

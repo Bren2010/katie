@@ -176,7 +176,7 @@ func (le *logEntry) proof() [][]byte {
 
 func (le *logEntry) rollup(ptr uint64, offset uint8) interface{} {
 	if len(le.path) <= int(offset) {
-		return le.leaf
+		return *le.leaf
 	}
 
 	acc := leafHash(le.leaf)
