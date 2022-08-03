@@ -53,7 +53,7 @@ var (
 // signs it.  The user uploads the signed commitment along with this key and
 // the associated data to the server in order for the server to reveal the
 // associated data to senders. This commitment scheme keeps the associated data
-// from leeking to anyone that has not explicitly requested it from the server.
+// from leaking to anyone that has not explicitly requested it from the server.
 func GenCommitmentKey() ([]byte, error) {
 	// Generate commitment nonce.
 	nonce := make([]byte, commitmentKeyLen)
