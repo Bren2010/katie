@@ -232,5 +232,5 @@ func TestInsert(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert(len(res.inner.(inclusionProof).proof) == 129)
-	assert(res.inner.(inclusionProof).value == 1)
+	assert(res.inner.(inclusionProof).counter == 1)
 }

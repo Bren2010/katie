@@ -30,11 +30,26 @@ func (sr *SearchResult) Inclusion() bool {
 	}
 }
 
+// Counter returns the value of the counter of an inclusion proof, or -1 for a
+// non-inclusion proof.
+func (sr *SearchResult) Counter() int {
+	switch inner := sr.inner.(type) {
+	case nonInclusionParent:
+		return -1
+	case nonInclusionLeaf:
+		return -1
+	case inclusionProof:
+		return int(inner.counter)
+	default:
+		panic("unreachable")
+	}
+}
+
 type searchResultSchema struct {
-	Typ   string   `json:"type"`
-	Proof [][]byte `json:"proof"`
-	Key   []byte   `json:"key,omitempty"`
-	Value *uint32  `json:"value,omitempty"`
+	Typ     string   `json:"type"`
+	Proof   [][]byte `json:"proof"`
+	Key     []byte   `json:"key,omitempty"`
+	Counter *uint32  `json:"counter,omitempty"`
 }
 
 func (sr *SearchResult) MarshalJSON() ([]byte, error) {
@@ -46,16 +61,16 @@ func (sr *SearchResult) MarshalJSON() ([]byte, error) {
 		})
 	case nonInclusionLeaf:
 		return json.Marshal(searchResultSchema{
-			Typ:   "non-inclusion-leaf",
-			Proof: inner.proof,
-			Key:   inner.key,
-			Value: &inner.value,
+			Typ:     "non-inclusion-leaf",
+			Proof:   inner.proof,
+			Key:     inner.key,
+			Counter: &inner.counter,
 		})
 	case inclusionProof:
 		return json.Marshal(searchResultSchema{
-			Typ:   "inclusion",
-			Proof: inner.proof,
-			Value: &inner.value,
+			Typ:     "inclusion",
+			Proof:   inner.proof,
+			Counter: &inner.counter,
 		})
 	default:
 		panic("unreachable")
@@ -66,7 +81,7 @@ func (sr *SearchResult) UnmarshalJSON(b []byte) error {
 	val := searchResultSchema{}
 	if err := json.Unmarshal(b, &val); err != nil {
 		return err
-	} else if val.Typ != "non-inclusion-parent" && val.Value == nil {
+	} else if val.Typ != "non-inclusion-parent" && val.Counter == nil {
 		return errors.New("malformed search result")
 	}
 
@@ -74,9 +89,9 @@ func (sr *SearchResult) UnmarshalJSON(b []byte) error {
 	case "non-inclusion-parent":
 		sr.inner = nonInclusionParent{proof: val.Proof}
 	case "non-inclusion-leaf":
-		sr.inner = nonInclusionLeaf{proof: val.Proof, key: val.Key, value: *val.Value}
+		sr.inner = nonInclusionLeaf{proof: val.Proof, key: val.Key, counter: *val.Counter}
 	case "inclusion":
-		sr.inner = inclusionProof{proof: val.Proof, value: *val.Value}
+		sr.inner = inclusionProof{proof: val.Proof, counter: *val.Counter}
 	default:
 		return errors.New("unable to parse search result")
 	}
@@ -93,15 +108,15 @@ type nonInclusionParent struct {
 // nonInclusionLeaf is a proof of non-inclusion based on showing a leaf node for
 // a different key where the search path would normally proceed.
 type nonInclusionLeaf struct {
-	proof [][]byte
-	key   []byte
-	value uint32
+	proof   [][]byte
+	key     []byte
+	counter uint32
 }
 
 // inclusionProof is a proof of inclusion.
 type inclusionProof struct {
-	proof [][]byte
-	value uint32
+	proof   [][]byte
+	counter uint32
 }
 
 // Tree is the high-level implementation of the Merkle prefix tree, backed by a

@@ -7,7 +7,7 @@ import (
 
 type idCtrPair struct {
 	id  uint64
-	ctr uint32
+	ctr int
 }
 
 type idCtrSlice []idCtrPair
@@ -49,7 +49,7 @@ func (pg *proofGuide) done() (bool, error) {
 	sort.Sort(pg.sorted)
 
 	// Check that the list of counters is monotonic.
-	last := uint32(0)
+	last := 0
 	for i := 0; i < len(pg.sorted); i++ {
 		if pg.sorted[i].ctr < last {
 			return false, errors.New("set of counters given is not monotonic")
@@ -64,7 +64,9 @@ func (pg *proofGuide) done() (bool, error) {
 	}
 
 	// Determine the next id to check.
-	if smallest == 0 {
+	if pg.sorted[smallest].ctr == -1 {
+		return true, nil
+	} else if smallest == 0 {
 		if pg.sorted[0].id == 0 {
 			return true, nil
 		}
@@ -82,15 +84,23 @@ func (pg *proofGuide) done() (bool, error) {
 func (pg *proofGuide) next() uint64 { return pg.ids[len(pg.sorted)] }
 
 // insert adds an id-counter pair to the guide.
-func (pg *proofGuide) insert(id uint64, ctr uint32) {
+func (pg *proofGuide) insert(id uint64, ctr int) {
 	pg.sorted = append(pg.sorted, idCtrPair{id, ctr})
 }
 
-// final returns the id that represents the final search result.
-func (pg *proofGuide) final() uint64 {
+// final returns the index that represents the final search result.
+func (pg *proofGuide) final() int {
 	smallest := len(pg.sorted) - 1
 	for smallest > 0 && pg.sorted[smallest-1].ctr == pg.sorted[smallest].ctr {
 		smallest--
 	}
-	return pg.sorted[smallest].id
+	if pg.sorted[smallest].ctr == -1 {
+		return -1
+	}
+	for i := 0; i < len(pg.ids); i++ {
+		if pg.ids[i] == pg.sorted[smallest].id {
+			return i
+		}
+	}
+	panic("unexpected error")
 }

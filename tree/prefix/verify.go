@@ -30,7 +30,7 @@ func verifyProof(root, key, value [32]byte, proof [][]byte) error {
 // verifyInclusionProof checks that `res`, which the output of search, is a
 // valid inclusion proof for `key` in a tree with the given root.
 func verifyInclusionProof(root, key [32]byte, res inclusionProof) error {
-	leaf := leafHash(&leafNode{key, res.value})
+	leaf := leafHash(&leafNode{key, res.counter})
 	return verifyProof(root, key, leaf, res.proof)
 }
 
@@ -46,7 +46,7 @@ func verifyNonInclusionLeafProof(root, key [32]byte, res nonInclusionLeaf) error
 	if key == key32 {
 		return errors.New("non-inclusion-leaf proof given but keys match")
 	}
-	return verifyProof(root, key, leafHash(&leafNode{key32, res.value}), res.proof)
+	return verifyProof(root, key, leafHash(&leafNode{key32, res.counter}), res.proof)
 }
 
 // verifyNonInclusionParentProof checks that `res`, which the output of search,

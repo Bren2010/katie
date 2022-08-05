@@ -31,11 +31,26 @@ type VrfOutput struct {
 	Proof []byte `json:"proof"`
 }
 
-// SearchResult is the output from executing a search in the tree, containing a
+// SearchStep is the output of one step of a binary search through the log.
+type SearchStep struct {
+	Prefix     *prefix.SearchResult `json:"prefix"`
+	Commitment []byte               `json:"commitment"`
+	Log        [][]byte             `json:"log"`
+}
+
+// SearchValue is the account data returned by a search, if any.
+type SearchValue struct {
+	Opening []byte `json:"opening"`
+	Value   []byte `json:"value"`
+}
+
+// SearchResult is the output from executing a search in the tree, creating a
 // cryptographic proof of inclusion or non-inclusion.
 type SearchResult struct {
-	Root *db.TransparencyTreeRoot `json:"root"`
-	Vrf  *VrfOutput               `json:"vrf"`
+	Root   *db.TransparencyTreeRoot `json:"root"`
+	Vrf    *VrfOutput               `json:"vrf"`
+	Search []SearchStep             `json:"search"`
+	Value  *SearchValue             `json:"value,omitempty"`
 }
 
 type rootTbs struct {
@@ -79,8 +94,56 @@ func (t *Tree) GetConsistency(m, n int) ([][]byte, error) {
 	return log.NewTree(t.tx.LogStore()).GetConsistencyProof(m, n)
 }
 
+// Search searches for `key` in the tree and returns a proof of inclusion or
+// non-inclusion.
 func (t *Tree) Search(key string) (*SearchResult, error) {
+	var searchOutput []SearchStep
+	var journals [][]byte
+
+	logTree := log.NewTree(t.tx.LogStore())
+	prefixTree := prefix.NewTree(t.tx.PrefixStore())
 	index, vrfProof := t.vrfKey.Evaluate([]byte(key))
+
+	guide := newProofGuide(t.latest.TreeSize)
+	for {
+		done, err := guide.done()
+		if err != nil {
+			return nil, err
+		} else if done {
+			break
+		}
+		id := guide.next()
+
+		prefixProof, err := prefixTree.Search(id+1, index[:])
+		if err != nil {
+			return nil, err
+		}
+		journal, err := t.tx.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		_, logProof, err := logTree.Get(int(id), int(t.latest.TreeSize))
+		if err != nil {
+			return nil, err
+		}
+
+		guide.insert(id, prefixProof.Counter())
+
+		searchOutput = append(searchOutput, SearchStep{
+			Prefix:     prefixProof,
+			Commitment: journal[0:32],
+			Log:        logProof,
+		})
+		journals = append(journals, journal)
+	}
+
+	var value *SearchValue
+	if i := guide.final(); i != -1 {
+		value = &SearchValue{
+			Opening: journals[i][32:48],
+			Value:   journals[i][48:],
+		}
+	}
 
 	return &SearchResult{
 		Root: t.latest,
@@ -88,6 +151,8 @@ func (t *Tree) Search(key string) (*SearchResult, error) {
 			Index: index[:],
 			Proof: vrfProof,
 		},
+		Search: searchOutput,
+		Value:  value,
 	}, nil
 }
 
@@ -109,19 +174,21 @@ func (t *Tree) Insert(key string, value []byte) (*SearchResult, error) {
 		return nil, err
 	}
 
-	// Produce the leaf value that will be added to the log.
+	// Store the nonce and account data.
+	journal := new(bytes.Buffer)
+	journal.Write(commitment)
+	journal.Write(nonce)
+	journal.Write(value)
+	if err := t.tx.Set(t.latest.TreeSize, journal.Bytes()); err != nil {
+		return nil, err
+	}
+
+	// Add a new leaf to the log tree.
 	leaf := new(bytes.Buffer)
 	leaf.Write(proot)
 	leaf.Write(commitment)
-	leaf.Write(nonce)
-	buf := leaf.Bytes()
+	h := leafHash(leaf.Bytes())
 
-	h := leafHash(buf[:len(proot)+len(commitment)])
-
-	// Store the leaf and insert its hash into the log.
-	if err := t.tx.Set(t.latest.TreeSize, buf); err != nil {
-		return nil, err
-	}
 	root, err := log.NewTree(t.tx.LogStore()).Append(int(t.latest.TreeSize), h)
 	if err != nil {
 		return nil, err
