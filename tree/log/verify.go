@@ -124,14 +124,13 @@ func VerifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) e
 func VerifyBatchProof(x []int, n int, values [][]byte, proof [][]byte, root []byte) error {
 	if len(x) != len(values) {
 		return errors.New("expected same number of indices and values")
+	} else if !sort.IsSorted(sort.IntSlice(x)) {
+		return errors.New("input entries must be in sorted order")
 	}
 	for _, elem := range proof {
 		if len(elem) != 32 {
 			return errors.New("malformed proof")
 		}
-	}
-	if !sort.IsSorted(sort.IntSlice(x)) {
-		return errors.New("input entries must be in sorted order")
 	}
 
 	copath := math.BatchCopath(x, n)

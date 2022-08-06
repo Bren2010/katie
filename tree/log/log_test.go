@@ -139,7 +139,7 @@ func TestBatchInclusionProof(t *testing.T) {
 	sort.Ints(x)
 
 	values := make([][]byte, 0)
-	for id := range x {
+	for _, id := range x {
 		values = append(values, leaves[id])
 	}
 
