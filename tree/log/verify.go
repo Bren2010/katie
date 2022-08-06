@@ -3,6 +3,7 @@ package log
 import (
 	"bytes"
 	"errors"
+	"sort"
 
 	"github.com/JumpPrivacy/katie/tree/log/math"
 )
@@ -113,6 +114,54 @@ func VerifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) e
 	}
 
 	if !bytes.Equal(acc.value, root) {
+		return errors.New("root does not match proof")
+	}
+	return nil
+}
+
+// VerifyBatchProof checks that `proof` is a valid batch inclusion proof for the
+// given values in a tree with the given root.
+func VerifyBatchProof(x []int, n int, values [][]byte, proof [][]byte, root []byte) error {
+	if len(x) != len(values) {
+		return errors.New("expected same number of indices and values")
+	}
+	for _, elem := range proof {
+		if len(elem) != 32 {
+			return errors.New("malformed proof")
+		}
+	}
+	if !sort.IsSorted(sort.IntSlice(x)) {
+		return errors.New("input entries must be in sorted order")
+	}
+
+	copath := math.BatchCopath(x, n)
+	if len(proof) != len(copath) {
+		return errors.New("malformed proof")
+	}
+
+	calc := newSimpleRootCalculator()
+	i, j := 0, 0
+	for i < len(x) && j < len(copath) {
+		if 2*x[i] < copath[j] {
+			calc.Insert(0, values[i])
+			i++
+		} else {
+			calc.Insert(math.Level(copath[j]), proof[j])
+			j++
+		}
+	}
+	for i < len(x) {
+		calc.Insert(0, values[i])
+		i++
+	}
+	for j < len(copath) {
+		calc.Insert(math.Level(copath[j]), proof[j])
+		j++
+	}
+
+	if cand, err := calc.Root(); err != nil {
+		return err
+	} else if !bytes.Equal(root, cand) {
 		return errors.New("root does not match proof")
 	}
 	return nil

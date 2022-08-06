@@ -1,6 +1,7 @@
 package log
 
 import (
+	"sort"
 	"testing"
 
 	"bytes"
@@ -107,6 +108,46 @@ func TestInclusionProof(t *testing.T) {
 			x = mrand.Intn(m)
 			checkTree(x, m)
 		}
+	}
+}
+
+func TestBatchInclusionProof(t *testing.T) {
+	tree := NewTree(new(memoryStore))
+	var (
+		leaves [][]byte
+		root   []byte
+		err    error
+	)
+	for i := 0; i < 2000; i++ {
+		leaf := random()
+		leaves = append(leaves, leaf)
+
+		root, err = tree.Append(i, leaf)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	xDedup := make(map[int]struct{})
+	for i := 0; i < 10; i++ {
+		xDedup[mrand.Intn(2000)] = struct{}{}
+	}
+	x := make([]int, 0)
+	for id := range xDedup {
+		x = append(x, id)
+	}
+	sort.Ints(x)
+
+	values := make([][]byte, 0)
+	for id := range x {
+		values = append(values, leaves[id])
+	}
+
+	proof, err := tree.GetBatch(x, 2000)
+	if err != nil {
+		t.Fatal(err)
+	} else if err := VerifyBatchProof(x, 2000, values, proof, root); err != nil {
+		t.Fatal(err)
 	}
 }
 
