@@ -83,19 +83,19 @@ func (c *simpleRootCalculator) Root() ([]byte, error) {
 	return root.value, nil
 }
 
-// VerifyInclusionProof checks that `proof` is a valid inclusion proof for
-// `value` at position `x` in a tree with the given root.
-func VerifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) error {
+// EvaluateInclusionProof returns the root that would result in the given proof
+// being valid for the given value.
+func EvaluateInclusionProof(x, n int, value []byte, proof [][]byte) ([]byte, error) {
 	for _, elem := range proof {
 		if len(elem) != 32 {
-			return errors.New("malformed proof")
+			return nil, errors.New("malformed proof")
 		}
 	}
 
 	x = 2 * x
 	path := math.Copath(x, n)
 	if len(proof) != len(path) {
-		return errors.New("malformed proof")
+		return nil, errors.New("malformed proof")
 	}
 
 	acc := &nodeData{leaf: true, value: value}
@@ -113,29 +113,38 @@ func VerifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) e
 		x = path[i]
 	}
 
-	if !bytes.Equal(acc.value, root) {
+	return acc.value, nil
+}
+
+// VerifyInclusionProof checks that `proof` is a valid inclusion proof for
+// `value` at position `x` in a tree with the given root.
+func VerifyInclusionProof(x, n int, value []byte, proof [][]byte, root []byte) error {
+	cand, err := EvaluateInclusionProof(x, n, value, proof)
+	if err != nil {
+		return err
+	} else if !bytes.Equal(root, cand) {
 		return errors.New("root does not match proof")
 	}
 	return nil
 }
 
-// VerifyBatchProof checks that `proof` is a valid batch inclusion proof for the
-// given values in a tree with the given root.
-func VerifyBatchProof(x []int, n int, values [][]byte, proof [][]byte, root []byte) error {
+// EvaluateBatchProof returns the root that would result in the given proof
+// being valid for the given values.
+func EvaluateBatchProof(x []int, n int, values [][]byte, proof [][]byte) ([]byte, error) {
 	if len(x) != len(values) {
-		return errors.New("expected same number of indices and values")
+		return nil, errors.New("expected same number of indices and values")
 	} else if !sort.IsSorted(sort.IntSlice(x)) {
-		return errors.New("input entries must be in sorted order")
+		return nil, errors.New("input entries must be in sorted order")
 	}
 	for _, elem := range proof {
 		if len(elem) != 32 {
-			return errors.New("malformed proof")
+			return nil, errors.New("malformed proof")
 		}
 	}
 
 	copath := math.BatchCopath(x, n)
 	if len(proof) != len(copath) {
-		return errors.New("malformed proof")
+		return nil, errors.New("malformed proof")
 	}
 
 	calc := newSimpleRootCalculator()
@@ -158,7 +167,14 @@ func VerifyBatchProof(x []int, n int, values [][]byte, proof [][]byte, root []by
 		j++
 	}
 
-	if cand, err := calc.Root(); err != nil {
+	return calc.Root()
+}
+
+// VerifyBatchProof checks that `proof` is a valid batch inclusion proof for the
+// given values in a tree with the given root.
+func VerifyBatchProof(x []int, n int, values [][]byte, proof [][]byte, root []byte) error {
+	cand, err := EvaluateBatchProof(x, n, values, proof)
+	if err != nil {
 		return err
 	} else if !bytes.Equal(root, cand) {
 		return errors.New("root does not match proof")
