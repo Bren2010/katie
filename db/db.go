@@ -28,7 +28,7 @@ type TransparencyStore interface {
 	SetRoot(*TransparencyTreeRoot) error
 
 	Get(key uint64) ([]byte, error)
-	Set(key uint64, data []byte) error
+	Put(key uint64, data []byte) error
 
 	LogStore() LogStore
 	PrefixStore() PrefixStore

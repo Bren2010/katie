@@ -1,8 +1,19 @@
 package transparency
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"sort"
+
+	"github.com/JumpPrivacy/katie/crypto/commitments"
+	"github.com/JumpPrivacy/katie/crypto/vrf"
+	"github.com/JumpPrivacy/katie/crypto/vrf/p256"
+	"github.com/JumpPrivacy/katie/tree/log"
+	"github.com/JumpPrivacy/katie/tree/prefix"
 )
 
 type idCtrPair struct {
@@ -49,7 +60,7 @@ func (pg *proofGuide) done() (bool, error) {
 	sort.Sort(pg.sorted)
 
 	// Check that the list of counters is monotonic.
-	last := 0
+	last := -1
 	for i := 0; i < len(pg.sorted); i++ {
 		if pg.sorted[i].ctr < last {
 			return false, errors.New("set of counters given is not monotonic")
@@ -104,3 +115,115 @@ func (pg *proofGuide) final() int {
 	}
 	panic("unexpected error")
 }
+
+// LogConfig wraps the information that a client needs to know about a log.
+type LogConfig struct {
+	SigKey *ecdsa.PublicKey
+	VrfKey vrf.PublicKey
+}
+
+type leafData struct {
+	id    uint64
+	value []byte
+}
+
+type leafSlice []leafData
+
+func (ls leafSlice) Len() int           { return len(ls) }
+func (ls leafSlice) Less(i, j int) bool { return ls[i].id < ls[j].id }
+func (ls leafSlice) Swap(i, j int)      { ls[i], ls[j] = ls[j], ls[i] }
+
+// Verify checks that the contents of SearchResult is valid.
+func Verify(config *LogConfig, key string, sr *SearchResult) error {
+	if int(sr.Root.TreeSize) <= 0 {
+		return errors.New("invalid search result")
+	}
+
+	// Validate the VRF output.
+	index, err := config.VrfKey.ProofToHash([]byte(key), sr.Vrf.Proof)
+	if err != nil {
+		return err
+	} else if !bytes.Equal(index[:], sr.Vrf.Index) {
+		return errors.New("vrf output is different than expected")
+	}
+
+	// Follow the search path in prefix trees.
+	guide := newProofGuide(sr.Root.TreeSize)
+	i := 0
+	var leaves leafSlice
+	for {
+		if i > len(sr.Search) {
+			return errors.New("not enough steps provided in search path")
+		}
+		done, err := guide.done()
+		if err != nil {
+			return err
+		} else if done {
+			break
+		}
+		id := guide.next()
+
+		proot, err := prefix.Evaluate(index[:], sr.Search[i].Prefix)
+		if err != nil {
+			return err
+		}
+		leaf := new(bytes.Buffer)
+		leaf.Write(proot)
+		leaf.Write(sr.Search[i].Commitment)
+		leaves = append(leaves, leafData{id, leafHash(leaf.Bytes())})
+
+		guide.insert(id, sr.Search[i].Prefix.Counter())
+	}
+	if i < len(sr.Search) {
+		return errors.New("search path is longer than expected")
+	}
+
+	// Compute the expected log root.
+	sort.Sort(leaves)
+	ids, values := make([]int, 0), make([][]byte, 0)
+	for _, leaf := range leaves {
+		ids = append(ids, int(leaf.id))
+		values = append(values, leaf.value)
+	}
+	root, err := log.EvaluateBatchProof(ids, int(sr.Root.TreeSize), values, sr.Log)
+	if err != nil {
+		return err
+	}
+
+	// Validate the root signature.
+	sigPub := config.SigKey
+	vrfPub := config.VrfKey.(*p256.PublicKey).PublicKey
+
+	tbs, err := json.Marshal(rootTbs{
+		SignatureKey: elliptic.Marshal(sigPub.Curve, sigPub.X, sigPub.Y),
+		VrfKey:       elliptic.Marshal(vrfPub.Curve, vrfPub.X, vrfPub.Y),
+		TreeSize:     sr.Root.TreeSize,
+		Timestamp:    sr.Root.Timestamp,
+		Root:         root,
+	})
+	if err != nil {
+		return err
+	}
+	tbsHash := sha256.Sum256(tbs)
+
+	if ok := ecdsa.VerifyASN1(sigPub, tbsHash[:], sr.Root.Signature); !ok {
+		return errors.New("signature on root failed to verify")
+	}
+
+	// Validate the commit opening.
+	if i := guide.final(); i == -1 {
+		if sr.Value != nil {
+			return errors.New("expected no value")
+		}
+	} else {
+		err := commitments.Verify(key, sr.Search[i].Commitment, sr.Value.Value, sr.Value.Opening)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// TODO: Check timestamp in root.
+// TODO: Monitoring code.

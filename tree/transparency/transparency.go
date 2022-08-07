@@ -35,7 +35,6 @@ type VrfOutput struct {
 type SearchStep struct {
 	Prefix     *prefix.SearchResult `json:"prefix"`
 	Commitment []byte               `json:"commitment"`
-	Log        [][]byte             `json:"log"`
 }
 
 // SearchValue is the account data returned by a search, if any.
@@ -50,6 +49,7 @@ type SearchResult struct {
 	Root   *db.TransparencyTreeRoot `json:"root"`
 	Vrf    *VrfOutput               `json:"vrf"`
 	Search []SearchStep             `json:"search"`
+	Log    [][]byte                 `json:"log"`
 	Value  *SearchValue             `json:"value,omitempty"`
 }
 
@@ -97,6 +97,7 @@ func (t *Tree) GetConsistency(m, n int) ([][]byte, error) {
 // Search searches for `key` in the tree and returns a proof of inclusion or
 // non-inclusion.
 func (t *Tree) Search(key string) (*SearchResult, error) {
+	var ids []int
 	var searchOutput []SearchStep
 	var journals [][]byte
 
@@ -122,19 +123,20 @@ func (t *Tree) Search(key string) (*SearchResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, logProof, err := logTree.Get(int(id), int(t.latest.TreeSize))
-		if err != nil {
-			return nil, err
-		}
 
 		guide.insert(id, prefixProof.Counter())
 
+		ids = append(ids, int(id))
 		searchOutput = append(searchOutput, SearchStep{
 			Prefix:     prefixProof,
 			Commitment: journal[0:32],
-			Log:        logProof,
 		})
 		journals = append(journals, journal)
+	}
+
+	logProof, err := logTree.GetBatch(ids, int(t.latest.TreeSize))
+	if err != nil {
+		return nil, err
 	}
 
 	var value *SearchValue
@@ -152,6 +154,7 @@ func (t *Tree) Search(key string) (*SearchResult, error) {
 			Proof: vrfProof,
 		},
 		Search: searchOutput,
+		Log:    logProof,
 		Value:  value,
 	}, nil
 }
@@ -179,7 +182,7 @@ func (t *Tree) Insert(key string, value []byte) (*SearchResult, error) {
 	journal.Write(commitment)
 	journal.Write(nonce)
 	journal.Write(value)
-	if err := t.tx.Set(t.latest.TreeSize, journal.Bytes()); err != nil {
+	if err := t.tx.Put(t.latest.TreeSize, journal.Bytes()); err != nil {
 		return nil, err
 	}
 

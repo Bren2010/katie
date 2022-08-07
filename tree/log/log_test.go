@@ -1,12 +1,12 @@
 package log
 
 import (
-	"sort"
 	"testing"
 
 	"bytes"
 	"crypto/rand"
 	mrand "math/rand"
+	"sort"
 )
 
 func assert(ok bool) {
