@@ -173,6 +173,8 @@ func Verify(config *LogConfig, key string, sr *SearchResult) error {
 		leaves = append(leaves, leafData{id, leafHash(leaf.Bytes())})
 
 		guide.insert(id, sr.Search[i].Prefix.Counter())
+
+		i++
 	}
 	if i < len(sr.Search) {
 		return errors.New("search path is longer than expected")

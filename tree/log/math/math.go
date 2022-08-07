@@ -227,8 +227,12 @@ func BatchCopath(leaves []int, n int) []int {
 			nextLevel = append(nextLevel, p)
 		}
 		if len(nodes) == 1 {
-			out = append(out, Sibling(nodes[0], n))
-			nextLevel = append(nextLevel, Parent(nodes[0], n))
+			if len(nextLevel) > 0 && Level(Parent(nodes[0], n)) > Level(nextLevel[0]) {
+				nextLevel = append(nextLevel, nodes[0])
+			} else {
+				out = append(out, Sibling(nodes[0], n))
+				nextLevel = append(nextLevel, Parent(nodes[0], n))
+			}
 		}
 
 		nodes = nextLevel

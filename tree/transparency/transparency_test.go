@@ -1,6 +1,7 @@
 package transparency
 
 import (
+	"bytes"
 	"testing"
 
 	"crypto/ecdsa"
@@ -148,8 +149,9 @@ func TestTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	data := make(map[string][]byte)
+
+	// Add initial data to tree.
 	for i := 0; i < 700; i++ {
 		key := fmt.Sprintf("%x", random())
 		value := random()
@@ -161,6 +163,57 @@ func TestTree(t *testing.T) {
 			t.Fatal(err)
 		} else if err := Verify(cfg, key, sr); err != nil {
 			t.Fatal(err)
+		} else if !bytes.Equal(sr.Value.Value, value) {
+			t.Fatal("values don't match")
+		}
+	}
+
+	// Overwrite some entries.
+	for i := 0; i < 10; i++ {
+		j := 0
+		for key := range data {
+			if j > 10 {
+				break
+			}
+			j++
+
+			value := random()
+			data[key] = value
+
+			sr, err := tree.Insert(key, value)
+			if err != nil {
+				t.Fatal(err)
+			} else if err := Verify(cfg, key, sr); err != nil {
+				t.Fatal(err)
+			} else if !bytes.Equal(sr.Value.Value, value) {
+				t.Fatal("values don't match")
+			}
+		}
+	}
+
+	// Search for every entry.
+	for key, value := range data {
+		sr, err := tree.Search(key)
+		if err != nil {
+			t.Fatal(err)
+		} else if err := Verify(cfg, key, sr); err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(sr.Value.Value, value) {
+			t.Fatal("values don't match")
+		}
+	}
+
+	// Search for some keys that don't exist.
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("%x", random())
+
+		sr, err := tree.Search(key)
+		if err != nil {
+			t.Fatal(err)
+		} else if err := Verify(cfg, key, sr); err != nil {
+			t.Fatal(err)
+		} else if sr.Value != nil {
+			t.Fatal("expected nil value")
 		}
 	}
 }
