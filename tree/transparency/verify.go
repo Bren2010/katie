@@ -2,9 +2,8 @@ package transparency
 
 import (
 	"bytes"
-	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -118,7 +117,7 @@ func (pg *proofGuide) final() int {
 
 // LogConfig wraps the information that a client needs to know about a log.
 type LogConfig struct {
-	SigKey *ecdsa.PublicKey
+	SigKey ed25519.PublicKey
 	VrfKey vrf.PublicKey
 }
 
@@ -193,11 +192,10 @@ func Verify(config *LogConfig, key string, sr *SearchResult) error {
 	}
 
 	// Validate the root signature.
-	sigPub := config.SigKey
 	vrfPub := config.VrfKey.(*p256.PublicKey).PublicKey
 
 	tbs, err := json.Marshal(rootTbs{
-		SignatureKey: elliptic.Marshal(sigPub.Curve, sigPub.X, sigPub.Y),
+		SignatureKey: config.SigKey,
 		VrfKey:       elliptic.Marshal(vrfPub.Curve, vrfPub.X, vrfPub.Y),
 		TreeSize:     sr.Root.TreeSize,
 		Timestamp:    sr.Root.Timestamp,
@@ -206,9 +204,8 @@ func Verify(config *LogConfig, key string, sr *SearchResult) error {
 	if err != nil {
 		return err
 	}
-	tbsHash := sha256.Sum256(tbs)
 
-	if ok := ecdsa.VerifyASN1(sigPub, tbsHash[:], sr.Root.Signature); !ok {
+	if ok := ed25519.Verify(config.SigKey, tbs, sr.Root.Signature); !ok {
 		return errors.New("signature on root failed to verify")
 	}
 

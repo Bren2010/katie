@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
@@ -127,7 +128,7 @@ func (ps prefixStore) Put(key uint64, data []byte) error {
 }
 
 func TestTree(t *testing.T) {
-	sigKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	sigPubKey, sigPrivKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,9 +144,9 @@ func TestTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &LogConfig{&sigKey.PublicKey, vrfPub}
+	cfg := &LogConfig{sigPubKey, vrfPub}
 
-	tree, err := NewTree(sigKey, vrfKey, new(memoryStore))
+	tree, err := NewTree(sigPrivKey, vrfKey, new(memoryStore))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -64,14 +65,14 @@ type rootTbs struct {
 // Tree is an implementation of a transparency tree that handles all state
 // management, the evaluation of a VRF, and generating/opening commitments.
 type Tree struct {
-	sigKey *ecdsa.PrivateKey
+	sigKey ed25519.PrivateKey
 	vrfKey vrf.PrivateKey
 	tx     db.TransparencyStore
 
 	latest *db.TransparencyTreeRoot
 }
 
-func NewTree(sigKey *ecdsa.PrivateKey, vrfKey vrf.PrivateKey, tx db.TransparencyStore) (*Tree, error) {
+func NewTree(sigKey ed25519.PrivateKey, vrfKey vrf.PrivateKey, tx db.TransparencyStore) (*Tree, error) {
 	latest, err := tx.GetRoot()
 	if err != nil {
 		return nil, err
@@ -198,13 +199,12 @@ func (t *Tree) Insert(key string, value []byte) (*SearchResult, error) {
 	}
 
 	// Produce a new signed tree root.
-	sigPub := t.sigKey.Public().(*ecdsa.PublicKey)
 	vrfPub := t.vrfKey.Public().(*ecdsa.PublicKey)
 	treeSize := t.latest.TreeSize + 1
 	ts := time.Now().UnixMilli()
 
 	tbs, err := json.Marshal(rootTbs{
-		SignatureKey: elliptic.Marshal(sigPub.Curve, sigPub.X, sigPub.Y),
+		SignatureKey: t.sigKey.Public().(ed25519.PublicKey),
 		VrfKey:       elliptic.Marshal(vrfPub.Curve, vrfPub.X, vrfPub.Y),
 		TreeSize:     treeSize,
 		Timestamp:    ts,
@@ -213,9 +213,8 @@ func (t *Tree) Insert(key string, value []byte) (*SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	tbsHash := sha256.Sum256(tbs)
 
-	sig, err := t.sigKey.Sign(rand.Reader, tbsHash[:], crypto.SHA256)
+	sig, err := t.sigKey.Sign(rand.Reader, tbs, crypto.Hash(0))
 	if err != nil {
 		return nil, err
 	}
