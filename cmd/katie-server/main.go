@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// Start the inserter thread.
-	tx1, err := db.NewLDBTransparencyStore(config.DatabaseFile)
+	tx1, err := db.NewLDBTransparencyStore(config.DatabaseFile, false)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -44,7 +44,7 @@ func main() {
 	go inserter(tree, ch)
 
 	// Setup handler for the API server.
-	tx2, err := db.NewLDBTransparencyStore(config.DatabaseFile)
+	tx2, err := db.NewLDBTransparencyStore(config.DatabaseFile, true)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}

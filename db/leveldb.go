@@ -17,14 +17,15 @@ func dup(in []byte) []byte {
 // ldbConn is a wrapper around a base LevelDB database that handles batching
 // writes between commits transparently.
 type ldbConn struct {
-	conn  *leveldb.DB
-	batch map[string][]byte
+	conn     *leveldb.DB
+	readonly bool
+	batch    map[string][]byte
 }
 
 // TODO: Consider adding LRU cache.
 
-func newLDBConn(conn *leveldb.DB) *ldbConn {
-	return &ldbConn{conn, make(map[string][]byte)}
+func newLDBConn(conn *leveldb.DB, readonly bool) *ldbConn {
+	return &ldbConn{conn, readonly, make(map[string][]byte)}
 }
 
 func (c *ldbConn) Get(key string) ([]byte, error) {
@@ -35,10 +36,17 @@ func (c *ldbConn) Get(key string) ([]byte, error) {
 }
 
 func (c *ldbConn) Put(key string, value []byte) {
+	if c.readonly {
+		panic("connection is readonly")
+	}
 	c.batch[key] = dup(value)
 }
 
 func (c *ldbConn) Commit() error {
+	if c.readonly {
+		panic("connection is readonly")
+	}
+
 	var b *leveldb.Batch
 	for key, value := range c.batch {
 		if key == "root" {
@@ -65,7 +73,7 @@ type ldbTransparencyStore struct {
 	conn *ldbConn
 }
 
-func NewLDBTransparencyStore(file string) (TransparencyStore, error) {
+func NewLDBTransparencyStore(file string, readonly bool) (TransparencyStore, error) {
 	conn, err := leveldb.OpenFile(file, nil)
 	if errors.IsCorrupted(err) {
 		conn, err = leveldb.RecoverFile(file, nil)
@@ -73,7 +81,7 @@ func NewLDBTransparencyStore(file string) (TransparencyStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ldbTransparencyStore{newLDBConn(conn)}, nil
+	return &ldbTransparencyStore{newLDBConn(conn, readonly)}, nil
 }
 
 func (ldb *ldbTransparencyStore) GetRoot() (*TransparencyTreeRoot, error) {
