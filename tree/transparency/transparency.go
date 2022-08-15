@@ -1,4 +1,5 @@
-// Package transparency implements a
+// Package transparency implements a transparency tree that supports blinded
+// searches and efficient auditing.
 package transparency
 
 import (

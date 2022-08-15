@@ -21,6 +21,8 @@ type Config struct {
 	tlsConfig  *tls.Config
 
 	APIConfig *APIConfig `yaml:"api"`
+
+	DatabaseFile string `yaml:"db-file"`
 }
 
 // TLSConfig specifies the API server's TLS config. Since this is only intended
@@ -64,6 +66,8 @@ func ReadConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("field not provided: api.signing-key")
 	} else if parsed.APIConfig.VRFKey == "" {
 		return nil, fmt.Errorf("field not provided: api.vrf-key")
+	} else if parsed.DatabaseFile == "" {
+		return nil, fmt.Errorf("field not provided: db-file")
 	}
 
 	// Parse TLS config if necessary.

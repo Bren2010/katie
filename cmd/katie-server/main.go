@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/JumpPrivacy/katie/db"
+	"github.com/JumpPrivacy/katie/tree/transparency"
 	"github.com/gorilla/mux"
 )
 
@@ -28,11 +30,29 @@ func main() {
 		log.Fatalf("Failed to load config file: %v", err)
 	}
 
+	// Start the inserter thread.
+	tx1, err := db.NewLDBTransparencyStore(config.DatabaseFile)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	tree, err := transparency.NewTree(config.APIConfig.signingKey, config.APIConfig.vrfKey, tx1)
+	if err != nil {
+		log.Fatalf("failed to initialize tree: %v", err)
+	}
+	ch := make(chan InsertRequest)
+
+	go inserter(tree, ch)
+
 	// Setup handler for the API server.
-	h := &Handler{config: config.APIConfig}
+	tx2, err := db.NewLDBTransparencyStore(config.DatabaseFile)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	h := &Handler{config: config.APIConfig, tx: tx2}
 	r := mux.NewRouter()
 	r.HandleFunc("/", h.Home)
-	r.HandleFunc("/meta", h.Meta)
+	r.HandleFunc("/v1/meta", HandleAPI(h.Meta))
+	r.HandleFunc("/v1/consistency/{older:[0-9]+}/{newer:[0-9]+}", HandleAPI(h.Consistency))
 
 	// Setup the API server.
 	srv := &http.Server{
