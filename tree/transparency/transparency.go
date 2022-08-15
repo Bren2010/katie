@@ -162,7 +162,7 @@ func (t *Tree) Search(key string) (*SearchResult, error) {
 
 // Insert adds a new key/value pair to the tree and returns an immediate proof
 // of inclusion for it.
-func (t *Tree) Insert(key string, value []byte) (*SearchResult, error) {
+func (t *Tree) Insert(key string, value []byte) (*db.TransparencyTreeRoot, error) {
 	// Produce a commitment to the user's data.
 	nonce, err := commitments.GenCommitmentKey()
 	if err != nil {
@@ -228,5 +228,5 @@ func (t *Tree) Insert(key string, value []byte) (*SearchResult, error) {
 	}
 	t.latest = str
 
-	return t.Search(key)
+	return t.latest, nil
 }

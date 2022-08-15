@@ -159,7 +159,11 @@ func TestTree(t *testing.T) {
 
 		data[key] = value
 
-		sr, err := tree.Insert(key, value)
+		_, err := tree.Insert(key, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sr, err := tree.Search(key)
 		if err != nil {
 			t.Fatal(err)
 		} else if err := Verify(cfg, key, sr); err != nil {
@@ -181,7 +185,11 @@ func TestTree(t *testing.T) {
 			value := random()
 			data[key] = value
 
-			sr, err := tree.Insert(key, value)
+			_, err := tree.Insert(key, value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sr, err := tree.Search(key)
 			if err != nil {
 				t.Fatal(err)
 			} else if err := Verify(cfg, key, sr); err != nil {

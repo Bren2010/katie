@@ -21,6 +21,8 @@ type ldbConn struct {
 	batch map[string][]byte
 }
 
+// TODO: Consider adding LRU cache.
+
 func newLDBConn(conn *leveldb.DB) *ldbConn {
 	return &ldbConn{conn, make(map[string][]byte)}
 }
@@ -76,7 +78,9 @@ func NewLDBTransparencyStore(file string) (TransparencyStore, error) {
 
 func (ldb *ldbTransparencyStore) GetRoot() (*TransparencyTreeRoot, error) {
 	latest, err := ldb.conn.Get("root")
-	if err != nil {
+	if err == leveldb.ErrNotFound {
+		return &TransparencyTreeRoot{}, nil
+	} else if err != nil {
 		return nil, err
 	}
 	out := &TransparencyTreeRoot{}
