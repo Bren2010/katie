@@ -153,19 +153,21 @@ func (h *Handler) Account(rw http.ResponseWriter, req *http.Request) *HttpError 
 		n := 0
 		for {
 			m, err := req.Body.Read(value[n:])
+			n += m
 			if err == io.EOF {
 				break
 			} else if err != nil {
 				return &HttpError{http.StatusInternalServerError, err}
-			}
-			n += m
-			if n == len(value) {
+			} else if n == len(value) {
 				return &HttpError{http.StatusBadRequest, fmt.Errorf("request body is too large")}
 			}
 		}
+		if n == 0 {
+			return &HttpError{http.StatusBadRequest, fmt.Errorf("empty request body not allowed")}
+		}
 
 		resp := make(chan InsertResponse)
-		timer := time.NewTimer(30 * time.Second)
+		timer := time.NewTimer(5 * time.Second)
 		select {
 		case h.ch <- InsertRequest{Key: account, Value: value[:n], Resp: resp}:
 		case <-timer.C:

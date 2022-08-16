@@ -44,7 +44,7 @@ func main() {
 	go inserter(tree, ch)
 
 	// Setup handler for the API server.
-	h := &Handler{config: config.APIConfig, tx: tx.Clone()}
+	h := &Handler{config: config.APIConfig, tx: tx.Clone(), ch: ch}
 	r := mux.NewRouter()
 	r.HandleFunc("/", h.Home)
 	r.HandleFunc("/v1/meta", HandleAPI(h.Meta))

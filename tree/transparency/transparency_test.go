@@ -31,6 +31,8 @@ type memoryStore struct {
 	Prefix prefixStore
 }
 
+func (m *memoryStore) Clone() db.TransparencyStore { return m }
+
 func (m *memoryStore) GetRoot() (*db.TransparencyTreeRoot, error) {
 	if m.latest == "" {
 		return &db.TransparencyTreeRoot{}, nil

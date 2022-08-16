@@ -47,7 +47,7 @@ func (c *ldbConn) Commit() error {
 		panic("connection is readonly")
 	}
 
-	var b *leveldb.Batch
+	b := new(leveldb.Batch)
 	for key, value := range c.batch {
 		if key == "root" {
 			continue
