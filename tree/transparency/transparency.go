@@ -48,11 +48,12 @@ type SearchValue struct {
 // SearchResult is the output from executing a search in the tree, creating a
 // cryptographic proof of inclusion or non-inclusion.
 type SearchResult struct {
-	Root   *db.TransparencyTreeRoot `json:"root"`
-	Vrf    *VrfOutput               `json:"vrf"`
-	Search []SearchStep             `json:"search"`
-	Log    [][]byte                 `json:"log"`
-	Value  *SearchValue             `json:"value,omitempty"`
+	Root        *db.TransparencyTreeRoot `json:"root"`
+	Consistency [][]byte                 `json:"consistency,omitempty"`
+	Vrf         *VrfOutput               `json:"vrf"`
+	Search      []SearchStep             `json:"search"`
+	Log         [][]byte                 `json:"log"`
+	Value       *SearchValue             `json:"value,omitempty"`
 }
 
 type rootTbs struct {
@@ -85,6 +86,10 @@ func NewTree(sigKey ed25519.PrivateKey, vrfKey vrf.PrivateKey, tx db.Transparenc
 
 		latest: latest,
 	}, nil
+}
+
+func (t *Tree) SetLatest(latest *db.TransparencyTreeRoot) {
+	t.latest = latest
 }
 
 // GetConsistencyProof returns a proof that the current log with n elements is

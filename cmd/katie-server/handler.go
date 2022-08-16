@@ -6,9 +6,11 @@ import (
 	"crypto/elliptic"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/JumpPrivacy/katie/db"
 	"github.com/JumpPrivacy/katie/tree/transparency"
@@ -113,6 +115,92 @@ func (h *Handler) Consistency(rw http.ResponseWriter, req *http.Request) *HttpEr
 		return &HttpError{http.StatusBadRequest, err}
 	}
 	res := ApiResponse{Success: true, Response: proof}
+	if err := json.NewEncoder(rw).Encode(res); err != nil {
+		return &HttpError{http.StatusInternalServerError, err}
+	}
+
+	return nil
+}
+
+// Account handles both getting most recent account data over the GET method,
+// and updating account data over the POST method.
+func (h *Handler) Account(rw http.ResponseWriter, req *http.Request) *HttpError {
+	if req.Method != "GET" && req.Method != "POST" {
+		return &HttpError{http.StatusMethodNotAllowed, fmt.Errorf("method not allowed")}
+	}
+	vars := mux.Vars(req)
+	account := vars["account"]
+
+	last := -1
+	if str, ok := vars["last"]; ok {
+		parsed, err := strconv.Atoi(str)
+		if err != nil {
+			return &HttpError{http.StatusBadRequest, fmt.Errorf("request path had unexpected format")}
+		}
+		last = parsed
+	}
+
+	tree, err := transparency.NewTree(h.config.signingKey, h.config.vrfKey, h.tx)
+	if err != nil {
+		return &HttpError{http.StatusInternalServerError, err}
+	}
+
+	// If the request is over POST, read the request body and submit it to the
+	// inserter goroutine to be added to the log.
+	if req.Method == "POST" {
+		value := make([]byte, 16*1024)
+
+		n := 0
+		for {
+			m, err := req.Body.Read(value[n:])
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return &HttpError{http.StatusInternalServerError, err}
+			}
+			n += m
+			if n == len(value) {
+				return &HttpError{http.StatusBadRequest, fmt.Errorf("request body is too large")}
+			}
+		}
+
+		resp := make(chan InsertResponse)
+		timer := time.NewTimer(30 * time.Second)
+		select {
+		case h.ch <- InsertRequest{Key: account, Value: value[:n], Resp: resp}:
+		case <-timer.C:
+			return &HttpError{http.StatusInternalServerError, fmt.Errorf("submitting insertion request timed out")}
+		}
+		var root *db.TransparencyTreeRoot
+		select {
+		case res := <-resp:
+			if res.Err != nil {
+				return &HttpError{http.StatusInternalServerError, res.Err}
+			}
+			root = res.Root
+		case <-timer.C:
+			return &HttpError{http.StatusInternalServerError, fmt.Errorf("waiting for insertion result timed out")}
+		}
+		if !timer.Stop() {
+			<-timer.C
+		}
+
+		tree.SetLatest(root)
+	}
+
+	// Search for the most recent version of account data.
+	sr, err := tree.Search(account)
+	if err != nil {
+		return &HttpError{http.StatusInternalServerError, err}
+	}
+	if last != -1 {
+		// Add a consistency proof if requested.
+		sr.Consistency, err = tree.GetConsistency(last, int(sr.Root.TreeSize))
+		if err != nil {
+			return &HttpError{http.StatusInternalServerError, err}
+		}
+	}
+	res := ApiResponse{Success: true, Response: sr}
 	if err := json.NewEncoder(rw).Encode(res); err != nil {
 		return &HttpError{http.StatusInternalServerError, err}
 	}

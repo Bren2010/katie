@@ -73,7 +73,7 @@ type ldbTransparencyStore struct {
 	conn *ldbConn
 }
 
-func NewLDBTransparencyStore(file string, readonly bool) (TransparencyStore, error) {
+func NewLDBTransparencyStore(file string) (TransparencyStore, error) {
 	conn, err := leveldb.OpenFile(file, nil)
 	if errors.IsCorrupted(err) {
 		conn, err = leveldb.RecoverFile(file, nil)
@@ -81,7 +81,11 @@ func NewLDBTransparencyStore(file string, readonly bool) (TransparencyStore, err
 	if err != nil {
 		return nil, err
 	}
-	return &ldbTransparencyStore{newLDBConn(conn, readonly)}, nil
+	return &ldbTransparencyStore{newLDBConn(conn, false)}, nil
+}
+
+func (ldb *ldbTransparencyStore) Clone() TransparencyStore {
+	return &ldbTransparencyStore{newLDBConn(ldb.conn.conn, true)}
 }
 
 func (ldb *ldbTransparencyStore) GetRoot() (*TransparencyTreeRoot, error) {

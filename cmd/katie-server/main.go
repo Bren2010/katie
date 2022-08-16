@@ -31,11 +31,11 @@ func main() {
 	}
 
 	// Start the inserter thread.
-	tx1, err := db.NewLDBTransparencyStore(config.DatabaseFile, false)
+	tx, err := db.NewLDBTransparencyStore(config.DatabaseFile)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	tree, err := transparency.NewTree(config.APIConfig.signingKey, config.APIConfig.vrfKey, tx1)
+	tree, err := transparency.NewTree(config.APIConfig.signingKey, config.APIConfig.vrfKey, tx)
 	if err != nil {
 		log.Fatalf("failed to initialize tree: %v", err)
 	}
@@ -44,15 +44,13 @@ func main() {
 	go inserter(tree, ch)
 
 	// Setup handler for the API server.
-	tx2, err := db.NewLDBTransparencyStore(config.DatabaseFile, true)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	h := &Handler{config: config.APIConfig, tx: tx2}
+	h := &Handler{config: config.APIConfig, tx: tx.Clone()}
 	r := mux.NewRouter()
 	r.HandleFunc("/", h.Home)
 	r.HandleFunc("/v1/meta", HandleAPI(h.Meta))
 	r.HandleFunc("/v1/consistency/{older:[0-9]+}/{newer:[0-9]+}", HandleAPI(h.Consistency))
+	r.HandleFunc("/v1/account/{account}", HandleAPI(h.Account))
+	r.HandleFunc("/v1/account/{account}/{last:[0-9]+}", HandleAPI(h.Account))
 
 	// Setup the API server.
 	srv := &http.Server{

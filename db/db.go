@@ -24,7 +24,14 @@ type TransparencyTreeRoot struct {
 // TransparencyStore is the interface a transparency tree uses to communicate
 // with its database.
 type TransparencyStore interface {
+	// Clone returns a read-only clone of the current transparency store,
+	// suitable for distributing to child goroutines.
+	Clone() TransparencyStore
+
+	// GetRoot returns the most recent tree root, or the zero value of
+	// TransparencyTreeRoot if there hasn't been a signed root yet.
 	GetRoot() (*TransparencyTreeRoot, error)
+	// SetRoot sets the input value as the most recent tree root.
 	SetRoot(*TransparencyTreeRoot) error
 
 	Get(key uint64) ([]byte, error)
