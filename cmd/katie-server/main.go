@@ -6,6 +6,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/JumpPrivacy/katie/db"
@@ -14,6 +15,9 @@ import (
 )
 
 var (
+	Version   = "dev"
+	GoVersion = runtime.Version()
+
 	configFile = flag.String("config", "", "Location of config file.")
 )
 
@@ -29,6 +33,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config file: %v", err)
 	}
+
+	// Start the metrics server.
+	go metrics(config.MetricsAddr)
 
 	// Start the inserter thread.
 	tx, err := db.NewLDBTransparencyStore(config.DatabaseFile)
@@ -64,7 +71,7 @@ func main() {
 		IdleTimeout:       30 * time.Second,
 	}
 
-	log.Println("Starting API server.")
+	log.Printf("Starting API server at: %v", config.ServerAddr)
 	if config.TLSConfig == nil {
 		log.Fatal(srv.ListenAndServe())
 	} else {

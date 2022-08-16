@@ -16,9 +16,10 @@ import (
 
 // Config specifies the file format of config files.
 type Config struct {
-	ServerAddr string     `yaml:"addr"`
-	TLSConfig  *TLSConfig `yaml:"tls"`
-	tlsConfig  *tls.Config
+	ServerAddr  string     `yaml:"server-addr"`
+	MetricsAddr string     `yaml:"metrics-addr"`
+	TLSConfig   *TLSConfig `yaml:"tls"`
+	tlsConfig   *tls.Config
 
 	APIConfig *APIConfig `yaml:"api"`
 
@@ -57,7 +58,9 @@ func ReadConfig(filename string) (*Config, error) {
 
 	// Check that all required fields are populated.
 	if parsed.ServerAddr == "" {
-		return nil, fmt.Errorf("field not provided: addr")
+		return nil, fmt.Errorf("field not provided: server-addr")
+	} else if parsed.MetricsAddr == "" {
+		return nil, fmt.Errorf("field not provided: metrics-addr")
 	} else if parsed.APIConfig == nil {
 		return nil, fmt.Errorf("field not provided: api")
 	} else if parsed.APIConfig.HomeRedirect == "" {
