@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/JumpPrivacy/katie/db"
@@ -32,11 +33,32 @@ type HttpError struct {
 	Err    error
 }
 
+func extractPath(req *http.Request) string {
+	full := req.URL.Path
+	if len(full) > 0 && full[0] == '/' {
+		full = full[1:]
+	}
+	parts := strings.Split(full, "/")
+	if len(parts) == 0 {
+		return "/"
+	} else if len(parts) == 1 {
+		return "/" + parts[0]
+	}
+	out := "/" + parts[0] + "/" + parts[1]
+	if out == "/v1/account" && req.Method == "POST" {
+		out = "POST:" + out
+	}
+	return out
+}
+
 // HandleAPI takes an API handler function as input and turns it into an
 // http.HandlerFunc by adding error handling.
 func HandleAPI(inner func(rw http.ResponseWriter, req *http.Request) *HttpError) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
+		path := extractPath(req)
+
 		if err := inner(rw, req); err != nil {
+			requestCtr.WithLabelValues(path, fmt.Sprint(err.Status)).Inc()
 			log.Printf("%v(%v): %v", req.URL.Path, err.Status, err.Err)
 
 			rw.WriteHeader(err.Status)
@@ -44,6 +66,8 @@ func HandleAPI(inner func(rw http.ResponseWriter, req *http.Request) *HttpError)
 				Success: false,
 				Message: err.Err.Error(),
 			})
+		} else {
+			requestCtr.WithLabelValues(path, "200").Inc()
 		}
 	}
 }

@@ -18,11 +18,34 @@ var (
 		},
 		[]string{"version", "goversion"},
 	)
+	insertOps = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "insert_operations",
+			Help: "Incremented for each insert operation, labeled by success or failure.",
+		},
+		[]string{"success"},
+	)
+	insertDur = prometheus.NewSummary(
+		prometheus.SummaryOpts{
+			Name: "insert_duration",
+			Help: "Summary of how long an insert operation takes to complete.",
+		},
+	)
+	requestCtr = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "requests",
+			Help: "Incremented for each API request received.",
+		},
+		[]string{"path", "status"},
+	)
 )
 
 func metrics(addr string) {
 	buildInfo.WithLabelValues(Version, GoVersion).Set(1)
 	prometheus.MustRegister(buildInfo)
+	prometheus.MustRegister(insertOps)
+	prometheus.MustRegister(insertDur)
+	prometheus.MustRegister(requestCtr)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {

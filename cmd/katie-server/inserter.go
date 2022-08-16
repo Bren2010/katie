@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/JumpPrivacy/katie/db"
 	"github.com/JumpPrivacy/katie/tree/transparency"
 )
@@ -21,8 +24,16 @@ type InsertResponse struct {
 func inserter(tree *transparency.Tree, ch chan InsertRequest) {
 	for {
 		req := <-ch
+
+		start := time.Now()
 		root, err := tree.Insert(req.Key, req.Value)
-		req.Resp <- InsertResponse{root, err}
+		insertOps.WithLabelValues(fmt.Sprint(err == nil)).Inc()
+		insertDur.Observe(float64(time.Since(start).Microseconds()))
+
+		select {
+		case req.Resp <- InsertResponse{root, err}:
+		default:
+		}
 	}
 	// TODO: Restart thread in case of panic.
 }
