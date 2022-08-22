@@ -11,6 +11,11 @@ jobs:
     runs-on: "ubuntu-latest"
 
     steps:
+      - name: "Checkout"
+        uses: actions/checkout@v2
+          with:
+            fetch-depth: 0
+
       - name: "Build"
         run: |
           VERSION=$(git describe --tags) go build -ldflags "-X main.Version=$VERSION" github.com/JumpPrivacy/katie/cmd/katie-server
