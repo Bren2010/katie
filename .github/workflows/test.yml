@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  tagged-release:
+  test:
     name: "Test"
     runs-on: "ubuntu-latest"
 
@@ -17,5 +17,4 @@ jobs:
 
       - name: "Build"
         run: |
-          VERSION=$(git describe --tags) && \
-          go build -ldflags "-X main.Version=$VERSION" github.com/JumpPrivacy/katie/cmd/katie-server
+          go build github.com/JumpPrivacy/katie/cmd/katie-server
