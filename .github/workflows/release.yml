@@ -18,6 +18,16 @@ jobs:
         run: |
           VERSION=$(git describe --tags) && \
           go build -ldflags "-X main.Version=$VERSION" github.com/JumpPrivacy/katie/cmd/katie-server
+          sha256sum katie-server > katie-server.hash
+
+      - name: "Upload to B2"
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_KEY: ${{ secrets.B2_KEY }}
+        run: |
+          pip3 install --upgrade b2
+          b2 authorize-account $B2_KEY_ID $B2_KEY
+          b2 upload-file katie-artifacts ./katie-server $(git describe --tags)/katie-server
 
       - name: "Release"
         uses: "marvinpinto/action-automatic-releases@latest"
@@ -27,3 +37,4 @@ jobs:
           prerelease: false
           files: |
             katie-server
+            katie-server.hash
