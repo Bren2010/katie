@@ -18,8 +18,9 @@ jobs:
 
       - name: "Build"
         run: |
-          VERSION=$(git describe --tags) go build -ldflags "-X main.Version=$VERSION" github.com/JumpPrivacy/katie/cmd/katie-server
-      
+          VERSION=$(git describe --tags) && \
+          go build -ldflags "-X main.Version=$VERSION" github.com/JumpPrivacy/katie/cmd/katie-server
+
       - name: "Release"
         uses: "marvinpinto/action-automatic-releases@latest"
         with:
