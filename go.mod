@@ -1,4 +1,4 @@
-module github.com/JumpPrivacy/katie
+module github.com/SkewPrivacy/katie
 
 go 1.18
 

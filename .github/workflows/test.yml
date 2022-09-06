@@ -17,4 +17,4 @@ jobs:
 
       - name: "Build"
         run: |
-          go build github.com/JumpPrivacy/katie/cmd/katie-server
+          go build github.com/SkewPrivacy/katie/cmd/katie-server

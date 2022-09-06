@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/JumpPrivacy/katie/crypto/vrf/p256"
+	"github.com/SkewPrivacy/katie/crypto/vrf/p256"
 )
 
 func main() {

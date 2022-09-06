@@ -8,11 +8,11 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/JumpPrivacy/katie/crypto/commitments"
-	"github.com/JumpPrivacy/katie/crypto/vrf"
-	"github.com/JumpPrivacy/katie/crypto/vrf/p256"
-	"github.com/JumpPrivacy/katie/tree/log"
-	"github.com/JumpPrivacy/katie/tree/prefix"
+	"github.com/SkewPrivacy/katie/crypto/commitments"
+	"github.com/SkewPrivacy/katie/crypto/vrf"
+	"github.com/SkewPrivacy/katie/crypto/vrf/p256"
+	"github.com/SkewPrivacy/katie/tree/log"
+	"github.com/SkewPrivacy/katie/tree/prefix"
 )
 
 type idCtrPair struct {

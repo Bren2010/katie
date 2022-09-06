@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/JumpPrivacy/katie/crypto/vrf"
-	"github.com/JumpPrivacy/katie/crypto/vrf/p256"
+	"github.com/SkewPrivacy/katie/crypto/vrf"
+	"github.com/SkewPrivacy/katie/crypto/vrf/p256"
 
 	"gopkg.in/yaml.v2"
 )

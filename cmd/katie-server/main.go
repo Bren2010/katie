@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/JumpPrivacy/katie/db"
-	"github.com/JumpPrivacy/katie/tree/transparency"
+	"github.com/SkewPrivacy/katie/db"
+	"github.com/SkewPrivacy/katie/tree/transparency"
 	"github.com/gorilla/mux"
 )
 
