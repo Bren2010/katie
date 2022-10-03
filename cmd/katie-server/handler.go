@@ -149,6 +149,7 @@ func (h *Handler) Consistency(rw http.ResponseWriter, req *http.Request) *HttpEr
 // Account handles both getting most recent account data over the GET method,
 // and updating account data over the POST method.
 func (h *Handler) Account(rw http.ResponseWriter, req *http.Request) *HttpError {
+	// TOOD: Figure out some kind of authentication / domain-separation.
 	if req.Method != "GET" && req.Method != "POST" {
 		return &HttpError{http.StatusMethodNotAllowed, fmt.Errorf("method not allowed")}
 	}
