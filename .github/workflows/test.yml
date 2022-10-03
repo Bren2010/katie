@@ -1,0 +1,20 @@
+name: "test"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    name: "Test"
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v3
+
+      - name: "Build"
+        run: |
+          go build github.com/Bren2010/katie/cmd/katie-server
