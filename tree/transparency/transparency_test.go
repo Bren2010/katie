@@ -12,8 +12,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/SkewPrivacy/katie/crypto/vrf/p256"
-	"github.com/SkewPrivacy/katie/db"
+	"github.com/Bren2010/katie/crypto/vrf/p256"
+	"github.com/Bren2010/katie/db"
 )
 
 func random() []byte {

@@ -3,7 +3,7 @@ package log
 import (
 	"fmt"
 
-	"github.com/SkewPrivacy/katie/tree/log/math"
+	"github.com/Bren2010/katie/tree/log/math"
 )
 
 // The log tree implementation is designed to work with a standard key-value

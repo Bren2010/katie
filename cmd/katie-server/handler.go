@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SkewPrivacy/katie/db"
-	"github.com/SkewPrivacy/katie/tree/transparency"
+	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/transparency"
 	"github.com/gorilla/mux"
 )
 

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/SkewPrivacy/katie/db"
+	"github.com/Bren2010/katie/db"
 )
 
 // SearchResult is the output from executing a search in the tree, containing a

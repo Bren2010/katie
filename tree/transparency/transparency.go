@@ -14,11 +14,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/SkewPrivacy/katie/crypto/commitments"
-	"github.com/SkewPrivacy/katie/crypto/vrf"
-	"github.com/SkewPrivacy/katie/db"
-	"github.com/SkewPrivacy/katie/tree/log"
-	"github.com/SkewPrivacy/katie/tree/prefix"
+	"github.com/Bren2010/katie/crypto/commitments"
+	"github.com/Bren2010/katie/crypto/vrf"
+	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/log"
+	"github.com/Bren2010/katie/tree/prefix"
 )
 
 func leafHash(raw []byte) []byte {

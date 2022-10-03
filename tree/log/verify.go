@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/SkewPrivacy/katie/tree/log/math"
+	"github.com/Bren2010/katie/tree/log/math"
 )
 
 // simpleRootCalculator is an alternative implementation of the root-calculation

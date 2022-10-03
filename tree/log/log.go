@@ -6,8 +6,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/SkewPrivacy/katie/db"
-	"github.com/SkewPrivacy/katie/tree/log/math"
+	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/log/math"
 )
 
 // treeHash returns the intermediate hash of left and right.

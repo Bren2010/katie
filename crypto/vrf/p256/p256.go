@@ -35,7 +35,7 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/SkewPrivacy/katie/crypto/vrf"
+	"github.com/Bren2010/katie/crypto/vrf"
 )
 
 var (
