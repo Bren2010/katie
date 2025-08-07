@@ -2,36 +2,19 @@ package p256
 
 import (
 	"bytes"
-	"crypto/ecdh"
 	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/sha256"
+	"errors"
 	"math/big"
 
+	"filippo.io/nistec"
 	"github.com/Bren2010/katie/crypto/vrf"
 )
 
-var curve = ecdh.P256()
-
-// marshalEcdh takes the (x, y) coordinates of a curve point and returns a
-// corresponding *ecdh.PublicKey structure.
-func marshalEcdh(x, y *big.Int) *ecdh.PublicKey {
-	buf := make([]byte, 65)
-	buf[0] = 0x04
-	x.FillBytes(buf[1:33])
-	y.FillBytes(buf[33:])
-
-	pub, err := curve.NewPublicKey(buf)
-	if err != nil {
-		panic(err)
-	}
-	return pub
-}
-
-// encodeToCurve implements the trial-and-increment algorithm.
-func encodeToCurve(salt, m []byte) *ecdh.PublicKey {
-	ellipticCurve := elliptic.P256()
-	hasher := sha256.New()
+// encodeToCurve implements the trial-and-increment algorithm for encoding a
+// byte string to a curve point.
+func encodeToCurve(salt, m []byte) *nistec.P256Point {
 	counter := 0
 
 	for {
@@ -43,40 +26,31 @@ func encodeToCurve(salt, m []byte) *ecdh.PublicKey {
 		buf.WriteByte(byte(counter))
 		buf.WriteByte(0x00) // Back domain separator
 
-		hasher.Write(buf.Bytes())
-		hashStr := hasher.Sum([]byte{0x02})
+		hash := sha256.Sum256(buf.Bytes())
 
-		x, y := elliptic.UnmarshalCompressed(ellipticCurve, hashStr)
-		if x != nil {
-			return marshalEcdh(x, y)
+		hashStr := make([]byte, 33)
+		hashStr[0] = 0x02
+		copy(hashStr[1:], hash[:])
+
+		point, err := new(nistec.P256Point).SetBytes(hashStr)
+		if err == nil {
+			return point
 		} else if counter == 255 {
 			panic("encode to curve failed unexpectedly")
 		}
 
-		hasher.Reset()
 		counter++
 	}
 }
 
-// pointToString converts an *ecdh.PublicKey to compressed NIST format.
-func pointToString(pt *ecdh.PublicKey) []byte {
-	encoded := pt.Bytes()
-
-	buf := make([]byte, 33)
-	buf[0] = 2 | (encoded[64] & 1)
-	copy(buf[1:33], encoded[1:33])
-
-	return buf
-}
-
 func mac(key, message []byte) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write(message)
-	return mac.Sum(nil)
+	hasher := hmac.New(sha256.New, key)
+	hasher.Write(message)
+	return hasher.Sum(nil)
 }
 
 // generateNonce deterministically generates a private key from hStr.
-func generateNonce(priv *ecdh.PrivateKey, hStr []byte) *ecdh.PrivateKey {
+func generateNonce(priv, hStr []byte) []byte {
 	// a. h1 = H(m)
 	h1 := sha256.Sum256(hStr)
 
@@ -93,7 +67,7 @@ func generateNonce(priv *ecdh.PrivateKey, hStr []byte) *ecdh.PrivateKey {
 	buf := &bytes.Buffer{}
 	buf.Write(V)
 	buf.WriteByte(0x00)
-	buf.Write(priv.Bytes())
+	buf.Write(priv)
 	buf.Write(h1[:])
 
 	K = mac(K, buf.Bytes())
@@ -105,7 +79,7 @@ func generateNonce(priv *ecdh.PrivateKey, hStr []byte) *ecdh.PrivateKey {
 	buf.Reset()
 	buf.Write(V)
 	buf.WriteByte(0x01)
-	buf.Write(priv.Bytes())
+	buf.Write(priv)
 	buf.Write(h1[:])
 
 	K = mac(K, buf.Bytes())
@@ -119,9 +93,9 @@ func generateNonce(priv *ecdh.PrivateKey, hStr []byte) *ecdh.PrivateKey {
 		V = mac(K, V)
 
 		// Return if acceptable.
-		out, err := curve.NewPrivateKey(V)
-		if err == nil {
-			return out
+		vInt := new(big.Int).SetBytes(V)
+		if vInt.Sign() == 1 && vInt.Cmp(elliptic.P256().Params().N) == -1 {
+			return V
 		}
 
 		// K = HMAC_K(V || 0x00)
@@ -135,45 +109,141 @@ func generateNonce(priv *ecdh.PrivateKey, hStr []byte) *ecdh.PrivateKey {
 
 // generateChallenge deterministically generates the proof challenge from the
 // given elliptic curve points.
-func generateChallenge(p1, p2, p4 *ecdh.PublicKey, p3, p5 []byte) *big.Int {
+func generateChallenge(p1, p2, p3, p4, p5 *nistec.P256Point) []byte {
 	buf := &bytes.Buffer{}
 	buf.WriteByte(0x01) // Suite string
 	buf.WriteByte(0x02) // Front domain separator
-	buf.Write(pointToString(p1))
-	buf.Write(pointToString(p2))
-	buf.Write(pointToString(p3))
-	buf.Write(pointToString(p4))
-	buf.Write(pointToString(p5))
+	buf.Write(p1.BytesCompressed())
+	buf.Write(p2.BytesCompressed())
+	buf.Write(p3.BytesCompressed())
+	buf.Write(p4.BytesCompressed())
+	buf.Write(p5.BytesCompressed())
+	buf.WriteByte(0x00) // Back domain separator
+
+	cStr := sha256.Sum256(buf.Bytes())
+
+	return cStr[:16]
+}
+
+// proofToHash converts the VRF proof into the VRF output.
+func proofToHash(gamma []byte) [32]byte {
+	buf := &bytes.Buffer{}
+	buf.WriteByte(0x01) // Suite string
+	buf.WriteByte(0x03) // Front domain separator
+	buf.Write(gamma)
+	buf.WriteByte(0x00) // Back domain separator
+
+	return sha256.Sum256(buf.Bytes())
 }
 
 type PrivateKey struct {
-	inner *ecdh.PrivateKey
+	scalar []byte
+	point  *nistec.P256Point
 }
 
-var _ vrf.PrivateKey = &PrivateKey{}
-
 func (p *PrivateKey) Prove(m []byte) (index [32]byte, proof []byte) {
-	// ECVRF_prove
-	Y := p.inner.PublicKey()
-	H := encodeToCurve(Y.Bytes(), m)
-	hStr := pointToString(H)
+	H := encodeToCurve(p.point.BytesCompressed(), m)
+	hStr := H.BytesCompressed()
 
-	Gamma, err := p.inner.ECDH(H)
+	Gamma, err := new(nistec.P256Point).ScalarMult(H, p.scalar)
 	if err != nil {
 		panic(err)
 	}
 
-	k := generateNonce(p.inner, hStr)
-	c := generateChallenge(Y, H, Gamma, k.PublicKey(), k.ECDH(H))
+	k := generateNonce(p.scalar, hStr)
+	kB, err := new(nistec.P256Point).ScalarBaseMult(k)
+	if err != nil {
+		panic(err)
+	}
+	kH, err := new(nistec.P256Point).ScalarMult(H, k)
+	if err != nil {
+		panic(err)
+	}
+	c := generateChallenge(p.point, H, Gamma, kB, kH)
 
 	cInt := new(big.Int).SetBytes(c)
-	xInt := new(big.Int).SetBytes(p.inner.Bytes())
-	kInt := new(big.Int).SetBytes(k.Bytes())
+	xInt := new(big.Int).SetBytes(p.scalar)
+	kInt := new(big.Int).SetBytes(k)
 
 	sInt := new(big.Int).Mul(cInt, xInt)
 	sInt.Add(sInt, kInt).Mod(sInt, elliptic.P256().Params().N)
+
+	proof = make([]byte, 33+16+32)
+	copy(proof[:33], Gamma.BytesCompressed())
+	copy(proof[33:49], c)
+	sInt.FillBytes(proof[49:])
+
+	index = proofToHash(proof[:33])
+
+	return
 }
 
-func (p *PrivateKey) Public() vrf.PublicKey {
+func (p *PrivateKey) PublicKey() vrf.PublicKey {
+	return &PublicKey{point: p.point}
+}
 
+type PublicKey struct {
+	point *nistec.P256Point
+}
+
+func (p *PublicKey) verify(m, proof []byte) error {
+	// Decode proof.
+	if len(proof) != 33+16+32 {
+		return errors.New("vrf proof is invalid size")
+	}
+
+	Gamma, err := new(nistec.P256Point).SetBytes(proof[:33])
+	if err != nil {
+		return err
+	}
+
+	c := make([]byte, 32)
+	copy(c[16:], proof[33:49])
+
+	s := proof[49:]
+	sInt := new(big.Int).SetBytes(s)
+	if sInt.Sign() != 1 || sInt.Cmp(elliptic.P256().Params().N) != -1 {
+		return errors.New("vrf proof is malformed")
+	}
+
+	// Verify proof.
+	H := encodeToCurve(p.point.BytesCompressed(), m)
+
+	U, err := new(nistec.P256Point).ScalarBaseMult(s)
+	if err != nil {
+		return err
+	}
+	temp, err := new(nistec.P256Point).ScalarMult(p.point, c)
+	if err != nil {
+		return err
+	}
+	temp.Negate(temp)
+	U.Add(U, temp)
+
+	V, err := new(nistec.P256Point).ScalarMult(H, s)
+	if err != nil {
+		return err
+	}
+	_, err = temp.ScalarMult(Gamma, c)
+	if err != nil {
+		return err
+	}
+	temp.Negate(temp)
+	V.Add(V, temp)
+
+	cPrime := generateChallenge(p.point, H, Gamma, U, V)
+	if !bytes.Equal(c[16:], cPrime) {
+		return errors.New("vrf proof verification failed")
+	}
+
+	return nil
+}
+
+func (p *PublicKey) Verify(m, proof []byte) (index [32]byte, err error) {
+	err = p.verify(m, proof)
+	if err != nil {
+		return
+	}
+	index = proofToHash(proof[:33])
+	return
 }

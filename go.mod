@@ -3,6 +3,7 @@ module github.com/Bren2010/katie
 go 1.18
 
 require (
+	filippo.io/nistec v0.0.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect

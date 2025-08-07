@@ -4,7 +4,7 @@ package vrf
 // PrivateKey represents a VRF private key.
 type PrivateKey interface {
 	Prove(m []byte) (index [32]byte, proof []byte)
-	Public() PublicKey
+	PublicKey() PublicKey
 }
 
 // PublicKey represents a VRF public key.
