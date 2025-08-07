@@ -17,11 +17,11 @@ type KTSha256Ed25519 struct{}
 
 var _ CipherSuite = KTSha256Ed25519{}
 
-func (s KTSha256Ed25519) Id() uint16       { return 0x02 }
-func (s KTSha256Ed25519) Hash() hash.Hash  { return sha256.New() }
-func (s KTSha256Ed25519) OpeningSize() int { return 16 }
+func (s KTSha256Ed25519) Id() uint16                 { return 0x02 }
+func (s KTSha256Ed25519) Hash() hash.Hash            { return sha256.New() }
+func (s KTSha256Ed25519) CommitmentOpeningSize() int { return 16 }
 
-func (s KTSha256Ed25519) CommitmentBytes() []byte {
+func (s KTSha256Ed25519) CommitmentFixedBytes() []byte {
 	return []byte{
 		0xd8, 0x21, 0xf8, 0x79, 0x0d, 0x97, 0x70, 0x97,
 		0x96, 0xb4, 0xd7, 0x90, 0x33, 0x57, 0xc3, 0xf5,
@@ -29,7 +29,10 @@ func (s KTSha256Ed25519) CommitmentBytes() []byte {
 }
 
 func (s KTSha256Ed25519) ParseSigningPrivateKey(raw []byte) (SigningPrivateKey, error) {
-	decoded := make([]byte, hex.DecodedLen(len(raw)))
+	if len(raw) != 2*ed25519.SeedSize {
+		return nil, fmt.Errorf("encoding private key is unexpected size")
+	}
+	decoded := make([]byte, ed25519.SeedSize)
 	n, err := hex.Decode(decoded, raw)
 	if err != nil {
 		return nil, err

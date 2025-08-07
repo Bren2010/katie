@@ -11,8 +11,8 @@ import (
 type CipherSuite interface {
 	Id() uint16
 	Hash() hash.Hash
-	OpeningSize() int
-	CommitmentBytes() []byte
+	CommitmentOpeningSize() int
+	CommitmentFixedBytes() []byte
 
 	ParseSigningPrivateKey(raw []byte) (SigningPrivateKey, error)
 	ParseSigningPublicKey(raw []byte) (SigningPublicKey, error)

@@ -19,11 +19,11 @@ type KTSha256P256 struct{}
 
 var _ CipherSuite = KTSha256P256{}
 
-func (s KTSha256P256) Id() uint16       { return 0x01 }
-func (s KTSha256P256) Hash() hash.Hash  { return sha256.New() }
-func (s KTSha256P256) OpeningSize() int { return 16 }
+func (s KTSha256P256) Id() uint16                 { return 0x01 }
+func (s KTSha256P256) Hash() hash.Hash            { return sha256.New() }
+func (s KTSha256P256) CommitmentOpeningSize() int { return 16 }
 
-func (s KTSha256P256) CommitmentBytes() []byte {
+func (s KTSha256P256) CommitmentFixedBytes() []byte {
 	return []byte{
 		0xd8, 0x21, 0xf8, 0x79, 0x0d, 0x97, 0x70, 0x97,
 		0x96, 0xb4, 0xd7, 0x90, 0x33, 0x57, 0xc3, 0xf5,
