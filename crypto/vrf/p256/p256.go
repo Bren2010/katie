@@ -1,284 +1,179 @@
-// Copyright 2016 Google Inc. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// Package p256 implements a verifiable random function using curve p256.
 package p256
-
-// Discrete Log based VRF from Appendix A of CONIKS:
-// http://www.jbonneau.com/doc/MBBFF15-coniks.pdf
-// based on "Unique Ring Signatures, a Practical Construction"
-// http://fc13.ifca.ai/proc/5-1.pdf
 
 import (
 	"bytes"
-	"crypto"
-	"crypto/ecdsa"
+	"crypto/ecdh"
 	"crypto/elliptic"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
-	"crypto/sha512"
-	"crypto/x509"
-	"encoding/binary"
-	"encoding/pem"
-	"errors"
 	"math/big"
 
 	"github.com/Bren2010/katie/crypto/vrf"
 )
 
-var (
-	curve  = elliptic.P256()
-	params = curve.Params()
+var curve = ecdh.P256()
 
-	// ErrPointNotOnCurve occurs when a public key is not on the curve.
-	ErrPointNotOnCurve = errors.New("point is not on the P256 curve")
-	// ErrWrongKeyType occurs when a key is not an ECDSA key.
-	ErrWrongKeyType = errors.New("not an ECDSA key")
-	// ErrNoPEMFound occurs when attempting to parse a non PEM data structure.
-	ErrNoPEMFound = errors.New("no PEM block found")
-	// ErrInvalidVRF occurs when the VRF does not validate.
-	ErrInvalidVRF = errors.New("invalid VRF proof")
-)
+// marshalEcdh takes the (x, y) coordinates of a curve point and returns a
+// corresponding *ecdh.PublicKey structure.
+func marshalEcdh(x, y *big.Int) *ecdh.PublicKey {
+	buf := make([]byte, 65)
+	buf[0] = 0x04
+	x.FillBytes(buf[1:33])
+	y.FillBytes(buf[33:])
 
-// PublicKey holds a public VRF key.
-type PublicKey struct {
-	*ecdsa.PublicKey
-}
-
-// PrivateKey holds a private VRF key.
-type PrivateKey struct {
-	*ecdsa.PrivateKey
-}
-
-// GenerateKey generates a fresh keypair for this VRF
-func GenerateKey() (vrf.PrivateKey, vrf.PublicKey) {
-	key, err := ecdsa.GenerateKey(curve, rand.Reader)
+	pub, err := curve.NewPublicKey(buf)
 	if err != nil {
-		return nil, nil
+		panic(err)
 	}
-
-	return &PrivateKey{PrivateKey: key}, &PublicKey{PublicKey: &key.PublicKey}
+	return pub
 }
 
-// H1 hashes m to a curve point
-func H1(m []byte) (x, y *big.Int) {
-	h := sha512.New()
-	var i uint32
-	byteLen := (params.BitSize + 7) >> 3
-	for x == nil && i < 100 {
-		// TODO: Use a NIST specified DRBG.
-		h.Reset()
-		binary.Write(h, binary.BigEndian, i)
-		h.Write(m)
-		r := []byte{2} // Set point encoding to "compressed", y=0.
-		r = h.Sum(r)
-		x, y = elliptic.UnmarshalCompressed(curve, r[:byteLen+1])
-		i++
-	}
-	return
-}
+// encodeToCurve implements the trial-and-increment algorithm.
+func encodeToCurve(salt, m []byte) *ecdh.PublicKey {
+	ellipticCurve := elliptic.P256()
+	hasher := sha256.New()
+	counter := 0
 
-// H2 hashes to an integer [1,N-1]
-func H2(m []byte) *big.Int {
-	// NIST SP 800-90A § A.5.1: Simple discard method.
-	byteLen := (params.BitSize + 7) >> 3
-	one := big.NewInt(1)
-	limit := new(big.Int).Sub(params.N, one)
-	h := sha512.New()
-	for i := uint32(0); ; i++ {
-		// TODO: Use a NIST specified DRBG.
-		h.Reset()
-		binary.Write(h, binary.BigEndian, i)
-		h.Write(m)
-		b := h.Sum(nil)
-		k := new(big.Int).SetBytes(b[:byteLen])
-		if k.Cmp(limit) == -1 {
-			return k.Add(k, one)
+	for {
+		buf := &bytes.Buffer{}
+		buf.WriteByte(0x01) // Suite string
+		buf.WriteByte(0x01) // Front domain separator
+		buf.Write(salt)
+		buf.Write(m)
+		buf.WriteByte(byte(counter))
+		buf.WriteByte(0x00) // Back domain separator
+
+		hasher.Write(buf.Bytes())
+		hashStr := hasher.Sum([]byte{0x02})
+
+		x, y := elliptic.UnmarshalCompressed(ellipticCurve, hashStr)
+		if x != nil {
+			return marshalEcdh(x, y)
+		} else if counter == 255 {
+			panic("encode to curve failed unexpectedly")
 		}
+
+		hasher.Reset()
+		counter++
 	}
-	// Note: The lowest probability of successfully generating an n-byte value
-	// that's less than an n-byte number N is about 2^-8. We'll do up to 2^32
-	// attempts here, but can reasonably expect this loop to never go beyond a
-	// few thousand as (1-2^-8)^17001 = 2^-96.
 }
 
-// Evaluate returns the verifiable unpredictable function evaluated at m
-func (k PrivateKey) Evaluate(m []byte) (index [32]byte, proof []byte) {
-	nilIndex := [32]byte{}
-	// Prover chooses r <-- [1,N-1]
-	r, _, _, err := elliptic.GenerateKey(curve, rand.Reader)
+// pointToString converts an *ecdh.PublicKey to compressed NIST format.
+func pointToString(pt *ecdh.PublicKey) []byte {
+	encoded := pt.Bytes()
+
+	buf := make([]byte, 33)
+	buf[0] = 2 | (encoded[64] & 1)
+	copy(buf[1:33], encoded[1:33])
+
+	return buf
+}
+
+func mac(key, message []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(message)
+	return mac.Sum(nil)
+}
+
+// generateNonce deterministically generates a private key from hStr.
+func generateNonce(priv *ecdh.PrivateKey, hStr []byte) *ecdh.PrivateKey {
+	// a. h1 = H(m)
+	h1 := sha256.Sum256(hStr)
+
+	// b. V = 0x01 0x01 ... 0x01
+	V := make([]byte, 32)
+	for i, _ := range V {
+		V[i] = 0x01
+	}
+
+	// c. K = 0x00 0x00 ... 0x00
+	K := make([]byte, 32)
+
+	// d. K = HMAC_K(V || 0x00 || priv || h1)
+	buf := &bytes.Buffer{}
+	buf.Write(V)
+	buf.WriteByte(0x00)
+	buf.Write(priv.Bytes())
+	buf.Write(h1[:])
+
+	K = mac(K, buf.Bytes())
+
+	// e. V = HMAC_K(V)
+	V = mac(K, V)
+
+	// f. K = HMAC_K(V || 0x01 || priv || h1)
+	buf.Reset()
+	buf.Write(V)
+	buf.WriteByte(0x01)
+	buf.Write(priv.Bytes())
+	buf.Write(h1[:])
+
+	K = mac(K, buf.Bytes())
+
+	// g. V = HMAC_K(v)
+	V = mac(K, V)
+
+	// h. Repeat until a proper value is found:
+	for i := 0; i < 256; i++ {
+		// V = HMAC_K(V)
+		V = mac(K, V)
+
+		// Return if acceptable.
+		out, err := curve.NewPrivateKey(V)
+		if err == nil {
+			return out
+		}
+
+		// K = HMAC_K(V || 0x00)
+		K = mac(K, append(V, 0x00))
+		// V = HMAC_K(V)
+		V = mac(K, V)
+	}
+
+	panic("nonce generation failed unexpectedly")
+}
+
+// generateChallenge deterministically generates the proof challenge from the
+// given elliptic curve points.
+func generateChallenge(p1, p2, p4 *ecdh.PublicKey, p3, p5 []byte) *big.Int {
+	buf := &bytes.Buffer{}
+	buf.WriteByte(0x01) // Suite string
+	buf.WriteByte(0x02) // Front domain separator
+	buf.Write(pointToString(p1))
+	buf.Write(pointToString(p2))
+	buf.Write(pointToString(p3))
+	buf.Write(pointToString(p4))
+	buf.Write(pointToString(p5))
+}
+
+type PrivateKey struct {
+	inner *ecdh.PrivateKey
+}
+
+var _ vrf.PrivateKey = &PrivateKey{}
+
+func (p *PrivateKey) Prove(m []byte) (index [32]byte, proof []byte) {
+	// ECVRF_prove
+	Y := p.inner.PublicKey()
+	H := encodeToCurve(Y.Bytes(), m)
+	hStr := pointToString(H)
+
+	Gamma, err := p.inner.ECDH(H)
 	if err != nil {
-		return nilIndex, nil
+		panic(err)
 	}
-	ri := new(big.Int).SetBytes(r)
 
-	// H = H1(m)
-	Hx, Hy := H1(m)
+	k := generateNonce(p.inner, hStr)
+	c := generateChallenge(Y, H, Gamma, k.PublicKey(), k.ECDH(H))
 
-	// VRF_k(m) = [k]H
-	sHx, sHy := curve.ScalarMult(Hx, Hy, k.D.Bytes())
-	vrf := elliptic.Marshal(curve, sHx, sHy) // 65 bytes.
+	cInt := new(big.Int).SetBytes(c)
+	xInt := new(big.Int).SetBytes(p.inner.Bytes())
+	kInt := new(big.Int).SetBytes(k.Bytes())
 
-	// G is the base point
-	// s = H2(G, H, [k]G, VRF, [r]G, [r]H)
-	rGx, rGy := curve.ScalarBaseMult(r)
-	rHx, rHy := curve.ScalarMult(Hx, Hy, r)
-	var b bytes.Buffer
-	b.Write(elliptic.Marshal(curve, params.Gx, params.Gy))
-	b.Write(elliptic.Marshal(curve, Hx, Hy))
-	b.Write(elliptic.Marshal(curve, k.PublicKey.X, k.PublicKey.Y))
-	b.Write(vrf)
-	b.Write(elliptic.Marshal(curve, rGx, rGy))
-	b.Write(elliptic.Marshal(curve, rHx, rHy))
-	s := H2(b.Bytes())
-
-	// t = r−s*k mod N
-	t := new(big.Int).Sub(ri, new(big.Int).Mul(s, k.D))
-	t.Mod(t, params.N)
-
-	// Index = H(vrf)
-	index = sha256.Sum256(vrf)
-
-	// Write s, t, and vrf to a proof blob. Also write leading zeros before s and t
-	// if needed.
-	var buf bytes.Buffer
-	buf.Write(make([]byte, 32-len(s.Bytes())))
-	buf.Write(s.Bytes())
-	buf.Write(make([]byte, 32-len(t.Bytes())))
-	buf.Write(t.Bytes())
-	buf.Write(vrf)
-
-	return index, buf.Bytes()
+	sInt := new(big.Int).Mul(cInt, xInt)
+	sInt.Add(sInt, kInt).Mod(sInt, elliptic.P256().Params().N)
 }
 
-// ProofToHash asserts that proof is correct for m and outputs index.
-func (pk *PublicKey) ProofToHash(m, proof []byte) (index [32]byte, err error) {
-	nilIndex := [32]byte{}
-	if got, want := len(proof), 64+65; got != want {
-		return nilIndex, ErrInvalidVRF
-	}
+func (p *PrivateKey) Public() vrf.PublicKey {
 
-	// Parse proof into s, t, and vrf.
-	s := proof[0:32]
-	t := proof[32:64]
-	vrf := proof[64 : 64+65]
-
-	uHx, uHy := elliptic.Unmarshal(curve, vrf)
-	if uHx == nil {
-		return nilIndex, ErrInvalidVRF
-	}
-
-	// [t]G + [s]([k]G) = [t+ks]G
-	tGx, tGy := curve.ScalarBaseMult(t)
-	ksGx, ksGy := curve.ScalarMult(pk.X, pk.Y, s)
-	tksGx, tksGy := curve.Add(tGx, tGy, ksGx, ksGy)
-
-	// H = H1(m)
-	// [t]H + [s]VRF = [t+ks]H
-	Hx, Hy := H1(m)
-	tHx, tHy := curve.ScalarMult(Hx, Hy, t)
-	sHx, sHy := curve.ScalarMult(uHx, uHy, s)
-	tksHx, tksHy := curve.Add(tHx, tHy, sHx, sHy)
-
-	//   H2(G, H, [k]G, VRF, [t]G + [s]([k]G), [t]H + [s]VRF)
-	// = H2(G, H, [k]G, VRF, [t+ks]G, [t+ks]H)
-	// = H2(G, H, [k]G, VRF, [r]G, [r]H)
-	var b bytes.Buffer
-	b.Write(elliptic.Marshal(curve, params.Gx, params.Gy))
-	b.Write(elliptic.Marshal(curve, Hx, Hy))
-	b.Write(elliptic.Marshal(curve, pk.X, pk.Y))
-	b.Write(vrf)
-	b.Write(elliptic.Marshal(curve, tksGx, tksGy))
-	b.Write(elliptic.Marshal(curve, tksHx, tksHy))
-	h2 := H2(b.Bytes())
-
-	// Left pad h2 with zeros if needed. This will ensure that h2 is padded
-	// the same way s is.
-	var buf bytes.Buffer
-	buf.Write(make([]byte, 32-len(h2.Bytes())))
-	buf.Write(h2.Bytes())
-
-	if !hmac.Equal(s, buf.Bytes()) {
-		return nilIndex, ErrInvalidVRF
-	}
-	return sha256.Sum256(vrf), nil
-}
-
-// NewVRFSigner creates a signer object from a private key.
-func NewVRFSigner(key *ecdsa.PrivateKey) (vrf.PrivateKey, error) {
-	if *(key.Params()) != *curve.Params() {
-		return nil, ErrPointNotOnCurve
-	}
-	if !curve.IsOnCurve(key.X, key.Y) {
-		return nil, ErrPointNotOnCurve
-	}
-	return &PrivateKey{PrivateKey: key}, nil
-}
-
-// Public returns the corresponding public key as bytes.
-func (k PrivateKey) Public() crypto.PublicKey {
-	return &k.PublicKey
-}
-
-// NewVRFVerifier creates a verifier object from a public key.
-func NewVRFVerifier(pubkey *ecdsa.PublicKey) (vrf.PublicKey, error) {
-	if *(pubkey.Params()) != *curve.Params() {
-		return nil, ErrPointNotOnCurve
-	}
-	if !curve.IsOnCurve(pubkey.X, pubkey.Y) {
-		return nil, ErrPointNotOnCurve
-	}
-	return &PublicKey{PublicKey: pubkey}, nil
-}
-
-// NewVRFSignerFromPEM creates a vrf private key from a PEM data structure.
-func NewVRFSignerFromPEM(b []byte) (vrf.PrivateKey, error) {
-	p, _ := pem.Decode(b)
-	if p == nil {
-		return nil, ErrNoPEMFound
-	}
-	return NewVRFSignerFromRawKey(p.Bytes)
-}
-
-// NewVRFSignerFromRawKey returns the private key from a raw private key bytes.
-func NewVRFSignerFromRawKey(b []byte) (vrf.PrivateKey, error) {
-	k, err := x509.ParseECPrivateKey(b)
-	if err != nil {
-		return nil, err
-	}
-	return NewVRFSigner(k)
-}
-
-// NewVRFVerifierFromPEM creates a vrf public key from a PEM data structure.
-func NewVRFVerifierFromPEM(b []byte) (vrf.PublicKey, error) {
-	p, _ := pem.Decode(b)
-	if p == nil {
-		return nil, ErrNoPEMFound
-	}
-	return NewVRFVerifierFromRawKey(p.Bytes)
-}
-
-// NewVRFVerifierFromRawKey returns the public key from a raw public key bytes.
-func NewVRFVerifierFromRawKey(b []byte) (vrf.PublicKey, error) {
-	k, err := x509.ParsePKIXPublicKey(b)
-	if err != nil {
-		return nil, err
-	}
-	pk, ok := k.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, ErrWrongKeyType
-	}
-	return NewVRFVerifier(pk)
 }
