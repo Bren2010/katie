@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/elliptic"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"math/big"
@@ -56,7 +57,7 @@ func generateNonce(priv, hStr []byte) []byte {
 
 	// b. V = 0x01 0x01 ... 0x01
 	V := make([]byte, 32)
-	for i, _ := range V {
+	for i := range V {
 		V[i] = 0x01
 	}
 
@@ -141,6 +142,38 @@ type PrivateKey struct {
 	point  *nistec.P256Point
 }
 
+func GeneratePrivateKey() []byte {
+	for {
+		k := make([]byte, 32)
+		rand.Read(k)
+
+		kInt := new(big.Int).SetBytes(k)
+		if kInt.Sign() == 1 && kInt.Cmp(elliptic.P256().Params().N) == -1 {
+			return k
+		}
+	}
+}
+
+func NewPrivateKey(raw []byte) (*PrivateKey, error) {
+	if len(raw) != 32 {
+		return nil, errors.New("vrf private key is unexpected length")
+	}
+	kInt := new(big.Int).SetBytes(raw)
+	if kInt.Sign() != 1 || kInt.Cmp(elliptic.P256().Params().N) != -1 {
+		return nil, errors.New("vrf private key is malformed")
+	}
+
+	scalar := make([]byte, len(raw))
+	copy(scalar, raw)
+
+	point, err := new(nistec.P256Point).ScalarBaseMult(scalar)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PrivateKey{scalar: scalar, point: point}, nil
+}
+
 func (p *PrivateKey) Prove(m []byte) (index [32]byte, proof []byte) {
 	H := encodeToCurve(p.point.BytesCompressed(), m)
 	hStr := H.BytesCompressed()
@@ -184,6 +217,14 @@ func (p *PrivateKey) PublicKey() vrf.PublicKey {
 
 type PublicKey struct {
 	point *nistec.P256Point
+}
+
+func NewPublicKey(raw []byte) (*PublicKey, error) {
+	point, err := new(nistec.P256Point).SetBytes(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &PublicKey{point: point}, nil
 }
 
 func (p *PublicKey) verify(m, proof []byte) error {
