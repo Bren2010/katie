@@ -10,4 +10,5 @@ type PrivateKey interface {
 // PublicKey represents a VRF public key.
 type PublicKey interface {
 	Verify(m, proof []byte) (index [32]byte, err error)
+	Bytes() []byte
 }

@@ -217,3 +217,5 @@ func (p *PublicKey) Verify(m, proof []byte) (index [32]byte, err error) {
 
 	return proofToHash(Gamma), nil
 }
+
+func (p *PublicKey) Bytes() []byte { return p.point.Bytes() }

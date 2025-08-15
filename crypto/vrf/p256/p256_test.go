@@ -78,7 +78,7 @@ func TestVectors(t *testing.T) {
 			t.Fatal(err)
 		}
 		pub := priv.PublicKey().(*PublicKey)
-		if fmt.Sprintf("%x", pub.point.BytesCompressed()) != vector.Pub {
+		if fmt.Sprintf("%x", pub.Bytes()) != vector.Pub {
 			t.Fatal("unexpected public key computed")
 		}
 		index1, proof := priv.Prove(hexDecode(vector.Message))

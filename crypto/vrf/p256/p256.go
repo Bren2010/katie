@@ -305,3 +305,5 @@ func (p *PublicKey) Verify(m, proof []byte) (index [32]byte, err error) {
 	index = proofToHash(proof[:33])
 	return
 }
+
+func (p *PublicKey) Bytes() []byte { return p.point.BytesCompressed() }
