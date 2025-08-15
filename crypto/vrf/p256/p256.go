@@ -1,3 +1,4 @@
+// Package p256 implements the ECVRF-P256-SHA256-TAI cipher suite from RFC 9381.
 package p256
 
 import (
@@ -33,6 +34,10 @@ func encodeToCurve(salt, m []byte) *nistec.P256Point {
 		hashStr[0] = 0x02
 		copy(hashStr[1:], hash[:])
 
+		// Notes on point validation:
+		// - SetBytes verifies that the scalar is less than p.
+		// - SetBytes verifies that the point is on the curve.
+		// - Point can not be point at infinity because hashStr starts with 2.
 		point, err := new(nistec.P256Point).SetBytes(hashStr)
 		if err == nil {
 			return point
@@ -220,6 +225,13 @@ type PublicKey struct {
 }
 
 func NewPublicKey(raw []byte) (*PublicKey, error) {
+	// Notes on point validation:
+	// - SetBytes verifies the scalar(s) are less than p.
+	// - SetBytes verifies that the point is on the curve.
+	// - We manually check that the point is not the point at infinity.
+	if len(raw) == 1 {
+		return nil, errors.New("public key is malformed")
+	}
 	point, err := new(nistec.P256Point).SetBytes(raw)
 	if err != nil {
 		return nil, err
@@ -233,6 +245,11 @@ func (p *PublicKey) verify(m, proof []byte) error {
 		return errors.New("vrf proof is invalid size")
 	}
 
+	// Notes on point validation:
+	// - SetBytes verifies that the scalar is less than p.
+	// - SetBytes verifies that the point is on the curve.
+	// - SetBytes will return an error if the first byte isn't 2 or 3 due to the
+	//   input length. As such, the point can not be the point at infinity.
 	Gamma, err := new(nistec.P256Point).SetBytes(proof[:33])
 	if err != nil {
 		return err
