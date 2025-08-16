@@ -4,66 +4,28 @@ package commitments
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/binary"
-	"errors"
+
+	"github.com/Bren2010/katie/crypto/suites"
 )
 
-const (
-	// commitmentKeyLen should be robust against the birthday attack.
-	// One commitment is given for each leaf node throughout time.
-	commitmentKeyLen = 16 // 128 bits of security, supports 2^64 nodes.
-	// prefix is a string used to make the commitments from this package unique.
-	prefix = "Key Transparency Commitment"
-)
-
-var (
-	hashAlgo = sha256.New
-	// key is publicly known random fixed key for use in the HMAC function.
-	// This fixed key allows the commitment scheme to be modeled as a random oracle.
-	fixedKey = []byte{0xd8, 0x21, 0xf8, 0x79, 0xd, 0x97, 0x70, 0x97, 0x96, 0xb4, 0xd7, 0x90, 0x33, 0x57, 0xc3, 0xf5}
-	// ErrInvalidCommitment occurs when the commitment doesn't match the profile.
-	ErrInvalidCommitment = errors.New("invalid commitment")
-)
-
-// GenCommitmentKey generates a commitment key for use in Commit. This key must
-// be kept secret in order to prevent an adversary from learning what data has
-// been committed to by a commitment. To unseal and verify a commitment,
-// provide this key, along with the data under commitment to the client.
-//
-// In Key Transparency, the user generates this key, creates a commitment, and
-// signs it.  The user uploads the signed commitment along with this key and
-// the associated data to the server in order for the server to reveal the
-// associated data to senders. This commitment scheme keeps the associated data
-// from leaking to anyone that has not explicitly requested it from the server.
-func GenCommitmentKey() ([]byte, error) {
-	// Generate commitment nonce.
-	nonce := make([]byte, commitmentKeyLen)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return nonce, nil
+// GenerateOpening returns a randomly generated opening for a commitment.
+func GenerateOpening(suite suites.CipherSuite) []byte {
+	out := make([]byte, suite.CommitmentOpeningSize())
+	rand.Read(out)
+	return out
 }
 
-// Commit makes a cryptographic commitment under a specific userID to data.
-func Commit(userID string, data, nonce []byte) []byte {
-	mac := hmac.New(hashAlgo, fixedKey)
-	mac.Write([]byte(prefix))
-	mac.Write(nonce)
-
-	// Message
-	binary.Write(mac, binary.BigEndian, uint32(len(userID)))
-	mac.Write([]byte(userID))
-	mac.Write(data)
-
+// Commit returns a cryptographic commitment to `body` with the given `opening`.
+func Commit(suite suites.CipherSuite, opening, body []byte) []byte {
+	mac := hmac.New(suite.Hash, suite.CommitmentFixedBytes())
+	mac.Write(opening)
+	mac.Write(body)
 	return mac.Sum(nil)
 }
 
-// Verify customizes a commitment with a userID.
-func Verify(userID string, commitment, data, nonce []byte) error {
-	if got, want := Commit(userID, data, nonce),
-		commitment; !hmac.Equal(got, want) {
-		return ErrInvalidCommitment
-	}
-	return nil
+// Verify returns an error if `commitment` does not correspond to a commitment
+// to `body` with the given `opening.`
+func Verify(suite suites.CipherSuite, opening, body, commitment []byte) bool {
+	cand := Commit(suite, opening, body)
+	return hmac.Equal(commitment, cand)
 }
