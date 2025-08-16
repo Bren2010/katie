@@ -8,6 +8,10 @@ import (
 )
 
 // CipherSuite is the interface implemented by each supported cipher suite.
+//
+// All of the methods that start with "Parse" expect their input to come from
+// locally stored configuration. This may differ from how the same values are
+// serialized for use in the protocol.
 type CipherSuite interface {
 	Id() uint16
 	Hash() hash.Hash
@@ -23,11 +27,13 @@ type CipherSuite interface {
 
 // SigningPrivateKey is the interface implemented by signature private keys.
 type SigningPrivateKey interface {
-	Public() ([]byte, error)
 	Sign(message []byte) ([]byte, error)
+	Public() SigningPublicKey
 }
 
 // SigningPublicKey is the interface implemented by signature public keys.
 type SigningPublicKey interface {
 	Verify(message, sig []byte) bool
+	// Bytes returns the encoded public key, following protocol rules.
+	Bytes() []byte
 }

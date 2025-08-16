@@ -2,15 +2,14 @@ package suites
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/x509"
-	"encoding/pem"
-	"fmt"
 	"hash"
 	"math/big"
 
 	"github.com/Bren2010/katie/crypto/vrf"
+	"github.com/Bren2010/katie/crypto/vrf/p256"
 )
 
 // KTSha256P256 implements the KT cipher suite using SHA-256 for hashing and
@@ -31,53 +30,33 @@ func (s KTSha256P256) CommitmentFixedBytes() []byte {
 }
 
 func (s KTSha256P256) ParseSigningPrivateKey(raw []byte) (SigningPrivateKey, error) {
-	block, _ := pem.Decode(raw)
-	if block == nil || block.Type != "PRIVATE KEY" {
-		return nil, fmt.Errorf("failed to decode pem block")
-	}
-	priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), raw)
 	if err != nil {
 		return nil, err
 	}
-	ecdsaPriv, ok := priv.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("decoded private key is unexpected type")
-	}
-	return p256PrivateKey{ecdsaPriv}, nil
+	return p256PrivateKey{priv}, nil
 }
 
 func (s KTSha256P256) ParseSigningPublicKey(raw []byte) (SigningPublicKey, error) {
-	block, _ := pem.Decode(raw)
-	if block == nil || block.Type != "PUBLIC KEY" {
-		return nil, fmt.Errorf("failed to decode pem block")
-	}
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
 	if err != nil {
 		return nil, err
 	}
-	ecdsaPub, ok := pub.(ecdsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("decoded public key is unexpected type")
-	}
-	return p256PublicKey{&ecdsaPub}, nil
+	return p256PublicKey{pub}, nil
 }
 
 func (s KTSha256P256) ParseVRFPrivateKey(raw []byte) (vrf.PrivateKey, error) {
-	panic("unimplemented")
+	return p256.NewPrivateKey(raw)
 }
 
 func (s KTSha256P256) ParseVRFPublicKey(raw []byte) (vrf.PublicKey, error) {
-	panic("unimplemented")
+	return p256.NewPublicKey(raw)
 }
 
 // p256PrivateKey implements the SigningPrivateKey interface for a P-256 ECDSA
 // private key.
 type p256PrivateKey struct {
 	inner *ecdsa.PrivateKey
-}
-
-func (k p256PrivateKey) Public() ([]byte, error) {
-	return x509.MarshalPKIXPublicKey(k.inner.PublicKey)
 }
 
 func (k p256PrivateKey) Sign(message []byte) ([]byte, error) {
@@ -94,6 +73,10 @@ func (k p256PrivateKey) Sign(message []byte) ([]byte, error) {
 	copy(sig[64-len(sBytes):], sBytes)
 
 	return sig, nil
+}
+
+func (k p256PrivateKey) Public() SigningPublicKey {
+	return p256PublicKey{inner: &k.inner.PublicKey}
 }
 
 // p256PublicKey implements the SigningPublicKey interface for a P-256 ECDSA
@@ -113,4 +96,12 @@ func (k p256PublicKey) Verify(message, sig []byte) bool {
 	s.SetBytes(sig[32:])
 
 	return ecdsa.Verify(k.inner, digest[:], r, s)
+}
+
+func (k p256PublicKey) Bytes() []byte {
+	out, err := k.inner.Bytes()
+	if err != nil {
+		panic(err)
+	}
+	return out
 }

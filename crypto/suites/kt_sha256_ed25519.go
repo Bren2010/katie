@@ -4,11 +4,11 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"hash"
 
 	"github.com/Bren2010/katie/crypto/vrf"
+	"github.com/Bren2010/katie/crypto/vrf/edwards25519"
 )
 
 // KTSha256Ed25519 implements the KT cipher suite using SHA-256 for hashing and
@@ -29,39 +29,25 @@ func (s KTSha256Ed25519) CommitmentFixedBytes() []byte {
 }
 
 func (s KTSha256Ed25519) ParseSigningPrivateKey(raw []byte) (SigningPrivateKey, error) {
-	if len(raw) != 2*ed25519.SeedSize {
+	if len(raw) != ed25519.SeedSize {
 		return nil, fmt.Errorf("encoding private key is unexpected size")
 	}
-	decoded := make([]byte, ed25519.SeedSize)
-	n, err := hex.Decode(decoded, raw)
-	if err != nil {
-		return nil, err
-	} else if n != len(decoded) {
-		return nil, fmt.Errorf("unexpected number of bytes decoded")
-	}
-	return ed25519PrivateKey{ed25519.NewKeyFromSeed(decoded)}, nil
+	return ed25519PrivateKey{ed25519.NewKeyFromSeed(raw)}, nil
 }
 
 func (s KTSha256Ed25519) ParseSigningPublicKey(raw []byte) (SigningPublicKey, error) {
-	if len(raw) != 2*ed25519.PublicKeySize {
+	if len(raw) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("encoded public key is unexpected size")
 	}
-	decoded := make([]byte, ed25519.PublicKeySize)
-	n, err := hex.Decode(decoded, raw)
-	if err != nil {
-		return nil, err
-	} else if n != len(decoded) {
-		return nil, fmt.Errorf("unexpected number of bytes decoded")
-	}
-	return ed25519PublicKey{ed25519.PublicKey(decoded)}, nil
+	return ed25519PublicKey{ed25519.PublicKey(raw)}, nil
 }
 
 func (s KTSha256Ed25519) ParseVRFPrivateKey(raw []byte) (vrf.PrivateKey, error) {
-	panic("unimplemented")
+	return edwards25519.NewPrivateKey(raw)
 }
 
 func (s KTSha256Ed25519) ParseVRFPublicKey(raw []byte) (vrf.PublicKey, error) {
-	panic("unimplemented")
+	return edwards25519.NewPublicKey(raw)
 }
 
 // ed25519PrivateKey implements the SigningPrivateKey interface for an ed25519
@@ -70,12 +56,12 @@ type ed25519PrivateKey struct {
 	inner ed25519.PrivateKey
 }
 
-func (k ed25519PrivateKey) Public() ([]byte, error) {
-	return k.inner.Public().(ed25519.PublicKey), nil
-}
-
 func (k ed25519PrivateKey) Sign(message []byte) ([]byte, error) {
 	return k.inner.Sign(nil, message, crypto.Hash(0))
+}
+
+func (k ed25519PrivateKey) Public() SigningPublicKey {
+	return ed25519PublicKey{inner: k.inner.Public().(ed25519.PublicKey)}
 }
 
 // ed25519PublicKey implements the SigningPublicKey interface for an ed25519
@@ -87,3 +73,5 @@ type ed25519PublicKey struct {
 func (k ed25519PublicKey) Verify(message, sig []byte) bool {
 	return ed25519.Verify(k.inner, message, sig)
 }
+
+func (k ed25519PublicKey) Bytes() []byte { return k.inner }
