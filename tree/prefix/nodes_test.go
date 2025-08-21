@@ -3,22 +3,33 @@ package prefix
 import (
 	"bytes"
 	"testing"
+
+	"github.com/Bren2010/katie/crypto/suites"
 )
 
+func makeBytes(b byte) []byte {
+	out := make([]byte, 32)
+	for i := range len(out) {
+		out[i] = b
+	}
+	return out
+}
+
 func TestMarshalUnmarshal1(t *testing.T) {
+	cs := suites.KTSha256P256{}
 	n1 := parentNode{
 		left: parentNode{
-			left:  leafNode{[32]byte{1}, [32]byte{2}},
-			right: leafNode{[32]byte{3}, [32]byte{4}},
+			left:  leafNode{makeBytes(1), makeBytes(2)},
+			right: leafNode{makeBytes(3), makeBytes(4)},
 		},
-		right: leafNode{[32]byte{5}, [32]byte{6}},
+		right: leafNode{makeBytes(5), makeBytes(6)},
 	}
 
 	buf := &bytes.Buffer{}
 	if err := n1.Marshal(buf); err != nil {
 		t.Fatal(err)
 	}
-	n2, err := unmarshalNode(bytes.NewBuffer(buf.Bytes()))
+	n2, err := unmarshalNode(cs, bytes.NewBuffer(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,11 +40,12 @@ func TestMarshalUnmarshal1(t *testing.T) {
 }
 
 func TestMarshalUnmarshal2(t *testing.T) {
+	cs := suites.KTSha256P256{}
 	n1 := parentNode{
-		left: leafNode{[32]byte{1}, [32]byte{2}},
+		left: leafNode{makeBytes(1), makeBytes(2)},
 		right: parentNode{
-			left:  leafNode{[32]byte{3}, [32]byte{4}},
-			right: leafNode{[32]byte{5}, [32]byte{6}},
+			left:  leafNode{makeBytes(3), makeBytes(4)},
+			right: leafNode{makeBytes(5), makeBytes(6)},
 		},
 	}
 
@@ -41,12 +53,11 @@ func TestMarshalUnmarshal2(t *testing.T) {
 	if err := n1.Marshal(buf); err != nil {
 		t.Fatal(err)
 	}
-	n2, err := unmarshalNode(bytes.NewBuffer(buf.Bytes()))
+	n2, err := unmarshalNode(cs, bytes.NewBuffer(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Log(buf.Len() - (32 * 6))
 	if got, want := n2.String(), n1.String(); got != want {
 		t.Fatal("unmarshalled value incorrectly")
 	}

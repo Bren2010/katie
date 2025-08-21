@@ -10,6 +10,8 @@ import (
 	"github.com/Bren2010/katie/crypto/suites"
 )
 
+const TargetTileWeight = 2000
+
 const (
 	emptyNodeType uint8 = iota
 	leafNodeType
@@ -25,7 +27,7 @@ func encodeUvarint(x uint64) []byte {
 
 type node interface {
 	String() string
-	Weight() int
+	Weight(cs suites.CipherSuite) int
 	Marshal(buf *bytes.Buffer) error
 }
 
@@ -42,7 +44,9 @@ func (pn parentNode) String() string {
 // Returns the same weight as an externalNode so that the breadth-first search
 // for building tiles can incrementally include more nodes, rather than starting
 // with a tile that's too large and trying to figure out how to trim it down.
-func (pn parentNode) Weight() int { return 1 + 32 + (8 * 2) }
+func (pn parentNode) Weight(cs suites.CipherSuite) int {
+	return 1 + cs.HashSize() + (2 * binary.MaxVarintLen64)
+}
 
 func (pn parentNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(parentNodeType); err != nil {
@@ -64,7 +68,7 @@ func hashContent(cs suites.CipherSuite, n node) []byte {
 	case parentNode:
 		return append([]byte{0x02}, n.Hash(cs)...)
 	case externalNode:
-		return append([]byte{0x02}, n.hash[:]...)
+		return append([]byte{0x02}, n.hash...)
 	default:
 		panic("unexpected node type")
 	}
@@ -89,7 +93,7 @@ type emptyNode struct{}
 
 func (en emptyNode) String() string { return "empty" }
 
-func (en emptyNode) Weight() int { return 1 }
+func (en emptyNode) Weight(cs suites.CipherSuite) int { return 1 }
 
 func (en emptyNode) Marshal(buf *bytes.Buffer) error {
 	return buf.WriteByte(emptyNodeType)
@@ -97,17 +101,16 @@ func (en emptyNode) Marshal(buf *bytes.Buffer) error {
 
 // leafNode contains the VRF output and commitment stored in a leaf node.
 type leafNode struct {
-	vrfOutput  [32]byte
-	commitment [32]byte
+	vrfOutput, commitment []byte
 }
 
-func newLeafNode(buf *bytes.Buffer) (node, error) {
-	var vrfOutput [32]byte
-	if _, err := io.ReadFull(buf, vrfOutput[:]); err != nil {
+func newLeafNode(cs suites.CipherSuite, buf *bytes.Buffer) (node, error) {
+	vrfOutput := make([]byte, cs.HashSize())
+	if _, err := io.ReadFull(buf, vrfOutput); err != nil {
 		return nil, err
 	}
-	var commitment [32]byte
-	if _, err := io.ReadFull(buf, commitment[:]); err != nil {
+	commitment := make([]byte, cs.HashSize())
+	if _, err := io.ReadFull(buf, commitment); err != nil {
 		return nil, err
 	}
 	return leafNode{vrfOutput, commitment}, nil
@@ -117,14 +120,16 @@ func (ln leafNode) String() string {
 	return fmt.Sprintf("[%x;%x]", ln.vrfOutput, ln.commitment)
 }
 
-func (ln leafNode) Weight() int { return 1 + (32 * 2) }
+func (ln leafNode) Weight(cs suites.CipherSuite) int {
+	return 1 + (2 * cs.HashSize())
+}
 
 func (ln leafNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(leafNodeType); err != nil {
 		return err
-	} else if _, err := buf.Write(ln.vrfOutput[:]); err != nil {
+	} else if _, err := buf.Write(ln.vrfOutput); err != nil {
 		return err
-	} else if _, err := buf.Write(ln.commitment[:]); err != nil {
+	} else if _, err := buf.Write(ln.commitment); err != nil {
 		return err
 	}
 	return nil
@@ -132,21 +137,21 @@ func (ln leafNode) Marshal(buf *bytes.Buffer) error {
 
 func (ln leafNode) Hash(cs suites.CipherSuite) []byte {
 	h := cs.Hash()
-	h.Write(ln.vrfOutput[:])
-	h.Write(ln.commitment[:])
+	h.Write(ln.vrfOutput)
+	h.Write(ln.commitment)
 	return h.Sum(nil)
 }
 
 // externalNode represents a parent node that's stored in another tile.
 type externalNode struct {
-	hash [32]byte // The hash of this subtree.
-	ver  uint64   // The prefix tree version where the parent was created.
-	ctr  uint64   // The tile counter where the parent node is stored.
+	hash []byte // The hash of this subtree.
+	ver  uint64 // The prefix tree version where the parent was created.
+	ctr  uint64 // The tile counter where the parent node is stored.
 }
 
-func newExternalNode(buf *bytes.Buffer) (node, error) {
-	var hash [32]byte
-	if _, err := io.ReadFull(buf, hash[:]); err != nil {
+func newExternalNode(cs suites.CipherSuite, buf *bytes.Buffer) (node, error) {
+	hash := make([]byte, cs.HashSize())
+	if _, err := io.ReadFull(buf, hash); err != nil {
 		return nil, err
 	}
 	ver, err := binary.ReadUvarint(buf)
@@ -164,14 +169,14 @@ func (en externalNode) String() string {
 	return fmt.Sprintf("<%v;%v>", en.ver, en.ctr)
 }
 
-func (en externalNode) Weight() int {
-	return 1 + 32 + (binary.MaxVarintLen64 * 2)
+func (en externalNode) Weight(cs suites.CipherSuite) int {
+	return 1 + cs.HashSize() + (2 * binary.MaxVarintLen64)
 }
 
 func (en externalNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(externalNodeType); err != nil {
 		return err
-	} else if _, err := buf.Write(en.hash[:]); err != nil {
+	} else if _, err := buf.Write(en.hash); err != nil {
 		return err
 	} else if _, err := buf.Write(encodeUvarint(en.ver)); err != nil {
 		return err
@@ -181,7 +186,7 @@ func (en externalNode) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-func unmarshalNode(buf *bytes.Buffer) (node, error) {
+func unmarshalNode(cs suites.CipherSuite, buf *bytes.Buffer) (node, error) {
 	b, err := buf.ReadByte()
 	if err != nil {
 		return nil, err
@@ -189,11 +194,11 @@ func unmarshalNode(buf *bytes.Buffer) (node, error) {
 
 	switch b {
 	case parentNodeType:
-		left, err := unmarshalNode(buf)
+		left, err := unmarshalNode(cs, buf)
 		if err != nil {
 			return nil, err
 		}
-		right, err := unmarshalNode(buf)
+		right, err := unmarshalNode(cs, buf)
 		if err != nil {
 			return nil, err
 		}
@@ -203,12 +208,74 @@ func unmarshalNode(buf *bytes.Buffer) (node, error) {
 		return emptyNode{}, nil
 
 	case leafNodeType:
-		return newLeafNode(buf)
+		return newLeafNode(cs, buf)
 
 	case externalNodeType:
-		return newExternalNode(buf)
+		return newExternalNode(cs, buf)
 
 	default:
 		return nil, errors.New("read unexpected byte")
 	}
+}
+
+// makeOneTile performs a breadth-first search to produce the largest tile
+// possible without exceeing TargetTileWeight. The tile is stored in root and
+// ejected nodes are returned.
+func makeOneTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node) []node {
+	// Queue for the breadth-first search through the tree.
+	queue := make([]*node, 1)
+	queue[0] = root
+
+	// Weight (approx. size in bytes) of the current tile.
+	weight := (*root).Weight(cs)
+
+	// Nodes that were ejected from this tile because they don't fit.
+	ejected := make([]node, 0)
+
+	for len(queue) > 0 {
+		ptr := queue[0]
+		queue = queue[1:]
+
+		pn, ok := (*ptr).(parentNode)
+		if !ok {
+			// If n is any type other than parentNode, then it is necessarily
+			// included in the current tile.
+			continue
+		}
+
+		newWeight := weight - pn.Weight(cs) + pn.left.Weight(cs) + pn.right.Weight(cs)
+		if newWeight <= TargetTileWeight {
+			queue = append(queue, &pn.left, &pn.right)
+			weight = newWeight
+		} else {
+			ejected = append(ejected, pn)
+			*ptr = externalNode{
+				hash: pn.Hash(cs),
+				ver:  ver,
+				ctr:  ctrOffset + uint64(len(ejected)),
+			}
+		}
+	}
+
+	return ejected
+}
+
+// tiles converts a (possibly abridged) prefix tree in `root` into a series of
+// tiles / subtrees that obey a maximum size limit.
+func tiles(cs suites.CipherSuite, ver uint64, root node) []node {
+	queue := make([]node, 0)
+	queue[0] = root
+
+	out := make([]node, 0)
+
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+
+		ejected := makeOneTile(cs, ver, uint64(len(out)), &n)
+		queue = append(queue, ejected...)
+		out = append(out, n)
+	}
+
+	return out
 }
