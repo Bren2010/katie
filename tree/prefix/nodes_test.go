@@ -8,8 +8,8 @@ import (
 func TestMarshalUnmarshal1(t *testing.T) {
 	n1 := parentNode{
 		left: parentNode{
-			leafNode{[32]byte{1}, [32]byte{2}},
-			leafNode{[32]byte{3}, [32]byte{4}},
+			left:  leafNode{[32]byte{1}, [32]byte{2}},
+			right: leafNode{[32]byte{3}, [32]byte{4}},
 		},
 		right: leafNode{[32]byte{5}, [32]byte{6}},
 	}
@@ -32,8 +32,8 @@ func TestMarshalUnmarshal2(t *testing.T) {
 	n1 := parentNode{
 		left: leafNode{[32]byte{1}, [32]byte{2}},
 		right: parentNode{
-			leafNode{[32]byte{3}, [32]byte{4}},
-			leafNode{[32]byte{5}, [32]byte{6}},
+			left:  leafNode{[32]byte{3}, [32]byte{4}},
+			right: leafNode{[32]byte{5}, [32]byte{6}},
 		},
 	}
 

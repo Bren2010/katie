@@ -1,9 +1,14 @@
 package prefix
 
-const maxWeight = 2000
+import "github.com/Bren2010/katie/crypto/suites"
 
-func makeOneTile(ver, ctrOffset uint64, root *node) ([]node, error) {
-	// Queue for a breadth-first search through the prefix tree.
+const TargetTileWeight = 2000
+
+// makeOneTile performs a breadth-first search to produce the largest tile
+// possible without exceeing TargetTileWeight. The tile is stored in root and
+// ejected nodes are returned.
+func makeOneTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node) []node {
+	// Queue for the breadth-first search through the tree.
 	queue := make([]*node, 1)
 	queue[0] = root
 
@@ -25,45 +30,38 @@ func makeOneTile(ver, ctrOffset uint64, root *node) ([]node, error) {
 		}
 
 		newWeight := weight - pn.Weight() + pn.left.Weight() + pn.right.Weight()
-		if newWeight <= maxWeight {
+		if newWeight <= TargetTileWeight {
 			queue = append(queue, &pn.left, &pn.right)
 			weight = newWeight
 		} else {
 			ejected = append(ejected, pn)
 			*ptr = externalNode{
-				hash: TODO,
+				hash: ([32]byte)(pn.Hash(cs)),
 				ver:  ver,
 				ctr:  ctrOffset + uint64(len(ejected)),
 			}
 		}
 	}
 
-	return ejected, nil
+	return ejected
 }
 
-func tiles(ver uint64, root node) ([]node, error) {
-	queue := make([]node, 1)
+// tiles converts a (possibly abridged) prefix tree in `root` into a series of
+// tiles / subtrees that obey a maximum size limit.
+func tiles(cs suites.CipherSuite, ver uint64, root node) []node {
+	queue := make([]node, 0)
 	queue[0] = root
 
-	weight := root.Weight()
-
-	ejected := make([]node, 0)
+	out := make([]node, 0)
 
 	for len(queue) > 0 {
-		pn, ok := queue[0].(*node)
+		n := queue[0]
 		queue = queue[1:]
-		if !ok {
-			// If n is any type other than parentNode, then it is necessarily
-			// included in the current tile.
-			continue
-		}
 
-		newWeight := weight - pn.Weight() + pn.left.Weight() + pn.right.Weight()
-		if newWeight <= maxWeight {
-			queue = append(queue, pn.left, pn.right)
-			weight = newWeight
-		} else {
-
-		}
+		ejected := makeOneTile(cs, ver, uint64(len(out)), &n)
+		queue = append(queue, ejected...)
+		out = append(out, n)
 	}
+
+	return out
 }
