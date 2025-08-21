@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -21,6 +22,7 @@ func encodeUvarint(x uint64) []byte {
 }
 
 type node interface {
+	String() string
 	Marshal(buf *bytes.Buffer) error
 	Count() int
 }
@@ -30,7 +32,11 @@ type parentNode struct {
 	left, right node
 }
 
-func (pn *parentNode) Marshal(buf *bytes.Buffer) error {
+func (pn parentNode) String() string {
+	return fmt.Sprintf("(%v, %v)", pn.left.String(), pn.right.String())
+}
+
+func (pn parentNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(parentNodeType); err != nil {
 		return err
 	} else if err := pn.left.Marshal(buf); err != nil {
@@ -41,16 +47,18 @@ func (pn *parentNode) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-func (pn *parentNode) Count() int { return pn.left.Count() + pn.right.Count() }
+func (pn parentNode) Count() int { return pn.left.Count() + pn.right.Count() }
 
 // emptyNode represents a non-existent child of a parent node.
 type emptyNode struct{}
 
-func (en *emptyNode) Marshal(buf *bytes.Buffer) error {
+func (en emptyNode) String() string { return "empty" }
+
+func (en emptyNode) Marshal(buf *bytes.Buffer) error {
 	return buf.WriteByte(emptyNodeType)
 }
 
-func (en *emptyNode) Count() int { return 1 }
+func (en emptyNode) Count() int { return 1 }
 
 // leafNode contains the VRF output and commitment stored in a leaf node.
 type leafNode struct {
@@ -70,7 +78,11 @@ func newLeafNode(buf *bytes.Buffer) (*leafNode, error) {
 	return &leafNode{vrfOutput, commitment}, nil
 }
 
-func (ln *leafNode) Marshal(buf *bytes.Buffer) error {
+func (ln leafNode) String() string {
+	return fmt.Sprintf("[%x;%x]", ln.vrfOutput, ln.commitment)
+}
+
+func (ln leafNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(leafNodeType); err != nil {
 		return err
 	} else if _, err := buf.Write(ln.vrfOutput[:]); err != nil {
@@ -81,7 +93,7 @@ func (ln *leafNode) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-func (ln *leafNode) Count() int { return 1 }
+func (ln leafNode) Count() int { return 1 }
 
 // externalNode represents a parent node that's stored in another tile.
 type externalNode struct {
@@ -106,7 +118,11 @@ func newExternalNode(buf *bytes.Buffer) (*externalNode, error) {
 	return &externalNode{hash, ver, ctr}, nil
 }
 
-func (en *externalNode) Marshal(buf *bytes.Buffer) error {
+func (en externalNode) String() string {
+	return fmt.Sprintf("<%v;%v>", en.ver, en.ctr)
+}
+
+func (en externalNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(externalNodeType); err != nil {
 		return err
 	} else if _, err := buf.Write(en.hash[:]); err != nil {
@@ -119,7 +135,7 @@ func (en *externalNode) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-func (en *externalNode) Count() int { return 1 }
+func (en externalNode) Count() int { return 1 }
 
 func unmarshalNode(buf *bytes.Buffer) (node, error) {
 	b, err := buf.ReadByte()
@@ -137,10 +153,10 @@ func unmarshalNode(buf *bytes.Buffer) (node, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &parentNode{left, right}, nil
+		return parentNode{left, right}, nil
 
 	case emptyNodeType:
-		return &emptyNode{}, nil
+		return emptyNode{}, nil
 
 	case leafNodeType:
 		return newLeafNode(buf)
