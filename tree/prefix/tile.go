@@ -1,170 +1,69 @@
 package prefix
 
-import (
-	"bytes"
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"io"
-)
+const maxWeight = 2000
 
-const (
-	parentNodeType uint8 = iota
-	emptyNodeType
-	leafNodeType
-	externalNodeType
-)
+func makeOneTile(ver, ctrOffset uint64, root *node) ([]node, error) {
+	// Queue for a breadth-first search through the prefix tree.
+	queue := make([]*node, 1)
+	queue[0] = root
 
-func encodeUvarint(x uint64) []byte {
-	encoded := make([]byte, binary.MaxVarintLen64)
-	n := binary.PutUvarint(encoded, x)
-	return encoded[:n]
-}
+	// Weight (approx. size in bytes) of the current tile.
+	weight := (*root).Weight()
 
-type node interface {
-	String() string
-	Marshal(buf *bytes.Buffer) error
-	Count() int
-}
+	// Nodes that were ejected from this tile because they don't fit.
+	ejected := make([]node, 0)
 
-// parentNode represents a parent node within a given tile.
-type parentNode struct {
-	left, right node
-}
+	for len(queue) > 0 {
+		ptr := queue[0]
+		queue = queue[1:]
 
-func (pn parentNode) String() string {
-	return fmt.Sprintf("(%v, %v)", pn.left.String(), pn.right.String())
-}
-
-func (pn parentNode) Marshal(buf *bytes.Buffer) error {
-	if err := buf.WriteByte(parentNodeType); err != nil {
-		return err
-	} else if err := pn.left.Marshal(buf); err != nil {
-		return err
-	} else if err := pn.right.Marshal(buf); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (pn parentNode) Count() int { return pn.left.Count() + pn.right.Count() }
-
-// emptyNode represents a non-existent child of a parent node.
-type emptyNode struct{}
-
-func (en emptyNode) String() string { return "empty" }
-
-func (en emptyNode) Marshal(buf *bytes.Buffer) error {
-	return buf.WriteByte(emptyNodeType)
-}
-
-func (en emptyNode) Count() int { return 1 }
-
-// leafNode contains the VRF output and commitment stored in a leaf node.
-type leafNode struct {
-	vrfOutput  [32]byte
-	commitment [32]byte
-}
-
-func newLeafNode(buf *bytes.Buffer) (*leafNode, error) {
-	var vrfOutput [32]byte
-	if _, err := io.ReadFull(buf, vrfOutput[:]); err != nil {
-		return nil, err
-	}
-	var commitment [32]byte
-	if _, err := io.ReadFull(buf, commitment[:]); err != nil {
-		return nil, err
-	}
-	return &leafNode{vrfOutput, commitment}, nil
-}
-
-func (ln leafNode) String() string {
-	return fmt.Sprintf("[%x;%x]", ln.vrfOutput, ln.commitment)
-}
-
-func (ln leafNode) Marshal(buf *bytes.Buffer) error {
-	if err := buf.WriteByte(leafNodeType); err != nil {
-		return err
-	} else if _, err := buf.Write(ln.vrfOutput[:]); err != nil {
-		return err
-	} else if _, err := buf.Write(ln.commitment[:]); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ln leafNode) Count() int { return 1 }
-
-// externalNode represents a parent node that's stored in another tile.
-type externalNode struct {
-	hash [32]byte // The hash of this subtree.
-	ver  uint64   // The prefix tree version where the parent was created.
-	ctr  uint64   // The tile counter where the parent node is stored.
-}
-
-func newExternalNode(buf *bytes.Buffer) (*externalNode, error) {
-	var hash [32]byte
-	if _, err := io.ReadFull(buf, hash[:]); err != nil {
-		return nil, err
-	}
-	ver, err := binary.ReadUvarint(buf)
-	if err != nil {
-		return nil, err
-	}
-	ctr, err := binary.ReadUvarint(buf)
-	if err != nil {
-		return nil, err
-	}
-	return &externalNode{hash, ver, ctr}, nil
-}
-
-func (en externalNode) String() string {
-	return fmt.Sprintf("<%v;%v>", en.ver, en.ctr)
-}
-
-func (en externalNode) Marshal(buf *bytes.Buffer) error {
-	if err := buf.WriteByte(externalNodeType); err != nil {
-		return err
-	} else if _, err := buf.Write(en.hash[:]); err != nil {
-		return err
-	} else if _, err := buf.Write(encodeUvarint(en.ver)); err != nil {
-		return err
-	} else if _, err := buf.Write(encodeUvarint(en.ctr)); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (en externalNode) Count() int { return 1 }
-
-func unmarshalNode(buf *bytes.Buffer) (node, error) {
-	b, err := buf.ReadByte()
-	if err != nil {
-		return nil, err
-	}
-
-	switch b {
-	case parentNodeType:
-		left, err := unmarshalNode(buf)
-		if err != nil {
-			return nil, err
+		pn, ok := (*ptr).(parentNode)
+		if !ok {
+			// If n is any type other than parentNode, then it is necessarily
+			// included in the current tile.
+			continue
 		}
-		right, err := unmarshalNode(buf)
-		if err != nil {
-			return nil, err
+
+		newWeight := weight - pn.Weight() + pn.left.Weight() + pn.right.Weight()
+		if newWeight <= maxWeight {
+			queue = append(queue, &pn.left, &pn.right)
+			weight = newWeight
+		} else {
+			ejected = append(ejected, pn)
+			*ptr = externalNode{
+				hash: TODO,
+				ver:  ver,
+				ctr:  ctrOffset + uint64(len(ejected)),
+			}
 		}
-		return parentNode{left, right}, nil
+	}
 
-	case emptyNodeType:
-		return emptyNode{}, nil
+	return ejected, nil
+}
 
-	case leafNodeType:
-		return newLeafNode(buf)
+func tiles(ver uint64, root node) ([]node, error) {
+	queue := make([]node, 1)
+	queue[0] = root
 
-	case externalNodeType:
-		return newExternalNode(buf)
+	weight := root.Weight()
 
-	default:
-		return nil, errors.New("read unexpected byte")
+	ejected := make([]node, 0)
+
+	for len(queue) > 0 {
+		pn, ok := queue[0].(*node)
+		queue = queue[1:]
+		if !ok {
+			// If n is any type other than parentNode, then it is necessarily
+			// included in the current tile.
+			continue
+		}
+
+		newWeight := weight - pn.Weight() + pn.left.Weight() + pn.right.Weight()
+		if newWeight <= maxWeight {
+			queue = append(queue, pn.left, pn.right)
+			weight = newWeight
+		} else {
+
+		}
 	}
 }

@@ -15,6 +15,7 @@ import (
 type CipherSuite interface {
 	Id() uint16
 	Hash() hash.Hash
+	HashSize() int
 	CommitmentOpeningSize() int
 	CommitmentFixedBytes() []byte
 

@@ -20,6 +20,7 @@ var _ CipherSuite = KTSha256P256{}
 
 func (s KTSha256P256) Id() uint16                 { return 0x01 }
 func (s KTSha256P256) Hash() hash.Hash            { return sha256.New() }
+func (s KTSha256P256) HashSize() int              { return 32 }
 func (s KTSha256P256) CommitmentOpeningSize() int { return 16 }
 
 func (s KTSha256P256) CommitmentFixedBytes() []byte {
