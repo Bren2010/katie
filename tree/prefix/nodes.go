@@ -28,6 +28,7 @@ func encodeUvarint(x uint64) []byte {
 type node interface {
 	String() string
 	Weight(cs suites.CipherSuite) int
+	Hash(cs suites.CipherSuite) []byte
 	Marshal(buf *bytes.Buffer) error
 }
 
@@ -48,6 +49,21 @@ func (pn parentNode) Weight(cs suites.CipherSuite) int {
 	return 1 + cs.HashSize() + (2 * binary.MaxVarintLen64)
 }
 
+func (pn parentNode) Hash(cs suites.CipherSuite) []byte {
+	if pn.hash != nil {
+		return pn.hash
+	}
+
+	h := cs.Hash()
+	h.Write([]byte{0x02})
+	h.Write(pn.left.Hash(cs))
+	h.Write(pn.right.Hash(cs))
+	out := h.Sum(nil)
+
+	pn.hash = out
+	return out
+}
+
 func (pn parentNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(parentNodeType); err != nil {
 		return err
@@ -59,41 +75,16 @@ func (pn parentNode) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-func hashContent(cs suites.CipherSuite, n node) []byte {
-	switch n := n.(type) {
-	case emptyNode:
-		return make([]byte, 1+cs.HashSize())
-	case leafNode:
-		return append([]byte{0x01}, n.Hash(cs)...)
-	case parentNode:
-		return append([]byte{0x02}, n.Hash(cs)...)
-	case externalNode:
-		return append([]byte{0x02}, n.hash...)
-	default:
-		panic("unexpected node type")
-	}
-}
-
-func (pn *parentNode) Hash(cs suites.CipherSuite) []byte {
-	if pn.hash != nil {
-		return pn.hash
-	}
-
-	h := cs.Hash()
-	h.Write(hashContent(cs, pn.left))
-	h.Write(hashContent(cs, pn.right))
-	out := h.Sum(nil)
-
-	pn.hash = out
-	return out
-}
-
 // emptyNode represents a non-existent child of a parent node.
 type emptyNode struct{}
 
 func (en emptyNode) String() string { return "empty" }
 
 func (en emptyNode) Weight(cs suites.CipherSuite) int { return 1 }
+
+func (en emptyNode) Hash(cs suites.CipherSuite) []byte {
+	return make([]byte, cs.HashSize())
+}
 
 func (en emptyNode) Marshal(buf *bytes.Buffer) error {
 	return buf.WriteByte(emptyNodeType)
@@ -124,6 +115,14 @@ func (ln leafNode) Weight(cs suites.CipherSuite) int {
 	return 1 + (2 * cs.HashSize())
 }
 
+func (ln leafNode) Hash(cs suites.CipherSuite) []byte {
+	h := cs.Hash()
+	h.Write([]byte{0x01})
+	h.Write(ln.vrfOutput)
+	h.Write(ln.commitment)
+	return h.Sum(nil)
+}
+
 func (ln leafNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(leafNodeType); err != nil {
 		return err
@@ -133,13 +132,6 @@ func (ln leafNode) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	return nil
-}
-
-func (ln leafNode) Hash(cs suites.CipherSuite) []byte {
-	h := cs.Hash()
-	h.Write(ln.vrfOutput)
-	h.Write(ln.commitment)
-	return h.Sum(nil)
 }
 
 // externalNode represents a parent node that's stored in another tile.
@@ -172,6 +164,8 @@ func (en externalNode) String() string {
 func (en externalNode) Weight(cs suites.CipherSuite) int {
 	return 1 + cs.HashSize() + (2 * binary.MaxVarintLen64)
 }
+
+func (en externalNode) Hash(cs suites.CipherSuite) []byte { return en.hash }
 
 func (en externalNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(externalNodeType); err != nil {
