@@ -40,18 +40,18 @@ type parentNode struct {
 	hash        []byte
 }
 
-func (pn parentNode) String() string {
+func (pn *parentNode) String() string {
 	return fmt.Sprintf("(%v, %v)", pn.left.String(), pn.right.String())
 }
 
 // Returns the same weight as an externalNode so that the breadth-first search
 // for building tiles can incrementally include more nodes, rather than starting
 // with a tile that's too large and trying to figure out how to trim it down.
-func (pn parentNode) Weight(cs suites.CipherSuite) int {
+func (pn *parentNode) Weight(cs suites.CipherSuite) int {
 	return 1 + cs.HashSize() + (2 * binary.MaxVarintLen64)
 }
 
-func (pn parentNode) Hash(cs suites.CipherSuite) []byte {
+func (pn *parentNode) Hash(cs suites.CipherSuite) []byte {
 	if pn.hash != nil {
 		return pn.hash
 	}
@@ -66,7 +66,7 @@ func (pn parentNode) Hash(cs suites.CipherSuite) []byte {
 	return out
 }
 
-func (pn parentNode) Marshal(buf *bytes.Buffer) error {
+func (pn *parentNode) Marshal(buf *bytes.Buffer) error {
 	if err := buf.WriteByte(parentNodeType); err != nil {
 		return err
 	} else if err := pn.left.Marshal(buf); err != nil {
@@ -197,7 +197,7 @@ func unmarshalNode(cs suites.CipherSuite, buf *bytes.Buffer) (node, error) {
 		if err != nil {
 			return nil, err
 		}
-		return parentNode{left: left, right: right}, nil
+		return &parentNode{left: left, right: right}, nil
 
 	case emptyNodeType:
 		return emptyNode{}, nil

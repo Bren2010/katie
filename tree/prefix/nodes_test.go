@@ -17,8 +17,8 @@ func makeBytes(b byte) []byte {
 
 func TestMarshalUnmarshal1(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	n1 := parentNode{
-		left: parentNode{
+	n1 := &parentNode{
+		left: &parentNode{
 			left:  leafNode{makeBytes(1), makeBytes(2)},
 			right: leafNode{makeBytes(3), makeBytes(4)},
 		},
@@ -41,9 +41,9 @@ func TestMarshalUnmarshal1(t *testing.T) {
 
 func TestMarshalUnmarshal2(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	n1 := parentNode{
+	n1 := &parentNode{
 		left: leafNode{makeBytes(1), makeBytes(2)},
-		right: parentNode{
+		right: &parentNode{
 			left:  leafNode{makeBytes(3), makeBytes(4)},
 			right: leafNode{makeBytes(5), makeBytes(6)},
 		},

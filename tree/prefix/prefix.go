@@ -33,7 +33,7 @@ func (c *cursor) step(n *node) *nextStep {
 		case emptyNode, leafNode:
 			return nil
 
-		case parentNode:
+		case *parentNode:
 			if getBit(c.vrfOutput, c.depth) {
 				n = &m.right
 			} else {
@@ -58,6 +58,9 @@ type batch struct {
 }
 
 func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
+	if len(nextSteps) == 0 {
+		return nil, nil
+	}
 	dedup := make(map[string]tileId)
 	for _, step := range nextSteps {
 		dedup[step.id.String()] = step.id
@@ -88,11 +91,11 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 	return out, nil
 }
 
-func (b *batch) search(state map[*node][]cursor) error {
+func (b *batch) search(state map[node][]cursor) error {
 	nextSteps := make(map[*cursor]nextStep)
 	for nd, cursors := range state {
 		for _, cursor := range cursors {
-			if res := cursor.step(nd); res != nil {
+			if res := cursor.step(&nd); res != nil {
 				nextSteps[&cursor] = *res
 			}
 		}
@@ -103,28 +106,31 @@ func (b *batch) search(state map[*node][]cursor) error {
 		return err
 	}
 
-	nextState := make(map[*node][]cursor)
+	nextState := make(map[node][]cursor)
 	for cursor, step := range nextSteps {
 		t := tiles[step.id.String()]
 
 		// Recurse down within the tile until we reach the desired depth.
-		n := &t.root
+		n := t.root
 		for i := range cursor.depth - t.depth {
-			switch m := (*n).(type) {
+			switch m := n.(type) {
 			case *parentNode:
 				if getBit(cursor.vrfOutput, t.depth+i) {
-					n = &m.right
+					n = m.right
 				} else {
-					n = &m.left
+					n = m.left
 				}
 			default:
 				return errors.New("unexpected node found in search path")
 			}
 		}
 
-		*step.ptr = *n
+		*step.ptr = n
 		nextState[n] = append(nextState[n], *cursor)
 	}
 
+	if len(nextState) == 0 {
+		return nil
+	}
 	return b.search(nextState)
 }
