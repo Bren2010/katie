@@ -10,8 +10,8 @@ type LogStore interface {
 // PrefixStore is the interface a prefix tree uses to communicate with its
 // database.
 type PrefixStore interface {
-	Get(key uint64) ([]byte, error)
-	Put(key uint64, data []byte) error
+	BatchGet(keys []string) (map[string][]byte, error)
+	BatchPut(data map[string][]byte) error
 }
 
 // TransparencyTreeRoot represents the signed root of a transparency tree.
