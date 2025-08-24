@@ -26,10 +26,10 @@ func TestMarshalUnmarshal1(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	if err := n1.Marshal(buf); err != nil {
+	if err := n1.Marshal(cs, 0, buf); err != nil {
 		t.Fatal(err)
 	}
-	n2, err := unmarshalNode(cs, bytes.NewBuffer(buf.Bytes()))
+	n2, err := unmarshalNode(cs, 0, bytes.NewBuffer(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,10 +50,10 @@ func TestMarshalUnmarshal2(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	if err := n1.Marshal(buf); err != nil {
+	if err := n1.Marshal(cs, 0, buf); err != nil {
 		t.Fatal(err)
 	}
-	n2, err := unmarshalNode(cs, bytes.NewBuffer(buf.Bytes()))
+	n2, err := unmarshalNode(cs, 0, bytes.NewBuffer(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}

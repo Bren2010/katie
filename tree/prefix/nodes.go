@@ -10,7 +10,14 @@ import (
 	"github.com/Bren2010/katie/crypto/suites"
 )
 
-const TargetTileWeight = 2000
+const (
+	IntermediateSuppression = 4
+	TargetTileWeight        = 1000
+)
+
+func shouldStoreIntermediate(depth int) bool {
+	return (depth % IntermediateSuppression) == (IntermediateSuppression - 1)
+}
 
 const (
 	emptyNodeType uint8 = iota
@@ -29,12 +36,10 @@ type node interface {
 	String() string
 	Weight(cs suites.CipherSuite) int
 	Hash(cs suites.CipherSuite) []byte
-	Marshal(buf *bytes.Buffer) error
+	Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error
 }
 
 // parentNode represents a parent node within a given tile.
-//
-// TODO: Occasionally serialize hash to database.
 type parentNode struct {
 	left, right node
 	hash        []byte
@@ -66,12 +71,18 @@ func (pn *parentNode) Hash(cs suites.CipherSuite) []byte {
 	return out
 }
 
-func (pn *parentNode) Marshal(buf *bytes.Buffer) error {
+func (pn *parentNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
 	if err := buf.WriteByte(parentNodeType); err != nil {
 		return err
-	} else if err := pn.left.Marshal(buf); err != nil {
+	}
+	if shouldStoreIntermediate(depth) {
+		if _, err := buf.Write(pn.Hash(cs)); err != nil {
+			return err
+		}
+	}
+	if err := pn.left.Marshal(cs, depth+1, buf); err != nil {
 		return err
-	} else if err := pn.right.Marshal(buf); err != nil {
+	} else if err := pn.right.Marshal(cs, depth+1, buf); err != nil {
 		return err
 	}
 	return nil
@@ -88,7 +99,7 @@ func (en emptyNode) Hash(cs suites.CipherSuite) []byte {
 	return make([]byte, cs.HashSize())
 }
 
-func (en emptyNode) Marshal(buf *bytes.Buffer) error {
+func (en emptyNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
 	return buf.WriteByte(emptyNodeType)
 }
 
@@ -125,7 +136,7 @@ func (ln leafNode) Hash(cs suites.CipherSuite) []byte {
 	return h.Sum(nil)
 }
 
-func (ln leafNode) Marshal(buf *bytes.Buffer) error {
+func (ln leafNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
 	if err := buf.WriteByte(leafNodeType); err != nil {
 		return err
 	} else if _, err := buf.Write(ln.vrfOutput); err != nil {
@@ -168,7 +179,7 @@ func (en externalNode) Weight(cs suites.CipherSuite) int {
 
 func (en externalNode) Hash(cs suites.CipherSuite) []byte { return en.hash }
 
-func (en externalNode) Marshal(buf *bytes.Buffer) error {
+func (en externalNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
 	if err := buf.WriteByte(externalNodeType); err != nil {
 		return err
 	} else if _, err := buf.Write(en.hash); err != nil {
@@ -181,7 +192,7 @@ func (en externalNode) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-func unmarshalNode(cs suites.CipherSuite, buf *bytes.Buffer) (node, error) {
+func unmarshalNode(cs suites.CipherSuite, depth int, buf *bytes.Buffer) (node, error) {
 	b, err := buf.ReadByte()
 	if err != nil {
 		return nil, err
@@ -189,15 +200,22 @@ func unmarshalNode(cs suites.CipherSuite, buf *bytes.Buffer) (node, error) {
 
 	switch b {
 	case parentNodeType:
-		left, err := unmarshalNode(cs, buf)
+		var hash []byte
+		if shouldStoreIntermediate(depth) {
+			hash = make([]byte, cs.HashSize())
+			if _, err := io.ReadFull(buf, hash); err != nil {
+				return nil, err
+			}
+		}
+		left, err := unmarshalNode(cs, depth+1, buf)
 		if err != nil {
 			return nil, err
 		}
-		right, err := unmarshalNode(cs, buf)
+		right, err := unmarshalNode(cs, depth+1, buf)
 		if err != nil {
 			return nil, err
 		}
-		return &parentNode{left: left, right: right}, nil
+		return &parentNode{left: left, right: right, hash: hash}, nil
 
 	case emptyNodeType:
 		return emptyNode{}, nil
@@ -228,14 +246,14 @@ type tile struct {
 	root  node
 }
 
-func (t *tile) Marshal() ([]byte, error) {
+func (t *tile) Marshal(cs suites.CipherSuite) ([]byte, error) {
 	buf := &bytes.Buffer{}
 
 	if t.depth > 255 {
 		return nil, errors.New("depth is too large to marshal")
 	} else if err := buf.WriteByte(byte(t.depth)); err != nil {
 		return nil, err
-	} else if err := t.root.Marshal(buf); err != nil {
+	} else if err := t.root.Marshal(cs, t.depth, buf); err != nil {
 		return nil, err
 	}
 
@@ -245,16 +263,18 @@ func (t *tile) Marshal() ([]byte, error) {
 func unmarshalTile(cs suites.CipherSuite, id tileId, raw []byte) (tile, error) {
 	buf := bytes.NewBuffer(raw)
 
-	depth, err := buf.ReadByte()
+	d, err := buf.ReadByte()
 	if err != nil {
 		return tile{}, err
 	}
-	root, err := unmarshalNode(cs, buf)
+	depth := int(d)
+
+	root, err := unmarshalNode(cs, depth, buf)
 	if err != nil {
 		return tile{}, err
 	}
 
-	return tile{id: id, depth: int(depth), root: root}, nil
+	return tile{id, depth, root}, nil
 }
 
 // // makeOneTile performs a breadth-first search to produce the largest tile

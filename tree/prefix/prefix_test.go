@@ -43,10 +43,10 @@ func (m *memoryPrefixStore) BatchPut(data map[string][]byte) error {
 
 func dupNode(cs suites.CipherSuite, n node) node {
 	buf := &bytes.Buffer{}
-	if err := n.Marshal(buf); err != nil {
+	if err := n.Marshal(cs, 0, buf); err != nil {
 		panic(err)
 	}
-	m, err := unmarshalNode(cs, buf)
+	m, err := unmarshalNode(cs, 0, buf)
 	if err != nil {
 		panic(err)
 	}
@@ -86,25 +86,25 @@ func batchTestSetup() (suites.CipherSuite, *memoryPrefixStore, node, node) {
 
 	// Marshal and write trees to a prefix store.
 	tile0 := tile{id: tileId{ver: 0, ctr: 0}, depth: 0, root: tree0}
-	bytes0, err := tile0.Marshal()
+	bytes0, err := tile0.Marshal(cs)
 	if err != nil {
 		panic(err)
 	}
 
 	tile1 := tile{id: tileId{ver: 1, ctr: 0}, depth: 0, root: tree1}
-	bytes1, err := tile1.Marshal()
+	bytes1, err := tile1.Marshal(cs)
 	if err != nil {
 		panic(err)
 	}
 
 	tile2 := tile{id: tileId{ver: 2, ctr: 0}, depth: 0, root: tree2}
-	bytes2, err := tile2.Marshal()
+	bytes2, err := tile2.Marshal(cs)
 	if err != nil {
 		panic(err)
 	}
 
 	tile3 := tile{id: tileId{ver: 2, ctr: 1}, depth: 1, root: brokenTile}
-	bytes3, err := tile3.Marshal()
+	bytes3, err := tile3.Marshal(cs)
 	if err != nil {
 		panic(err)
 	}
