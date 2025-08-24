@@ -2,6 +2,7 @@ package prefix
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -126,13 +127,13 @@ func TestSearchDepth0(t *testing.T) {
 
 	var tree node = dupNode(cs, tree1)
 	b := &batch{cs: cs, tx: store}
-	err := b.search(map[node][]cursor{
-		tree: {{vrfOutput: makeBytes(0b00000000), depth: 0}},
+	err := b.search(map[*node][]cursor{
+		&tree: {{vrfOutput: makeBytes(0b00000000), depth: 0}},
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(store.lookups) > 0 {
-		t.Fatal("no database lookups expected")
+	} else if fmt.Sprint(store.lookups) != "[]" {
+		t.Fatal("unexpected database lookups")
 	}
 	_ = tree.(*parentNode).left.(*parentNode).left.(leafNode)
 	_ = tree.(*parentNode).left.(*parentNode).right.(externalNode)
@@ -149,13 +150,13 @@ func TestSearchDepth1(t *testing.T) {
 
 	var tree node = dupNode(cs, tree1)
 	b := &batch{cs: cs, tx: store}
-	err := b.search(map[node][]cursor{
-		tree: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
+	err := b.search(map[*node][]cursor{
+		&tree: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(store.lookups) != 1 {
-		t.Fatal("exactly one database lookup expected")
+	} else if fmt.Sprint(store.lookups) != "[[0:0]]" {
+		t.Fatal("unexpected database lookups")
 	}
 	_ = tree.(*parentNode).left.(*parentNode).left.(leafNode)
 	_ = tree.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
@@ -173,13 +174,13 @@ func TestSearchDepth2(t *testing.T) {
 
 	var tree node = dupNode(cs, tree2)
 	b := &batch{cs: cs, tx: store}
-	err := b.search(map[node][]cursor{
-		tree: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
+	err := b.search(map[*node][]cursor{
+		&tree: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(store.lookups) != 2 {
-		t.Fatal("exactly two database lookups expected")
+	} else if fmt.Sprint(store.lookups) != "[[1:0] [0:0]]" {
+		t.Fatal("unexpected database lookups")
 	}
 	_ = tree.(*parentNode).left.(*parentNode).left.(leafNode)
 	_ = tree.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
@@ -197,13 +198,13 @@ func TestBrokenTile(t *testing.T) {
 
 	var tree node = dupNode(cs, tree2)
 	b := &batch{cs: cs, tx: store}
-	err := b.search(map[node][]cursor{
-		tree: {{vrfOutput: makeBytes(0b11000000), depth: 0}},
+	err := b.search(map[*node][]cursor{
+		&tree: {{vrfOutput: makeBytes(0b11000000), depth: 0}},
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(store.lookups) != 1 {
-		t.Fatal("exactly one database lookup expected")
+	} else if fmt.Sprint(store.lookups) != "[[2:1]]" {
+		t.Fatal("unexpected database lookups")
 	}
 	_ = tree.(*parentNode).left.(externalNode)
 	_ = tree.(*parentNode).right.(*parentNode).left.(leafNode)
@@ -212,4 +213,33 @@ func TestBrokenTile(t *testing.T) {
 	if got := tree.Hash(cs); !bytes.Equal(want, got) {
 		t.Fatal("tree hashes do not match")
 	}
+}
+
+func TestMultiVersionSearch(t *testing.T) {
+	cs, store, tree1, tree2 := batchTestSetup()
+	// want := tree2.Hash(cs)
+
+	var root1, root2 node = dupNode(cs, tree1), dupNode(cs, tree2)
+	b := &batch{cs: cs, tx: store, cache: map[string]tile{
+		"1:0": {id: tileId{ver: 1, ctr: 0}, depth: 0, root: root1},
+	}}
+	err := b.search(map[*node][]cursor{
+		&root1: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
+		&root2: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if fmt.Sprint(store.lookups) != "[[0:0]]" {
+		t.Fatal("unexpected database lookups")
+	}
+
+	if root2.(*parentNode).left.(*parentNode) != root1.(*parentNode).left.(*parentNode) {
+		t.Fatal("root1 was not correctly inserted as left child of root2")
+	}
+	_ = root2.(*parentNode).right.(externalNode)
+
+	_ = root1.(*parentNode).left.(*parentNode).left.(leafNode)
+	_ = root1.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
+	_ = root1.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
+	_ = root1.(*parentNode).right.(emptyNode)
 }
