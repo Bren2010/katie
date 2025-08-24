@@ -57,6 +57,8 @@ type batch struct {
 	tx db.PrefixStore
 }
 
+// get looks up the tiles that will be needed to execute the provided next
+// search steps. It returns a map from serialized tile id to parsed tile.
 func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 	if len(nextSteps) == 0 {
 		return nil, nil
@@ -91,6 +93,10 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 	return out, nil
 }
 
+// search takes a mapping from some nodes, to a list of searches that are
+// currently active on those nodes. It moves each search as far as possible
+// within each node, identifies which tiles will be need next, and initiates
+// looking them up for the next search iteration.
 func (b *batch) search(state map[node][]cursor) error {
 	nextSteps := make(map[*cursor]nextStep)
 	for nd, cursors := range state {
@@ -99,6 +105,9 @@ func (b *batch) search(state map[node][]cursor) error {
 				nextSteps[&cursor] = *res
 			}
 		}
+	}
+	if len(nextSteps) == 0 {
+		return nil
 	}
 
 	tiles, err := b.get(nextSteps)
@@ -125,12 +134,11 @@ func (b *batch) search(state map[node][]cursor) error {
 			}
 		}
 
+		// Replace the node where the search terminated with the new subtree
+		// that was just looked up. Setup cursor for next iteration.
 		*step.ptr = n
 		nextState[n] = append(nextState[n], *cursor)
 	}
 
-	if len(nextState) == 0 {
-		return nil
-	}
 	return b.search(nextState)
 }
