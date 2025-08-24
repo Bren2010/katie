@@ -14,9 +14,10 @@ func getBit(data []byte, bit int) bool {
 	return (data[bit/8]>>(7-(bit%8)))&1 == 1
 }
 
+// nextStep represents the next step of a search.
 type nextStep struct {
-	id  tileId
-	ptr *node
+	id  tileId // The tile id that needs to be loaded to continue search.
+	ptr *node  // Pointer to the node where the search terminated.
 }
 
 // cursor represents an in-progress search for a single VRF output.
@@ -49,12 +50,14 @@ func (c *cursor) step(n *node) *nextStep {
 	}
 }
 
+// batch implements a batch search algorithm. It does not directly produce
+// proofs, it only ensures that all necessary information is in-memory.
 type batch struct {
 	cs suites.CipherSuite
 	tx db.PrefixStore
 }
 
-func (b *batch) get(nextSteps map[int]nextStep) (map[string]tile, error) {
+func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 	dedup := make(map[string]tileId)
 	for _, step := range nextSteps {
 		dedup[step.id.String()] = step.id
@@ -85,11 +88,13 @@ func (b *batch) get(nextSteps map[int]nextStep) (map[string]tile, error) {
 	return out, nil
 }
 
-func (b *batch) search(nd *node, cursors []cursor) error {
-	nextSteps := make(map[int]nextStep)
-	for i, cursor := range cursors {
-		if res := cursor.step(nd); res != nil {
-			nextSteps[i] = *res
+func (b *batch) search(state map[*node][]cursor) error {
+	nextSteps := make(map[*cursor]nextStep)
+	for nd, cursors := range state {
+		for _, cursor := range cursors {
+			if res := cursor.step(nd); res != nil {
+				nextSteps[&cursor] = *res
+			}
 		}
 	}
 
@@ -98,9 +103,8 @@ func (b *batch) search(nd *node, cursors []cursor) error {
 		return err
 	}
 
-	recursions := make(map[*node][]cursor)
-	for i, step := range nextSteps {
-		cursor := cursors[i]
+	nextState := make(map[*node][]cursor)
+	for cursor, step := range nextSteps {
 		t := tiles[step.id.String()]
 
 		// Recurse down within the tile until we reach the desired depth.
@@ -118,14 +122,9 @@ func (b *batch) search(nd *node, cursors []cursor) error {
 			}
 		}
 
-		recursions[n] = append(recursions[n], cursor)
+		*step.ptr = *n
+		nextState[n] = append(nextState[n], *cursor)
 	}
 
-	for nd, cursors := range recursions {
-		if err := b.search(nd, cursors); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return b.search(nextState)
 }

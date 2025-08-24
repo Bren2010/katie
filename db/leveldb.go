@@ -165,11 +165,25 @@ type ldbPrefixStore struct {
 	conn *ldbConn
 }
 
-func (ps *ldbPrefixStore) Get(key uint64) ([]byte, error) {
-	return ps.conn.Get("p" + fmt.Sprint(key))
+func (ps *ldbPrefixStore) BatchGet(keys []string) (map[string][]byte, error) {
+	out := make(map[string][]byte)
+
+	for _, key := range keys {
+		value, err := ps.conn.Get("p" + key)
+		if err == leveldb.ErrNotFound {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out[key] = value
+	}
+
+	return out, nil
 }
 
-func (ps *ldbPrefixStore) Put(key uint64, data []byte) error {
-	ps.conn.Put("p"+fmt.Sprint(key), data)
+func (ps *ldbPrefixStore) BatchPut(data map[string][]byte) error {
+	for key, value := range data {
+		ps.conn.Put("p"+key, value)
+	}
 	return nil
 }

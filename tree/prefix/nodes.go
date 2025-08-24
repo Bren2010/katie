@@ -228,6 +228,20 @@ type tile struct {
 	root  node
 }
 
+func (t *tile) Marshal() ([]byte, error) {
+	buf := &bytes.Buffer{}
+
+	if t.depth > 255 {
+		return nil, errors.New("depth is too large to marshal")
+	} else if err := buf.WriteByte(byte(t.depth)); err != nil {
+		return nil, err
+	} else if err := t.root.Marshal(buf); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
 func unmarshalTile(cs suites.CipherSuite, id tileId, raw []byte) (tile, error) {
 	buf := bytes.NewBuffer(raw)
 
