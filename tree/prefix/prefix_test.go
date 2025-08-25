@@ -42,18 +42,6 @@ func (m *memoryPrefixStore) BatchPut(data map[string][]byte) error {
 	return nil
 }
 
-func dupNode(cs suites.CipherSuite, n node) node {
-	buf := &bytes.Buffer{}
-	if err := n.Marshal(cs, 0, buf); err != nil {
-		panic(err)
-	}
-	m, err := unmarshalNode(cs, 0, buf)
-	if err != nil {
-		panic(err)
-	}
-	return m
-}
-
 func batchTestSetup() (suites.CipherSuite, *memoryPrefixStore, node, node) {
 	cs := suites.KTSha256P256{}
 
@@ -125,21 +113,21 @@ func TestSearchDepth0(t *testing.T) {
 	cs, store, tree1, _ := batchTestSetup()
 	want := tree1.Hash(cs)
 
-	var tree node = dupNode(cs, tree1)
-	b := &batch{cs: cs, tx: store}
-	err := b.search(map[*node][]cursor{
-		&tree: {{vrfOutput: makeBytes(0b00000000), depth: 0}},
-	})
+	b := newBatch(cs, store)
+	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b00000000)}})
+	err := b.search(state)
 	if err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[]" {
+	} else if fmt.Sprint(store.lookups) != "[[1:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
-	_ = tree.(*parentNode).left.(*parentNode).left.(leafNode)
-	_ = tree.(*parentNode).left.(*parentNode).right.(externalNode)
-	_ = tree.(*parentNode).right.(emptyNode)
 
-	if got := tree.Hash(cs); !bytes.Equal(got, want) {
+	root := res[0].root
+	_ = root.(*parentNode).left.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).left.(*parentNode).right.(externalNode)
+	_ = root.(*parentNode).right.(emptyNode)
+
+	if got := root.Hash(cs); !bytes.Equal(got, want) {
 		t.Fatal("tree hashes do not match")
 	}
 }
@@ -148,22 +136,22 @@ func TestSearchDepth1(t *testing.T) {
 	cs, store, tree1, _ := batchTestSetup()
 	want := tree1.Hash(cs)
 
-	var tree node = dupNode(cs, tree1)
-	b := &batch{cs: cs, tx: store}
-	err := b.search(map[*node][]cursor{
-		&tree: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
-	})
+	b := newBatch(cs, store)
+	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b01000000)}})
+	err := b.search(state)
 	if err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[0:0]]" {
+	} else if fmt.Sprint(store.lookups) != "[[1:0] [0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
-	_ = tree.(*parentNode).left.(*parentNode).left.(leafNode)
-	_ = tree.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
-	_ = tree.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
-	_ = tree.(*parentNode).right.(emptyNode)
 
-	if got := tree.Hash(cs); !bytes.Equal(got, want) {
+	root := res[0].root
+	_ = root.(*parentNode).left.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
+	_ = root.(*parentNode).right.(emptyNode)
+
+	if got := root.Hash(cs); !bytes.Equal(got, want) {
 		t.Fatal("tree hashes do not match")
 	}
 }
@@ -172,22 +160,22 @@ func TestSearchDepth2(t *testing.T) {
 	cs, store, _, tree2 := batchTestSetup()
 	want := tree2.Hash(cs)
 
-	var tree node = dupNode(cs, tree2)
-	b := &batch{cs: cs, tx: store}
-	err := b.search(map[*node][]cursor{
-		&tree: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
-	})
+	b := newBatch(cs, store)
+	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b01000000)}})
+	err := b.search(state)
 	if err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[1:0] [0:0]]" {
+	} else if fmt.Sprint(store.lookups) != "[[2:0] [1:0] [0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
-	_ = tree.(*parentNode).left.(*parentNode).left.(leafNode)
-	_ = tree.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
-	_ = tree.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
-	_ = tree.(*parentNode).right.(externalNode)
 
-	if got := tree.Hash(cs); !bytes.Equal(want, got) {
+	root := res[0].root
+	_ = root.(*parentNode).left.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
+	_ = root.(*parentNode).right.(externalNode)
+
+	if got := root.Hash(cs); !bytes.Equal(want, got) {
 		t.Fatal("tree hashes do not match")
 	}
 }
@@ -196,43 +184,42 @@ func TestBrokenTile(t *testing.T) {
 	cs, store, _, tree2 := batchTestSetup()
 	want := tree2.Hash(cs)
 
-	var tree node = dupNode(cs, tree2)
-	b := &batch{cs: cs, tx: store}
-	err := b.search(map[*node][]cursor{
-		&tree: {{vrfOutput: makeBytes(0b11000000), depth: 0}},
-	})
+	b := newBatch(cs, store)
+	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b11000000)}})
+	err := b.search(state)
 	if err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[2:1]]" {
+	} else if fmt.Sprint(store.lookups) != "[[2:0] [2:1]]" {
 		t.Fatal("unexpected database lookups")
 	}
-	_ = tree.(*parentNode).left.(externalNode)
-	_ = tree.(*parentNode).right.(*parentNode).left.(leafNode)
-	_ = tree.(*parentNode).right.(*parentNode).right.(leafNode)
 
-	if got := tree.Hash(cs); !bytes.Equal(want, got) {
+	root := res[0].root
+	_ = root.(*parentNode).left.(externalNode)
+	_ = root.(*parentNode).right.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).right.(*parentNode).right.(leafNode)
+
+	if got := root.Hash(cs); !bytes.Equal(want, got) {
 		t.Fatal("tree hashes do not match")
 	}
 }
 
 func TestMultiVersionSearch(t *testing.T) {
 	cs, store, tree1, tree2 := batchTestSetup()
-	// want := tree2.Hash(cs)
+	want := tree2.Hash(cs)
 
-	var root1, root2 node = dupNode(cs, tree1), dupNode(cs, tree2)
-	b := &batch{cs: cs, tx: store, cache: map[string]tile{
-		"1:0": {id: tileId{ver: 1, ctr: 0}, depth: 0, root: root1},
-	}}
-	err := b.search(map[*node][]cursor{
-		&root1: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
-		&root2: {{vrfOutput: makeBytes(0b01000000), depth: 0}},
+	b := newBatch(cs, store)
+	b.cache["1:0"] = tile{id: tileId{ver: 1, ctr: 0}, depth: 0, root: tree1}
+	res, state := b.initialize(map[uint64][][]byte{
+		1: {makeBytes(0b01000000)},
+		2: {makeBytes(0b01000000)},
 	})
-	if err != nil {
+	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[0:0]]" {
+	} else if fmt.Sprint(store.lookups) != "[[0:0 2:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
+	root1, root2 := res[0].root, res[1].root
 	if root2.(*parentNode).left.(*parentNode) != root1.(*parentNode).left.(*parentNode) {
 		t.Fatal("root1 was not correctly inserted as left child of root2")
 	}
@@ -242,4 +229,8 @@ func TestMultiVersionSearch(t *testing.T) {
 	_ = root1.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
 	_ = root1.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
 	_ = root1.(*parentNode).right.(emptyNode)
+
+	if got := root2.Hash(cs); !bytes.Equal(want, got) {
+		t.Fatal("tree hashes do not match")
+	}
 }

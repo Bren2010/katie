@@ -4,6 +4,7 @@ package prefix
 
 import (
 	"errors"
+	"slices"
 	"sort"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -58,6 +59,36 @@ type batch struct {
 	cache map[string]tile
 }
 
+func newBatch(cs suites.CipherSuite, tx db.PrefixStore) *batch {
+	return &batch{cs: cs, tx: tx, cache: make(map[string]tile)}
+}
+
+// initialize creates the initial state object to call search with, and creates
+// a slice of tiles where the results will be stored.
+func (b *batch) initialize(searches map[uint64][][]byte) ([]tile, map[*node][]cursor) {
+	vers := make([]uint64, 0, len(searches))
+	for ver := range searches {
+		vers = append(vers, ver)
+	}
+	slices.Sort(vers)
+
+	tiles := make([]tile, 0, len(searches))
+	state := make(map[*node][]cursor, len(searches))
+	for _, ver := range vers {
+		id := tileId{ver: ver, ctr: 0}
+		tiles = append(tiles, tile{id: id, depth: 0, root: externalNode{nil, id}})
+
+		vrfOutputs := searches[ver]
+		cursors := make([]cursor, 0, len(vrfOutputs))
+		for _, vrfOutput := range vrfOutputs {
+			cursors = append(cursors, cursor{vrfOutput: vrfOutput, depth: 0})
+		}
+		state[&tiles[len(tiles)-1].root] = cursors
+	}
+
+	return tiles, state
+}
+
 // get looks up the tiles that will be needed to execute the provided next
 // search steps. It returns a map from serialized tile id to parsed tile.
 func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
@@ -95,9 +126,6 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 		t, err := unmarshalTile(b.cs, id, val)
 		if err != nil {
 			return nil, err
-		}
-		if b.cache == nil {
-			b.cache = make(map[string]tile)
 		}
 		out[key], b.cache[key] = t, t
 	}
