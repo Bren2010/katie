@@ -115,8 +115,7 @@ func TestSearchDepth0(t *testing.T) {
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b00000000)}})
-	err := b.search(state)
-	if err != nil {
+	if err := b.search(state); err != nil {
 		t.Fatal(err)
 	} else if fmt.Sprint(store.lookups) != "[[1:0]]" {
 		t.Fatal("unexpected database lookups")
@@ -138,8 +137,7 @@ func TestSearchDepth1(t *testing.T) {
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b01000000)}})
-	err := b.search(state)
-	if err != nil {
+	if err := b.search(state); err != nil {
 		t.Fatal(err)
 	} else if fmt.Sprint(store.lookups) != "[[1:0] [0:0]]" {
 		t.Fatal("unexpected database lookups")
@@ -162,8 +160,7 @@ func TestSearchDepth2(t *testing.T) {
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b01000000)}})
-	err := b.search(state)
-	if err != nil {
+	if err := b.search(state); err != nil {
 		t.Fatal(err)
 	} else if fmt.Sprint(store.lookups) != "[[2:0] [1:0] [0:0]]" {
 		t.Fatal("unexpected database lookups")
@@ -186,8 +183,7 @@ func TestBrokenTile(t *testing.T) {
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b11000000)}})
-	err := b.search(state)
-	if err != nil {
+	if err := b.search(state); err != nil {
 		t.Fatal(err)
 	} else if fmt.Sprint(store.lookups) != "[[2:0] [2:1]]" {
 		t.Fatal("unexpected database lookups")

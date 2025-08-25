@@ -1,6 +1,7 @@
 package prefix
 
 import (
+	"bytes"
 	"errors"
 	"slices"
 	"sort"
@@ -77,6 +78,8 @@ func (b *batch) initialize(searches map[uint64][][]byte) ([]tile, map[*node][]cu
 		tiles = append(tiles, tile{id: id, depth: 0, root: externalNode{nil, id}})
 
 		vrfOutputs := searches[ver]
+		slices.SortFunc(vrfOutputs, bytes.Compare)
+
 		cursors := make([]cursor, 0, len(vrfOutputs))
 		for _, vrfOutput := range vrfOutputs {
 			cursors = append(cursors, cursor{vrfOutput: vrfOutput, depth: 0})
