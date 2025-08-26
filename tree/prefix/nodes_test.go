@@ -64,7 +64,7 @@ func TestMarshalUnmarshal2(t *testing.T) {
 }
 
 func createLargeTree(depth int) node {
-	if depth == 7 {
+	if depth == 8 {
 		return leafNode{vrfOutput: makeBytes(1), commitment: makeBytes(2)}
 	}
 	return &parentNode{
@@ -110,8 +110,8 @@ func TestSplitIntoTiles(t *testing.T) {
 	hashes := make(map[tileId][]byte)
 	externals := make(map[tileId][]byte)
 	for _, tile := range tiles {
-		if encodedSize(cs, tile.depth, tile.root) > TargetTileWeight {
-			t.Fatal("encoded tile is too large")
+		if got := encodedSize(cs, tile.depth, tile.root); got > TargetTileWeight {
+			t.Fatalf("encoded tile is too large: %v", got)
 		}
 		extractExternalNodes(t, tile.root, externals)
 		hashes[tile.id] = tile.root.Hash(cs)
@@ -121,13 +121,14 @@ func TestSplitIntoTiles(t *testing.T) {
 	if !bytes.Equal(want, hashes[tileId{ver: 1, ctr: 0}]) {
 		t.Fatal("root hash changed")
 	}
+	delete(hashes, tileId{ver: 1, ctr: 0})
+
+	if len(hashes) != len(externals) {
+		t.Fatal("unexpected number of tiles vs external nodes")
+	}
 	for id, want := range hashes {
 		if got := externals[id]; !bytes.Equal(want, got) {
 			t.Fatal("external node has unexpected hash")
 		}
-	}
-
-	for _, elem := range tiles {
-		t.Log(elem.id, elem.depth, encodedSize(cs, elem.depth, elem.root))
 	}
 }

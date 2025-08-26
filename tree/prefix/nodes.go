@@ -312,7 +312,11 @@ func makeTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node, depth in
 			continue
 		}
 
-		newWeight := weight - p.Weight(cs) + p.left.Weight(cs) + p.right.Weight(cs) // TODO review.
+		newWeight := weight - p.Weight(cs) + 1 + p.left.Weight(cs) + p.right.Weight(cs)
+		if shouldStoreIntermediate(elem.depth) {
+			newWeight += cs.HashSize()
+		}
+
 		if newWeight <= TargetTileWeight {
 			queue = append(queue,
 				pointerAndDepth{ptr: &p.left, depth: elem.depth + 1},
