@@ -4,6 +4,7 @@ package prefix
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -24,6 +25,17 @@ func NewTree(cs suites.CipherSuite, tx db.PrefixStore) *Tree {
 // list of VRF outputs to search for in that version of the tree. It returns a
 // map from the searched versions of the tree to a batch PrefixProof.
 func (t *Tree) Search(searches map[uint64][][]byte) (map[uint64]PrefixProof, error) {
+	for ver, vrfOutputs := range searches {
+		if ver == 0 {
+			return nil, errors.New("unable to search in version 0 of the tree")
+		}
+		for _, vrfOutput := range vrfOutputs {
+			if len(vrfOutput) != t.cs.HashSize() {
+				return nil, errors.New("unexpected vrf output length")
+			}
+		}
+	}
+
 	b := newBatch(t.cs, t.tx)
 	res, state := b.initialize(searches)
 	if err := b.search(state); err != nil {
@@ -38,6 +50,66 @@ func (t *Tree) Search(searches map[uint64][][]byte) (map[uint64]PrefixProof, err
 		out[tile.id.ver] = proof
 	}
 	return out, nil
+}
+
+// Entry contains a new entry to be added to the tree.
+type Entry struct {
+	VrfOutput, Commitment []byte
+}
+
+// Insert adds a set of new entries to the tree and increments the version
+// counter. It returns the new root and a batch proof from just before the
+// entries were added.
+//
+// The current tree version is given in `ver`, which is 0 if the tree is empty.
+// After this, version `ver+1` of the tree will exist.
+func (t *Tree) Insert(ver uint64, entries []Entry) (*PrefixProof, error) {
+	slices.SortFunc(entries, func(a, b Entry) int {
+		return bytes.Compare(a.VrfOutput, b.VrfOutput)
+	})
+	for i, entry := range entries {
+		if len(entry.VrfOutput) != t.cs.HashSize() {
+			return nil, errors.New("unexpected vrf output length")
+		} else if len(entry.Commitment) != t.cs.HashSize() {
+			return nil, errors.New("unexpected commitment length")
+		} else if i > 0 && bytes.Equal(entries[i-1].VrfOutput, entry.VrfOutput) {
+			return nil, errors.New("unable to insert same vrf output multiple times")
+		}
+	}
+
+	root, proof, err := t.insertRoot(ver, entries)
+	if err != nil {
+		return nil, err
+	}
+	insertEntries(t.cs, &root, entries, 0)
+
+	// TODO: Tile. Insert into database.
+
+	return proof, nil
+}
+
+// insertRoot returns the node to operate on for our insertion. It also returns
+// the initial PrefixProof.
+func (t *Tree) insertRoot(ver uint64, entries []Entry) (node, *PrefixProof, error) {
+	if ver == 0 {
+		return &parentNode{left: emptyNode{}, right: emptyNode{}}, nil, nil
+	}
+
+	vrfOutputs := make([][]byte, 0, len(entries))
+	for _, entry := range entries {
+		vrfOutputs = append(vrfOutputs, entry.VrfOutput)
+	}
+
+	b := newBatch(t.cs, t.tx)
+	res, state := b.initialize(map[uint64][][]byte{ver: vrfOutputs})
+	if err := b.search(state); err != nil {
+		return nil, nil, err
+	}
+	root := res[0].root
+
+	proof := &PrefixProof{}
+	buildProof(t.cs, proof, root, vrfOutputs, 0)
+	return root, proof, nil
 }
 
 func buildProof(cs suites.CipherSuite, proof *PrefixProof, n node, vrfOutputs [][]byte, depth int) {
@@ -70,6 +142,47 @@ func buildProof(cs suites.CipherSuite, proof *PrefixProof, n node, vrfOutputs []
 		})
 		buildProof(cs, proof, n.left, vrfOutputs[:split], depth+1)
 		buildProof(cs, proof, n.right, vrfOutputs[split:], depth+1)
+
+	default:
+		panic("unexpected node type found")
+	}
+}
+
+func insertEntries(cs suites.CipherSuite, n *node, entries []Entry, depth int) {
+	if len(entries) == 0 {
+		// Replace parent nodes that are unnecessary with external nodes. Other
+		// node types are allowed to move into the new tile unchanged.
+		if p, ok := (*n).(*parentNode); ok {
+			*n = externalNode{
+				hash: p.Hash(cs),
+				id:   TODO,
+			}
+		}
+		return
+	}
+
+	switch m := (*n).(type) {
+	case emptyNode:
+		*n = &parentNode{left: emptyNode{}, right: emptyNode{}}
+		insertEntries(cs, n, entries, depth)
+
+	case leafNode:
+		if getBit(m.vrfOutput, depth) {
+			*n = &parentNode{left: emptyNode{}, right: m}
+		} else {
+			*n = &parentNode{left: m, right: emptyNode{}}
+		}
+		insertEntries(cs, n, entries, depth)
+
+	case *parentNode:
+		split, _ := slices.BinarySearchFunc(entries, true, func(entry Entry, _ bool) int {
+			if getBit(entry.VrfOutput, depth) {
+				return 0
+			}
+			return -1
+		})
+		insertEntries(cs, &m.left, entries[:split], depth+1)
+		insertEntries(cs, &m.right, entries[split:], depth+1)
 
 	default:
 		panic("unexpected node type found")
