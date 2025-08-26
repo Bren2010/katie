@@ -62,3 +62,72 @@ func TestMarshalUnmarshal2(t *testing.T) {
 		t.Fatal("unmarshalled value incorrectly")
 	}
 }
+
+func createLargeTree(depth int) node {
+	if depth == 7 {
+		return leafNode{vrfOutput: makeBytes(1), commitment: makeBytes(2)}
+	}
+	return &parentNode{
+		left:  createLargeTree(depth + 1),
+		right: createLargeTree(depth + 1),
+	}
+}
+
+func encodedSize(cs suites.CipherSuite, depth int, nd node) int {
+	buf := &bytes.Buffer{}
+	if err := nd.Marshal(cs, depth, buf); err != nil {
+		panic(err)
+	}
+	return buf.Len()
+}
+
+func extractExternalNodes(t *testing.T, nd node, externals map[tileId][]byte) {
+	switch nd := nd.(type) {
+	case *parentNode:
+		nd.hash = nil
+		extractExternalNodes(t, nd.left, externals)
+		extractExternalNodes(t, nd.right, externals)
+
+	case externalNode:
+		if existing, ok := externals[nd.id]; ok {
+			if !bytes.Equal(nd.hash, existing) {
+				t.Fatalf("same external node has different hashes")
+			}
+		}
+		externals[nd.id] = nd.hash
+	}
+}
+
+func TestSplitIntoTiles(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	root := createLargeTree(0)
+	want := root.Hash(cs)
+
+	// Split large root into tiles.
+	tiles := splitIntoTiles(cs, 1, root)
+
+	// Extract the root hash of each tile and
+	hashes := make(map[tileId][]byte)
+	externals := make(map[tileId][]byte)
+	for _, tile := range tiles {
+		if encodedSize(cs, tile.depth, tile.root) > TargetTileWeight {
+			t.Fatal("encoded tile is too large")
+		}
+		extractExternalNodes(t, tile.root, externals)
+		hashes[tile.id] = tile.root.Hash(cs)
+	}
+
+	// Check computed hashes match stored hashes.
+	if !bytes.Equal(want, hashes[tileId{ver: 1, ctr: 0}]) {
+		t.Fatal("root hash changed")
+	}
+	for id, want := range hashes {
+		if got := externals[id]; !bytes.Equal(want, got) {
+			t.Fatal("external node has unexpected hash")
+		}
+	}
+
+	for _, elem := range tiles {
+		t.Log(elem.id, elem.depth, encodedSize(cs, elem.depth, elem.root))
+	}
+}
