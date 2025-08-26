@@ -12,7 +12,7 @@ import (
 
 const (
 	IntermediateSuppression = 4
-	TargetTileWeight        = 1000
+	MaxTileWeight           = 1000
 )
 
 func shouldStoreIntermediate(depth int) bool {
@@ -289,8 +289,8 @@ type nodeAndDepth struct {
 }
 
 // makeTile performs a breadth-first search to produce the largest tile possible
-// without exceeing TargetTileWeight. The tile is stored in root and ejected
-// nodes are returned.
+// without exceeing MaxTileWeight. The tile is stored in root and ejected nodes
+// are returned.
 func makeTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node, depth int) []nodeAndDepth {
 	// Queue for the breadth-first search through the tree.
 	queue := []pointerAndDepth{{ptr: root, depth: depth}}
@@ -317,7 +317,7 @@ func makeTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node, depth in
 			newWeight += cs.HashSize()
 		}
 
-		if newWeight <= TargetTileWeight {
+		if newWeight <= MaxTileWeight {
 			queue = append(queue,
 				pointerAndDepth{ptr: &p.left, depth: elem.depth + 1},
 				pointerAndDepth{ptr: &p.right, depth: elem.depth + 1})

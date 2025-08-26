@@ -110,7 +110,7 @@ func TestSplitIntoTiles(t *testing.T) {
 	hashes := make(map[tileId][]byte)
 	externals := make(map[tileId][]byte)
 	for _, tile := range tiles {
-		if got := encodedSize(cs, tile.depth, tile.root); got > TargetTileWeight {
+		if got := encodedSize(cs, tile.depth, tile.root); got > MaxTileWeight {
 			t.Fatalf("encoded tile is too large: %v", got)
 		}
 		extractExternalNodes(t, tile.root, externals)
