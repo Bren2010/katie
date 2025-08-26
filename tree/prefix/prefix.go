@@ -155,7 +155,7 @@ func insertEntries(cs suites.CipherSuite, n *node, entries []Entry, depth int) {
 		if p, ok := (*n).(*parentNode); ok {
 			*n = externalNode{
 				hash: p.Hash(cs),
-				id:   TODO,
+				id:   *p.id,
 			}
 		}
 		return

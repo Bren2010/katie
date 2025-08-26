@@ -43,6 +43,7 @@ type node interface {
 type parentNode struct {
 	left, right node
 	hash        []byte
+	id          *tileId
 }
 
 func (pn *parentNode) String() string {
@@ -192,7 +193,7 @@ func (en externalNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buff
 	return nil
 }
 
-func unmarshalNode(cs suites.CipherSuite, depth int, buf *bytes.Buffer) (node, error) {
+func unmarshalNode(cs suites.CipherSuite, id *tileId, depth int, buf *bytes.Buffer) (node, error) {
 	b, err := buf.ReadByte()
 	if err != nil {
 		return nil, err
@@ -207,15 +208,15 @@ func unmarshalNode(cs suites.CipherSuite, depth int, buf *bytes.Buffer) (node, e
 				return nil, err
 			}
 		}
-		left, err := unmarshalNode(cs, depth+1, buf)
+		left, err := unmarshalNode(cs, id, depth+1, buf)
 		if err != nil {
 			return nil, err
 		}
-		right, err := unmarshalNode(cs, depth+1, buf)
+		right, err := unmarshalNode(cs, id, depth+1, buf)
 		if err != nil {
 			return nil, err
 		}
-		return &parentNode{left: left, right: right, hash: hash}, nil
+		return &parentNode{left: left, right: right, hash: hash, id: id}, nil
 
 	case emptyNodeType:
 		return emptyNode{}, nil
@@ -269,7 +270,7 @@ func unmarshalTile(cs suites.CipherSuite, id tileId, raw []byte) (tile, error) {
 	}
 	depth := int(d)
 
-	root, err := unmarshalNode(cs, depth, buf)
+	root, err := unmarshalNode(cs, &id, depth, buf)
 	if err != nil {
 		return tile{}, err
 	}
@@ -277,64 +278,60 @@ func unmarshalTile(cs suites.CipherSuite, id tileId, raw []byte) (tile, error) {
 	return tile{id, depth, root}, nil
 }
 
-// // makeOneTile performs a breadth-first search to produce the largest tile
-// // possible without exceeing TargetTileWeight. The tile is stored in root and
-// // ejected nodes are returned.
-// func makeOneTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node) []node {
-// 	// Queue for the breadth-first search through the tree.
-// 	queue := make([]*node, 1)
-// 	queue[0] = root
+// makeOneTile performs a breadth-first search to produce the largest tile
+// possible without exceeing TargetTileWeight. The tile is stored in root and
+// ejected nodes are returned.
+func makeOneTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node) []node {
+	// Queue for the breadth-first search through the tree.
+	queue := []*node{root}
 
-// 	// Weight (approx. size in bytes) of the current tile.
-// 	weight := (*root).Weight(cs)
+	// Weight (approx. size in bytes) of the current tile.
+	weight := (*root).Weight(cs)
 
-// 	// Nodes that were ejected from this tile because they don't fit.
-// 	ejected := make([]node, 0)
+	// Nodes that were ejected from this tile because they don't fit.
+	ejected := make([]node, 0)
 
-// 	for len(queue) > 0 {
-// 		ptr := queue[0]
-// 		queue = queue[1:]
+	for len(queue) > 0 {
+		ptr := queue[0]
+		queue = queue[1:]
 
-// 		pn, ok := (*ptr).(parentNode)
-// 		if !ok {
-// 			// If n is any type other than parentNode, then it is necessarily
-// 			// included in the current tile.
-// 			continue
-// 		}
+		p, ok := (*ptr).(*parentNode)
+		if !ok {
+			// If n is any type other than parentNode, then it is necessarily
+			// included in the current tile.
+			continue
+		}
 
-// 		newWeight := weight - pn.Weight(cs) + pn.left.Weight(cs) + pn.right.Weight(cs)
-// 		if newWeight <= TargetTileWeight {
-// 			queue = append(queue, &pn.left, &pn.right)
-// 			weight = newWeight
-// 		} else {
-// 			ejected = append(ejected, pn)
-// 			*ptr = externalNode{
-// 				hash: pn.Hash(cs),
-// 				ver:  ver,
-// 				ctr:  ctrOffset + uint64(len(ejected)),
-// 			}
-// 		}
-// 	}
+		newWeight := weight - p.Weight(cs) + p.left.Weight(cs) + p.right.Weight(cs) // TODO review.
+		if newWeight <= TargetTileWeight {
+			queue = append(queue, &p.left, &p.right)
+			weight = newWeight
+		} else {
+			ejected = append(ejected, p)
+			*ptr = externalNode{
+				hash: p.Hash(cs),
+				id:   tileId{ver: ver, ctr: ctrOffset + uint64(len(ejected))}, // TODO: ctr doesn't seem right.
+			}
+		}
+	}
 
-// 	return ejected
-// }
+	return ejected
+}
 
-// // tiles converts a (possibly abridged) prefix tree in `root` into a series of
-// // tiles / subtrees that obey a maximum size limit.
-// func tiles(cs suites.CipherSuite, ver uint64, root node) []node {
-// 	queue := make([]node, 0)
-// 	queue[0] = root
+// tiles converts the tree in `root` into a series of "tiles" that conform to a
+// maximum size limit when serialized.
+func tiles(cs suites.CipherSuite, ver uint64, root node) []node {
+	queue := []node{root}
+	out := make([]node, 0)
 
-// 	out := make([]node, 0)
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
 
-// 	for len(queue) > 0 {
-// 		n := queue[0]
-// 		queue = queue[1:]
+		ejected := makeOneTile(cs, ver, uint64(len(out)), &n)
+		queue = append(queue, ejected...)
+		out = append(out, n)
+	}
 
-// 		ejected := makeOneTile(cs, ver, uint64(len(out)), &n)
-// 		queue = append(queue, ejected...)
-// 		out = append(out, n)
-// 	}
-
-// 	return out
-// }
+	return out
+}
