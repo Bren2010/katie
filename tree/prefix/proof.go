@@ -145,6 +145,7 @@ func unmarshalSearchResult(cs suites.CipherSuite, buf *bytes.Buffer) (PrefixSear
 	if err != nil {
 		return nil, err
 	}
+
 	switch resultType {
 	case inclusionResultType:
 		depth, err := buf.ReadByte()

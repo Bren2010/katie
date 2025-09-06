@@ -58,39 +58,53 @@ type Entry struct {
 }
 
 // Insert adds a set of new entries to the tree and increments the version
-// counter. It returns the new root and a batch proof from just before the
+// counter. It returns the new root hash and a batch proof from just before the
 // entries were added.
 //
 // The current tree version is given in `ver`, which is 0 if the tree is empty.
 // After this, version `ver+1` of the tree will exist.
-func (t *Tree) Insert(ver uint64, entries []Entry) (*PrefixProof, error) {
+func (t *Tree) Insert(ver uint64, entries []Entry) ([]byte, *PrefixProof, error) {
 	slices.SortFunc(entries, func(a, b Entry) int {
 		return bytes.Compare(a.VrfOutput, b.VrfOutput)
 	})
 	for i, entry := range entries {
 		if len(entry.VrfOutput) != t.cs.HashSize() {
-			return nil, errors.New("unexpected vrf output length")
+			return nil, nil, errors.New("unexpected vrf output length")
 		} else if len(entry.Commitment) != t.cs.HashSize() {
-			return nil, errors.New("unexpected commitment length")
+			return nil, nil, errors.New("unexpected commitment length")
 		} else if i > 0 && bytes.Equal(entries[i-1].VrfOutput, entry.VrfOutput) {
-			return nil, errors.New("unable to insert same vrf output multiple times")
+			return nil, nil, errors.New("unable to insert same vrf output multiple times")
 		}
 	}
 
-	root, proof, err := t.insertRoot(ver, entries)
+	// Load necessary tiles into memory. Add new entries. Create tiles.
+	root, proof, err := t.getInsertionRoot(ver, entries)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	insertEntries(t.cs, &root, entries, 0)
+	rootHash := root.Hash(t.cs)
+	tiles := splitIntoTiles(t.cs, ver+1, root)
 
-	// TODO: Tile. Insert into database.
+	// Write tiles to database.
+	data := make(map[string][]byte, len(tiles))
+	for _, tile := range tiles {
+		raw, err := tile.Marshal(t.cs)
+		if err != nil {
+			return nil, nil, err
+		}
+		data[tile.id.String()] = raw
+	}
+	if err := t.tx.BatchPut(data); err != nil {
+		return nil, nil, err
+	}
 
-	return proof, nil
+	return rootHash, proof, nil
 }
 
-// insertRoot returns the node to operate on for our insertion. It also returns
-// the initial PrefixProof.
-func (t *Tree) insertRoot(ver uint64, entries []Entry) (node, *PrefixProof, error) {
+// getInsertRoot returns the node to operate on for our insertion. It also
+// returns the prior-version PrefixProof.
+func (t *Tree) getInsertionRoot(ver uint64, entries []Entry) (node, *PrefixProof, error) {
 	if ver == 0 {
 		return &parentNode{left: emptyNode{}, right: emptyNode{}}, nil, nil
 	}
@@ -175,6 +189,7 @@ func insertEntries(cs suites.CipherSuite, n *node, entries []Entry, depth int) {
 		insertEntries(cs, n, entries, depth)
 
 	case *parentNode:
+		m.hash, m.id = nil, nil
 		split, _ := slices.BinarySearchFunc(entries, true, func(entry Entry, _ bool) int {
 			if getBit(entry.VrfOutput, depth) {
 				return 0

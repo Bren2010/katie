@@ -33,9 +33,13 @@ func encodeUvarint(x uint64) []byte {
 }
 
 type node interface {
+	// String returns the debugging representation of the node.
 	String() string
+	// Weight returns the (approximate) size of the encoded node.
 	Weight(cs suites.CipherSuite) int
+	// Hash returns the cryptographic hash of the node. It may rely on cache.
 	Hash(cs suites.CipherSuite) []byte
+	// Marshal serializes the node and writes the output to buf.
 	Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error
 }
 
@@ -43,7 +47,9 @@ type node interface {
 type parentNode struct {
 	left, right node
 	hash        []byte
-	id          *tileId
+
+	// Used for tracking the tile a parent node came from during insertion.
+	id *tileId
 }
 
 func (pn *parentNode) String() string {
@@ -273,6 +279,8 @@ func unmarshalTile(cs suites.CipherSuite, id tileId, raw []byte) (tile, error) {
 	root, err := unmarshalNode(cs, &id, depth, buf)
 	if err != nil {
 		return tile{}, err
+	} else if buf.Len() != 0 {
+		return tile{}, errors.New("unexpected data left over after decoding tile")
 	}
 
 	return tile{id, depth, root}, nil
