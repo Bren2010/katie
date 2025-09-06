@@ -21,10 +21,15 @@ func NewTree(cs suites.CipherSuite, tx db.PrefixStore) *Tree {
 	return &Tree{cs: cs, tx: tx}
 }
 
+type SearchResult struct {
+	Proof       PrefixProof
+	Commitments [][]byte
+}
+
 // Search takes as input a map from each version of the tree to search, to the
 // list of VRF outputs to search for in that version of the tree. It returns a
 // map from the searched versions of the tree to a batch PrefixProof.
-func (t *Tree) Search(searches map[uint64][][]byte) (map[uint64]PrefixProof, error) {
+func (t *Tree) Search(searches map[uint64][][]byte) (map[uint64]SearchResult, error) {
 	for ver, vrfOutputs := range searches {
 		if ver == 0 {
 			return nil, errors.New("unable to search in version 0 of the tree")
@@ -42,12 +47,12 @@ func (t *Tree) Search(searches map[uint64][][]byte) (map[uint64]PrefixProof, err
 		return nil, err
 	}
 
-	out := make(map[uint64]PrefixProof, len(searches))
+	out := make(map[uint64]SearchResult, len(searches))
 	for _, tile := range res {
-		proof := PrefixProof{}
 		vrfOutputs := searches[tile.id.ver] // This is sorted already by search.
-		buildProof(t.cs, &proof, tile.root, vrfOutputs, 0)
-		out[tile.id.ver] = proof
+		pb := proofBuilder{cs: t.cs}
+		pb.build(tile.root, vrfOutputs, 0)
+		out[tile.id.ver] = SearchResult{Proof: pb.proof, Commitments: pb.commitments}
 	}
 	return out, nil
 }
@@ -121,29 +126,40 @@ func (t *Tree) getInsertionRoot(ver uint64, entries []Entry) (node, *PrefixProof
 	}
 	root := res[0].root
 
-	proof := &PrefixProof{}
-	buildProof(t.cs, proof, root, vrfOutputs, 0)
-	return root, proof, nil
+	pb := proofBuilder{cs: t.cs}
+	pb.build(root, vrfOutputs, 0)
+	if len(pb.commitments) > 0 {
+		return nil, nil, errors.New("can not insert same vrf output twice")
+	}
+	return root, &pb.proof, nil
 }
 
-func buildProof(cs suites.CipherSuite, proof *PrefixProof, n node, vrfOutputs [][]byte, depth int) {
+type proofBuilder struct {
+	cs suites.CipherSuite
+
+	proof       PrefixProof
+	commitments [][]byte
+}
+
+func (pb *proofBuilder) build(n node, vrfOutputs [][]byte, depth int) {
 	if len(vrfOutputs) == 0 {
-		proof.Elements = append(proof.Elements, n.Hash(cs))
+		pb.proof.Elements = append(pb.proof.Elements, n.Hash(pb.cs))
 		return
 	}
 
 	switch n := n.(type) {
 	case emptyNode:
 		for range vrfOutputs {
-			proof.Results = append(proof.Results, nonInclusionParentProof{depth: depth})
+			pb.proof.Results = append(pb.proof.Results, nonInclusionParentProof{depth: depth})
 		}
 
 	case leafNode:
 		for _, vrfOutput := range vrfOutputs {
 			if bytes.Equal(vrfOutput, n.vrfOutput) {
-				proof.Results = append(proof.Results, inclusionProof{depth: depth})
+				pb.proof.Results = append(pb.proof.Results, inclusionProof{depth: depth})
+				pb.commitments = append(pb.commitments, n.commitment)
 			} else {
-				proof.Results = append(proof.Results, nonInclusionLeafProof{leaf: n, depth: depth})
+				pb.proof.Results = append(pb.proof.Results, nonInclusionLeafProof{leaf: n, depth: depth})
 			}
 		}
 
@@ -154,8 +170,8 @@ func buildProof(cs suites.CipherSuite, proof *PrefixProof, n node, vrfOutputs []
 			}
 			return -1
 		})
-		buildProof(cs, proof, n.left, vrfOutputs[:split], depth+1)
-		buildProof(cs, proof, n.right, vrfOutputs[split:], depth+1)
+		pb.build(n.left, vrfOutputs[:split], depth+1)
+		pb.build(n.right, vrfOutputs[split:], depth+1)
 
 	default:
 		panic("unexpected node type found")

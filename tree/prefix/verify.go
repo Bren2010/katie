@@ -12,9 +12,9 @@ import (
 // specific depth in the tree. It follows the bits of the VRF output in `entry`
 // and pushes down to that depth before inserting the terminal node.
 func extendToDepth(entry Entry, res PrefixSearchResult, elements [][]byte, depth int) (node, [][]byte, error) {
-	if res.Depth() > depth {
+	if depth > res.Depth() {
 		return nil, nil, errors.New("current depth is greater than result depth")
-	} else if res.Depth() == depth {
+	} else if depth == res.Depth() {
 		return terminalNode(entry, res), elements, nil
 	}
 
@@ -101,6 +101,18 @@ func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byt
 	slices.SortFunc(entries, func(a, b Entry) int {
 		return bytes.Compare(a.VrfOutput, b.VrfOutput)
 	})
+	for i, entry := range entries {
+		if len(entry.VrfOutput) != cs.HashSize() {
+			return nil, errors.New("unexpected vrf output length")
+		} else if len(entry.Commitment) != cs.HashSize() {
+			return nil, errors.New("unexpected commitment length")
+		} else if i > 0 && bytes.Equal(entries[i-1].VrfOutput, entry.VrfOutput) {
+			return nil, errors.New("same vrf output present multiple times")
+		}
+	}
+	if len(entries) != len(proof.Results) {
+		return nil, errors.New("number of entries searched for does not match number of results")
+	}
 
 	root, elements, err := evaluate(entries, proof.Results, proof.Elements, 0)
 	if err != nil {
@@ -110,4 +122,15 @@ func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byt
 	}
 
 	return root.Hash(cs), nil
+}
+
+// Verify checks that the provided root hash matches `proof`.
+func Verify(cs suites.CipherSuite, entries []Entry, proof *PrefixProof, root []byte) error {
+	cand, err := Evaluate(cs, entries, proof)
+	if err != nil {
+		return err
+	} else if !bytes.Equal(root, cand) {
+		return errors.New("root hash does not match expected value")
+	}
+	return nil
 }
