@@ -87,8 +87,7 @@ type PrefixSearchResult interface {
 }
 
 type inclusionProof struct {
-	commitment []byte
-	depth      int
+	depth int
 }
 
 func (p inclusionProof) Inclusion() bool { return true }
@@ -152,7 +151,7 @@ func unmarshalSearchResult(cs suites.CipherSuite, buf *bytes.Buffer) (PrefixSear
 		if err != nil {
 			return nil, err
 		}
-		return inclusionProof{nil, int(depth)}, nil
+		return inclusionProof{int(depth)}, nil
 
 	case nonInclusionLeafResultType:
 		vrfOutput := make([]byte, cs.HashSize())

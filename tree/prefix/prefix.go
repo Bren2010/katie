@@ -141,7 +141,7 @@ func buildProof(cs suites.CipherSuite, proof *PrefixProof, n node, vrfOutputs []
 	case leafNode:
 		for _, vrfOutput := range vrfOutputs {
 			if bytes.Equal(vrfOutput, n.vrfOutput) {
-				proof.Results = append(proof.Results, inclusionProof{commitment: n.commitment, depth: depth})
+				proof.Results = append(proof.Results, inclusionProof{depth: depth})
 			} else {
 				proof.Results = append(proof.Results, nonInclusionLeafProof{leaf: n, depth: depth})
 			}
