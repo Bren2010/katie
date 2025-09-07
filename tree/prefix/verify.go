@@ -8,40 +8,6 @@ import (
 	"github.com/Bren2010/katie/crypto/suites"
 )
 
-// extendToDepth handles the case where the terminal node of a search is at some
-// specific depth in the tree. It follows the bits of the VRF output in `entry`
-// and pushes down to that depth before inserting the terminal node.
-func extendToDepth(entry Entry, res PrefixSearchResult, elements [][]byte, depth int) (node, [][]byte, error) {
-	if depth > res.Depth() {
-		return nil, nil, errors.New("current depth is greater than result depth")
-	} else if depth == res.Depth() {
-		return terminalNode(entry, res), elements, nil
-	}
-
-	if getBit(entry.VrfOutput, depth) {
-		if len(elements) == 0 {
-			return nil, nil, errors.New("malformed proof")
-		}
-		left := externalNode{hash: elements[0]}
-		right, elements, err := extendToDepth(entry, res, elements[1:], depth+1)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		return &parentNode{left: left, right: right}, elements, nil
-	} else {
-		left, elements, err := extendToDepth(entry, res, elements, depth+1)
-		if err != nil {
-			return nil, nil, err
-		} else if len(elements) == 0 {
-			return nil, nil, errors.New("malformed proof")
-		}
-		right := externalNode{hash: elements[0]}
-
-		return &parentNode{left: left, right: right}, elements[1:], nil
-	}
-}
-
 // terminalNode returns the terminal node of the search.
 func terminalNode(entry Entry, res PrefixSearchResult) node {
 	switch res := res.(type) {
@@ -56,43 +22,68 @@ func terminalNode(entry Entry, res PrefixSearchResult) node {
 	}
 }
 
-// evaluate recursively converts a PrefixProof structure into an in-memory tree
-// of nodes. `entries` are the values that were searched for in the current
-// subtree, `results` are the search results contained in the current subtree,
-// `elements` is a queue of copath hash values, and `depth` is the current
-// depth.
-//
-// It returns a node representing the subtree, and the queue of copath hash
-// values with consumed values removed.
-func evaluate(entries []Entry, results []PrefixSearchResult, elements [][]byte, depth int) (node, [][]byte, error) {
-	switch len(entries) {
-	case 0:
-		if len(elements) == 0 {
-			return nil, nil, errors.New("malformed proof")
-		}
-		return externalNode{hash: elements[0]}, elements[1:], nil
+// addToSkeleton adds the terminal node for a single search result
+// to the in-memory tree in `n`.
+func addToSkeleton(n *node, entry Entry, res PrefixSearchResult) error {
+	depth := 0
 
-	case 1:
-		return extendToDepth(entries[0], results[0], elements, depth)
+	for {
+		switch m := (*n).(type) {
+		case emptyNode, leafNode:
+			return errors.New("malformed proof")
+
+		case *parentNode:
+			if getBit(entry.VrfOutput, depth) {
+				n = &m.right
+			} else {
+				n = &m.left
+			}
+			depth++
+
+		case externalNode:
+			if depth > res.Depth() {
+				return errors.New("current depth is greater than result depth")
+			} else if depth == res.Depth() {
+				*n = terminalNode(entry, res)
+				return nil
+			} else {
+				*n = &parentNode{left: externalNode{}, right: externalNode{}}
+			}
+
+		default:
+			panic("unexpected node type found")
+		}
+	}
+}
+
+// fillInCopath populates all of the empty copath nodes in `n` with `elements`
+// in left-to-right order.
+func fillInCopath(n *node, elements [][]byte) ([][]byte, error) {
+	switch m := (*n).(type) {
+	case emptyNode, leafNode:
+		return elements, nil
+
+	case *parentNode:
+		var err error
+		elements, err = fillInCopath(&m.left, elements)
+		if err != nil {
+			return nil, err
+		}
+		elements, err = fillInCopath(&m.right, elements)
+		if err != nil {
+			return nil, err
+		}
+		return elements, nil
+
+	case externalNode:
+		if len(elements) == 0 {
+			return nil, errors.New("wrong number of copath nodes provided")
+		}
+		*n = externalNode{hash: elements[0]}
+		return elements[1:], nil
 
 	default:
-		split, _ := slices.BinarySearchFunc(entries, true, func(entry Entry, _ bool) int {
-			if getBit(entry.VrfOutput, depth) {
-				return 0
-			}
-			return -1
-		})
-
-		left, elements, err := evaluate(entries[:split], results[:split], elements, depth+1)
-		if err != nil {
-			return nil, nil, err
-		}
-		right, elements, err := evaluate(entries[split:], results[split:], elements, depth+1)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		return &parentNode{left: left, right: right}, elements, nil
+		panic("unexpected node type found")
 	}
 }
 
@@ -114,11 +105,17 @@ func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byt
 		return nil, errors.New("number of entries searched for does not match number of results")
 	}
 
-	root, elements, err := evaluate(entries, proof.Results, proof.Elements, 0)
+	var root node = externalNode{}
+	for i, entry := range entries {
+		if err := addToSkeleton(&root, entry, proof.Results[i]); err != nil {
+			return nil, err
+		}
+	}
+	elements, err := fillInCopath(&root, proof.Elements)
 	if err != nil {
 		return nil, err
 	} else if len(elements) != 0 {
-		return nil, errors.New("malformed proof")
+		return nil, errors.New("wrong number of copath nodes provided")
 	}
 
 	return root.Hash(cs), nil

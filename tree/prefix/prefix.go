@@ -131,6 +131,7 @@ func (t *Tree) getInsertionRoot(ver uint64, entries []Entry) (node, *PrefixProof
 	if len(pb.commitments) > 0 {
 		return nil, nil, errors.New("can not insert same vrf output twice")
 	}
+
 	return root, &pb.proof, nil
 }
 
@@ -193,8 +194,12 @@ func insertEntries(cs suites.CipherSuite, n *node, entries []Entry, depth int) {
 
 	switch m := (*n).(type) {
 	case emptyNode:
-		*n = &parentNode{left: emptyNode{}, right: emptyNode{}}
-		insertEntries(cs, n, entries, depth)
+		if len(entries) == 1 {
+			*n = leafNode{vrfOutput: entries[0].VrfOutput, commitment: entries[0].Commitment}
+		} else {
+			*n = &parentNode{left: emptyNode{}, right: emptyNode{}}
+			insertEntries(cs, n, entries, depth)
+		}
 
 	case leafNode:
 		if getBit(m.vrfOutput, depth) {
