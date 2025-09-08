@@ -30,13 +30,14 @@ func addToSkeleton(n *node, entry Entry, res PrefixSearchResult) error {
 	for {
 		switch m := (*n).(type) {
 		case emptyNode:
-			if res.Inclusion() {
+			if res.Depth() != depth || res.Inclusion() {
 				return errors.New("malformed proof")
 			}
 			return nil
 
 		case leafNode:
-			if res.Inclusion() != bytes.Equal(entry.VrfOutput, m.vrfOutput) {
+			equal := bytes.Equal(entry.VrfOutput, m.vrfOutput)
+			if res.Depth() != depth || res.Inclusion() != equal {
 				return errors.New("malformed proof")
 			}
 			return nil
