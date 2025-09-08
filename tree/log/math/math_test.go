@@ -10,7 +10,7 @@ func assert(ok bool) {
 	}
 }
 
-func slicesEq(left, right []int) bool {
+func slicesEq(left, right []uint64) bool {
 	if len(left) != len(right) {
 		return false
 	}
@@ -41,11 +41,11 @@ func TestMath(t *testing.T) {
 	assert(Sibling(13, 8) == 9)
 	assert(Sibling(9, 8) == 13)
 
-	assert(slicesEq(DirectPath(4, 8), []int{5, 3, 7}))
-	assert(slicesEq(Copath(4, 8), []int{6, 1, 11}))
+	assert(slicesEq(DirectPath(4, 8), []uint64{5, 3, 7}))
+	assert(slicesEq(Copath(4, 8), []uint64{6, 1, 11}))
 
-	assert(slicesEq(BatchCopath([]int{0, 2, 3, 4}, 8), []int{2, 10, 13}))
-	assert(slicesEq(BatchCopath([]int{0, 2, 3}, 8), []int{2, 11}))
+	assert(slicesEq(BatchCopath([]uint64{0, 2, 3, 4}, 8), []uint64{2, 10, 13}))
+	assert(slicesEq(BatchCopath([]uint64{0, 2, 3}, 8), []uint64{2, 11}))
 
-	assert(slicesEq(FullSubtrees(7, 6), []int{3, 9}))
+	assert(slicesEq(FullSubtrees(7, 6), []uint64{3, 9}))
 }

@@ -1,5 +1,5 @@
-// Package log implements a log-based Merkle tree where new data is added
-// as the right-most leaf.
+// Package log implements a Log Tree where new data is added as the rightmost
+// leaf.
 package log
 
 import (
