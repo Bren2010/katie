@@ -137,8 +137,8 @@ type ldbLogStore struct {
 	conn *ldbConn
 }
 
-func (ls *ldbLogStore) BatchGet(keys []int) (map[int][]byte, error) {
-	out := make(map[int][]byte)
+func (ls *ldbLogStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
+	out := make(map[uint64][]byte)
 
 	for _, key := range keys {
 		value, err := ls.conn.Get("l" + fmt.Sprint(key))
@@ -153,7 +153,7 @@ func (ls *ldbLogStore) BatchGet(keys []int) (map[int][]byte, error) {
 	return out, nil
 }
 
-func (ls *ldbLogStore) BatchPut(data map[int][]byte) error {
+func (ls *ldbLogStore) BatchPut(data map[uint64][]byte) error {
 	for key, value := range data {
 		ls.conn.Put("l"+fmt.Sprint(key), value)
 	}

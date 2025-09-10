@@ -3,44 +3,40 @@
 package log
 
 import (
-	"crypto/sha256"
 	"fmt"
 
+	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/log/math"
 )
 
 // treeHash returns the intermediate hash of left and right.
-func treeHash(left, right *nodeData) []byte {
-	if err := left.validate(); err != nil {
-		panic(err)
-	} else if err := right.validate(); err != nil {
-		panic(err)
-	}
-
-	input := append(left.marshal(), right.marshal()...)
-	output := sha256.Sum256(input)
-	return output[:]
+func treeHash(cs suites.CipherSuite, left, right *nodeData) []byte {
+	h := cs.Hash()
+	h.Write(left.marshal())
+	h.Write(right.marshal())
+	return h.Sum(nil)
 }
 
-// Tree is an implementation of a log-based Merkle tree where all new data is
-// added as the right-most leaf.
+// Tree is an implementation of a Log Tree where all new data is added as the
+// rightmost leaf.
 type Tree struct {
+	cs suites.CipherSuite
 	tx db.LogStore
 }
 
-func NewTree(tx db.LogStore) *Tree {
-	return &Tree{tx: tx}
+func NewTree(cs suites.CipherSuite, tx db.LogStore) *Tree {
+	return &Tree{cs: cs, tx: tx}
 }
 
 // fetch loads the chunks for the requested nodes from the database. It returns
 // an error if not all chunks are found.
-func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
-	dedup := make(map[int]struct{})
+func (t *Tree) fetch(n uint64, nodes []uint64) (*chunkSet, error) {
+	dedup := make(map[uint64]struct{})
 	for _, id := range nodes {
 		dedup[math.Chunk(id)] = struct{}{}
 	}
-	ids := make([]int, 0, len(dedup))
+	ids := make([]uint64, 0, len(dedup))
 	for id := range dedup {
 		ids = append(ids, id)
 	}
@@ -64,12 +60,12 @@ func (t *Tree) fetch(n int, nodes []int) (*chunkSet, error) {
 }
 
 // fetchSpecific returns the values for the requested nodes, accounting for the
-// ragged right-edge of the tree.
-func (t *Tree) fetchSpecific(n int, nodes []int) ([][]byte, error) {
-	lookup := make([]int, 0)
+// ragged right edge of the tree.
+func (t *Tree) fetchSpecific(n uint64, nodes []uint64) ([][]byte, error) {
+	lookup := make([]uint64, 0)
 
 	// Add the nodes that we need to compute the requested hashes.
-	rightEdge := make(map[int][]int)
+	rightEdge := make(map[uint64][]uint64)
 	for _, id := range nodes {
 		if math.IsFullSubtree(id, n) {
 			lookup = append(lookup, id)
@@ -95,7 +91,7 @@ func (t *Tree) fetchSpecific(n int, nodes []int) ([][]byte, error) {
 			for i := len(subtrees) - 2; i >= 0; i-- {
 				nd = &nodeData{
 					leaf:  false,
-					value: treeHash(set.get(subtrees[i]), nd),
+					value: treeHash(t.cs, set.get(subtrees[i]), nd),
 				}
 			}
 			out[i] = nd.value

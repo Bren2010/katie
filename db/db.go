@@ -1,13 +1,13 @@
 // Package db implements database wrappers that match a common interface.
 package db
 
-// LogStore is the interface a log tree uses to communicate with its database.
+// LogStore is the interface a Log Tree uses to communicate with its database.
 type LogStore interface {
-	BatchGet(keys []int) (data map[int][]byte, err error)
-	BatchPut(data map[int][]byte) error
+	BatchGet(keys []uint64) (data map[uint64][]byte, err error)
+	BatchPut(data map[uint64][]byte) error
 }
 
-// PrefixStore is the interface a prefix tree uses to communicate with its
+// PrefixStore is the interface a Prefix Tree uses to communicate with its
 // database.
 type PrefixStore interface {
 	BatchGet(keys []string) (map[string][]byte, error)
@@ -21,8 +21,8 @@ type TransparencyTreeRoot struct {
 	Signature []byte `json:"sig"`
 }
 
-// TransparencyStore is the interface a transparency tree uses to communicate
-// with its database.
+// TransparencyStore is the interface a Transparency / Combined Tree uses to
+// communicate with its database.
 type TransparencyStore interface {
 	// Clone returns a read-only clone of the current transparency store,
 	// suitable for distributing to child goroutines.
