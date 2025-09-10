@@ -52,7 +52,7 @@ func (t *Tree) fetch(n uint64, nodes []uint64) (*chunkSet, error) {
 	}
 
 	// Parse chunk set.
-	set, err := newChunkSet(n, data)
+	set, err := newChunkSet(t.cs, n, data)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (t *Tree) fetchSpecific(n uint64, nodes []uint64) ([][]byte, error) {
 
 // Get returns the value of log entry number `x` along with its proof of
 // inclusion.
-func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
+func (t *Tree) Get(x, n uint64) ([]byte, [][]byte, error) {
 	if n == 0 {
 		return nil, nil, fmt.Errorf("empty tree")
 	} else if x >= n {
@@ -114,7 +114,7 @@ func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
 
 	leaf := 2 * x
 	cpath := math.Copath(leaf, n)
-	data, err := t.fetchSpecific(n, append([]int{leaf}, cpath...))
+	data, err := t.fetchSpecific(n, append([]uint64{leaf}, cpath...))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -123,7 +123,7 @@ func (t *Tree) Get(x, n int) ([]byte, [][]byte, error) {
 }
 
 // GetBatch returns a batch proof for the given set of log entries.
-func (t *Tree) GetBatch(entries []int, n int) ([][]byte, error) {
+func (t *Tree) GetBatch(entries []uint64, n uint64) ([][]byte, error) {
 	if n == 0 {
 		return nil, fmt.Errorf("empty tree")
 	} else if len(entries) == 0 {
@@ -139,7 +139,7 @@ func (t *Tree) GetBatch(entries []int, n int) ([][]byte, error) {
 
 // GetConsistencyProof returns a proof that the current log with n elements is
 // an extension of a previous log root with m elements, 0 < m < n.
-func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
+func (t *Tree) GetConsistencyProof(m, n uint64) ([][]byte, error) {
 	if m <= 0 {
 		return nil, fmt.Errorf("first parameter must be greater than zero")
 	} else if m >= n {
@@ -151,19 +151,19 @@ func (t *Tree) GetConsistencyProof(m, n int) ([][]byte, error) {
 // Append adds a new element to the end of the log and returns the new root
 // value. n is the current value; after this operation is complete, methods to
 // this class should be called with n+1.
-func (t *Tree) Append(n int, value []byte) ([]byte, error) {
-	if len(value) != 32 {
+func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
+	if len(value) != t.cs.HashSize() {
 		return nil, fmt.Errorf("value has wrong length: %v", len(value))
 	}
 
 	// Calculate the set of nodes that we'll need to update / create.
 	leaf := 2 * n
-	path := []int{leaf}
+	path := []uint64{leaf}
 	for _, id := range math.DirectPath(leaf, n+1) {
 		path = append(path, id)
 	}
 
-	alreadyExists := make(map[int]struct{})
+	alreadyExists := make(map[uint64]struct{})
 	if n > 0 {
 		alreadyExists[math.Chunk(leaf-2)] = struct{}{}
 		for _, id := range math.DirectPath(leaf-2, n) {
@@ -171,8 +171,8 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 		}
 	}
 
-	updateChunks := make([]int, 0) // These are dedup'ed by fetch.
-	createChunks := make(map[int]struct{})
+	updateChunks := make([]uint64, 0) // These are dedup'ed by fetch.
+	createChunks := make(map[uint64]struct{})
 	for _, id := range path {
 		id = math.Chunk(id)
 		if _, ok := alreadyExists[id]; ok {
@@ -198,7 +198,7 @@ func (t *Tree) Append(n int, value []byte) ([]byte, error) {
 	for _, x := range path[1:] {
 		if math.Level(x)%4 == 0 {
 			l, r := math.Left(x), math.Right(x, n+1)
-			intermediate := treeHash(set.get(l), set.get(r))
+			intermediate := treeHash(t.cs, set.get(l), set.get(r))
 			set.set(x, intermediate)
 		}
 	}

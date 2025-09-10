@@ -1,12 +1,14 @@
 package log
 
 import (
+	"slices"
 	"testing"
 
 	"bytes"
 	"crypto/rand"
 	mrand "math/rand"
-	"sort"
+
+	"github.com/Bren2010/katie/crypto/suites"
 )
 
 func assert(ok bool) {
@@ -31,11 +33,11 @@ func dup(in []byte) []byte {
 
 // memoryStore implements db.LogStore over an in-memory map.
 type memoryStore struct {
-	Data map[int][]byte
+	Data map[uint64][]byte
 }
 
-func (m *memoryStore) BatchGet(keys []int) (map[int][]byte, error) {
-	out := make(map[int][]byte)
+func (m *memoryStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
+	out := make(map[uint64][]byte)
 
 	for _, key := range keys {
 		if d, ok := m.Data[key]; ok {
@@ -46,9 +48,9 @@ func (m *memoryStore) BatchGet(keys []int) (map[int][]byte, error) {
 	return out, nil
 }
 
-func (m *memoryStore) BatchPut(data map[int][]byte) error {
+func (m *memoryStore) BatchPut(data map[uint64][]byte) error {
 	if m.Data == nil {
-		m.Data = make(map[int][]byte)
+		m.Data = make(map[uint64][]byte)
 	}
 	for key, d := range data {
 		buf := make([]byte, len(d))
@@ -59,20 +61,21 @@ func (m *memoryStore) BatchPut(data map[int][]byte) error {
 }
 
 func TestInclusionProof(t *testing.T) {
-	tree := NewTree(new(memoryStore))
-	calc := newSimpleRootCalculator()
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, new(memoryStore))
+	calc := newSimpleRootCalculator(cs)
 	var (
 		nodes [][]byte
 		roots [][]byte
 	)
 
 	checkTree := func(x, n int) {
-		value, proof, err := tree.Get(x, n)
+		value, proof, err := tree.Get(uint64(x), uint64(n))
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert(bytes.Equal(value, nodes[x]))
-		if err := VerifyInclusionProof(x, n, value, proof, roots[n-1]); err != nil {
+		if err := VerifyInclusionProof(cs, uint64(x), uint64(n), value, proof, roots[n-1]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -82,7 +85,7 @@ func TestInclusionProof(t *testing.T) {
 		nodes = append(nodes, leaf)
 
 		// Append to the tree.
-		root, err := tree.Append(i, leaf)
+		root, err := tree.Append(uint64(i), leaf)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,11 +93,7 @@ func TestInclusionProof(t *testing.T) {
 		n := i + 1
 
 		calc.Add(leaf)
-		if calculated, err := calc.Root(); err != nil {
-			t.Fatal(err)
-		} else {
-			assert(bytes.Equal(root, calculated))
-		}
+		assert(bytes.Equal(root, calc.Root()))
 
 		// Do inclusion proofs for a few random entries.
 		if n < 5 {
@@ -112,7 +111,8 @@ func TestInclusionProof(t *testing.T) {
 }
 
 func TestBatchInclusionProof(t *testing.T) {
-	tree := NewTree(new(memoryStore))
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, new(memoryStore))
 	var (
 		leaves [][]byte
 		root   []byte
@@ -122,21 +122,21 @@ func TestBatchInclusionProof(t *testing.T) {
 		leaf := random()
 		leaves = append(leaves, leaf)
 
-		root, err = tree.Append(i, leaf)
+		root, err = tree.Append(uint64(i), leaf)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	xDedup := make(map[int]struct{})
+	xDedup := make(map[uint64]struct{})
 	for i := 0; i < 10; i++ {
-		xDedup[mrand.Intn(2000)] = struct{}{}
+		xDedup[uint64(mrand.Intn(2000))] = struct{}{}
 	}
-	x := make([]int, 0)
+	x := make([]uint64, 0)
 	for id := range xDedup {
 		x = append(x, id)
 	}
-	sort.Ints(x)
+	slices.Sort(x)
 
 	values := make([][]byte, 0)
 	for _, id := range x {
@@ -146,20 +146,21 @@ func TestBatchInclusionProof(t *testing.T) {
 	proof, err := tree.GetBatch(x, 2000)
 	if err != nil {
 		t.Fatal(err)
-	} else if err := VerifyBatchProof(x, 2000, values, proof, root); err != nil {
+	} else if err := VerifyBatchProof(cs, x, 2000, values, proof, root); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestConsistencyProof(t *testing.T) {
-	tree := NewTree(new(memoryStore))
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, new(memoryStore))
 
 	var roots [][]byte
 	for i := 0; i < 2000; i++ {
 		leaf := random()
 
 		// Append to the tree.
-		root, err := tree.Append(i, leaf)
+		root, err := tree.Append(uint64(i), leaf)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -172,22 +173,22 @@ func TestConsistencyProof(t *testing.T) {
 		}
 		for j := 0; j < 5; j++ {
 			m := mrand.Intn(n-1) + 1
-			proof, err := tree.GetConsistencyProof(m, n)
+			proof, err := tree.GetConsistencyProof(uint64(m), uint64(n))
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = VerifyConsistencyProof(m, n, proof, roots[m-1], roots[n-1])
+			err = VerifyConsistencyProof(cs, uint64(m), uint64(n), proof, roots[m-1], roots[n-1])
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			if m > 1 {
 				p := mrand.Intn(m-1) + 1
-				proof, err := tree.GetConsistencyProof(p, m)
+				proof, err := tree.GetConsistencyProof(uint64(p), uint64(m))
 				if err != nil {
 					t.Fatal(err)
 				}
-				err = VerifyConsistencyProof(p, m, proof, roots[p-1], roots[m-1])
+				err = VerifyConsistencyProof(cs, uint64(p), uint64(m), proof, roots[p-1], roots[m-1])
 				if err != nil {
 					t.Fatal(err)
 				}
