@@ -1,7 +1,6 @@
 package log
 
 import (
-	"bytes"
 	"errors"
 	"slices"
 
@@ -85,156 +84,152 @@ func (c *simpleRootCalculator) Root() []byte {
 	return root.value
 }
 
-// EvaluateInclusionProof returns the root that would result in the given proof
-// being valid for the given value.
-func EvaluateInclusionProof(cs suites.CipherSuite, x, n uint64, value []byte, proof [][]byte) ([]byte, error) {
-	if len(value) != cs.HashSize() {
-		return nil, errors.New("value is unexpected size")
+// Verifier is a stateful verifier for inclusion and consistency proofs from a
+// Log Tree.
+type Verifier struct {
+	cs suites.CipherSuite
+
+	prev     *uint64 // Previously observed tree size, or nil if none.
+	frontier [][]byte
+}
+
+func NewVerifier(cs suites.CipherSuite) *Verifier {
+	return &Verifier{cs: cs}
+}
+
+func NewVerifierFromState(cs suites.CipherSuite, prev uint64, frontier [][]byte) (*Verifier, error) {
+	if prev == 0 || prev > math.MaxTreeSize {
+		return nil, errors.New("invalid value for previous tree size")
 	}
-	for _, elem := range proof {
-		if len(elem) != cs.HashSize() {
-			return nil, errors.New("malformed proof")
+	fullSubtrees := math.FullSubtrees(math.Root(prev), prev)
+	if len(frontier) != len(fullSubtrees) {
+		return nil, errors.New("frontier has unexpected length")
+	}
+	for _, val := range frontier {
+		if len(val) != cs.HashSize() {
+			return nil, errors.New("hash has wrong size")
 		}
 	}
 
-	x = 2 * x
-	path := math.Copath(x, n)
-	if len(proof) != len(path) {
-		return nil, errors.New("malformed proof")
+	// Create the "padded" frontier by reversing the order and adding gaps for
+	// missing levels, as expected by simpleRootCalculator.
+	paddedFrontier := make([][]byte, math.Level(fullSubtrees[0])+1)
+	for i, x := range fullSubtrees {
+		paddedFrontier[math.Level(x)] = frontier[i]
 	}
 
-	acc := &nodeData{leaf: true, value: value}
-	for i := range len(path) {
-		nd := &nodeData{leaf: math.IsLeaf(path[i]), value: proof[i]}
+	return &Verifier{cs: cs, prev: &prev, frontier: paddedFrontier}, nil
+}
 
-		var hash []byte
-		if x < path[i] {
-			hash = treeHash(cs, acc, nd)
-		} else {
-			hash = treeHash(cs, nd, acc)
+// Previous returns the previously observed tree size.
+func (v *Verifier) Previous() *uint64 { return v.prev }
+
+// Frontier returns the retained frontier of the tree.
+func (v *Verifier) Frontier() [][]byte {
+	if len(v.frontier) == 0 {
+		return nil
+	}
+
+	out := make([][]byte, 0)
+	for _, val := range v.frontier {
+		if val != nil {
+			out = append(out, val)
 		}
-
-		acc = &nodeData{leaf: false, value: hash}
-		x = path[i]
 	}
+	slices.Reverse(out)
 
-	return acc.value, nil
+	return out
 }
 
-// VerifyInclusionProof checks that `proof` is a valid inclusion proof for
-// `value` at position `x` in a tree with the given root.
-func VerifyInclusionProof(cs suites.CipherSuite, x, n uint64, value []byte, proof [][]byte, root []byte) error {
-	cand, err := EvaluateInclusionProof(cs, x, n, value, proof)
-	if err != nil {
-		return err
-	} else if !bytes.Equal(root, cand) {
-		return errors.New("root does not match proof")
+// Evaluate returns the root that would result in `proof` being valid.
+func (v *Verifier) Evaluate(entries []uint64, n uint64, values [][]byte, proof [][]byte) ([]byte, error) {
+	if n == 0 || n > math.MaxTreeSize {
+		return nil, errors.New("invalid value for current tree size")
+	} else if len(entries) != len(values) {
+		return nil, errors.New("number of leaves must equal number of leaf values")
+	} else if !slices.IsSorted(entries) {
+		return nil, errors.New("leaves must be provided in sorted order")
 	}
-	return nil
-}
-
-// EvaluateBatchProof returns the root that would result in the given proof
-// being valid for the given values.
-func EvaluateBatchProof(cs suites.CipherSuite, x []uint64, n uint64, values [][]byte, proof [][]byte) ([]byte, error) {
-	if len(x) != len(values) {
-		return nil, errors.New("expected same number of indices and values")
-	} else if !slices.IsSorted(x) {
-		return nil, errors.New("input entries must be in sorted order")
+	for i, x := range entries {
+		if x >= n {
+			return nil, errors.New("leaf is beyond right edge of tree")
+		} else if i > 0 && entries[i-1] == x {
+			return nil, errors.New("duplicate leaf index found")
+		}
 	}
-	for _, value := range values {
-		if len(value) != cs.HashSize() {
+	for _, val := range values {
+		if len(val) != v.cs.HashSize() {
 			return nil, errors.New("value is unexpected size")
 		}
 	}
 	for _, elem := range proof {
-		if len(elem) != cs.HashSize() {
+		if len(elem) != v.cs.HashSize() {
 			return nil, errors.New("malformed proof")
 		}
 	}
-
-	copath := math.BatchCopath(x, n)
+	copath := math.BatchCopath(entries, n, v.prev)
 	if len(proof) != len(copath) {
 		return nil, errors.New("malformed proof")
 	}
 
-	calc := newSimpleRootCalculator(cs)
-	i, j := 0, 0
-	for i < len(x) && j < len(copath) {
-		if 2*x[i] < copath[j] {
-			calc.Insert(0, values[i])
-			i++
-		} else {
-			calc.Insert(int(math.Level(copath[j])), proof[j])
-			j++
-		}
-	}
-	for i < len(x) {
-		calc.Insert(0, values[i])
-		i++
-	}
-	for j < len(copath) {
-		calc.Insert(int(math.Level(copath[j])), proof[j])
-		j++
-	}
-
-	return calc.Root(), nil
+	// ???
 }
 
-// VerifyBatchProof checks that `proof` is a valid batch inclusion proof for the
-// given values in a tree with the given root.
-func VerifyBatchProof(cs suites.CipherSuite, x []uint64, n uint64, values [][]byte, proof [][]byte, root []byte) error {
-	cand, err := EvaluateBatchProof(cs, x, n, values, proof)
-	if err != nil {
-		return err
-	} else if !bytes.Equal(root, cand) {
-		return errors.New("root does not match proof")
-	}
-	return nil
-}
+// // EvaluateProof returns the root that would result in `proof“ being valid for
+// // the given values.
+// func EvaluateBatchProof(cs suites.CipherSuite, x []uint64, n uint64, m *uint64, values [][]byte, proof [][]byte) ([]byte, error) {
+// 	if len(x) != len(values) {
+// 		return nil, errors.New("expected same number of indices and values")
+// 	} else if !slices.IsSorted(x) {
+// 		return nil, errors.New("input entries must be in sorted order")
+// 	}
+// 	for _, value := range values {
+// 		if len(value) != cs.HashSize() {
+// 			return nil, errors.New("value is unexpected size")
+// 		}
+// 	}
+// 	for _, elem := range proof {
+// 		if len(elem) != cs.HashSize() {
+// 			return nil, errors.New("malformed proof")
+// 		}
+// 	}
 
-// VerifyConsistencyProof checks that `proof` is a valid consistency proof
-// between `mRoot` and `nRoot` where `m` < `n`.
-func VerifyConsistencyProof(cs suites.CipherSuite, m, n uint64, proof [][]byte, mRoot, nRoot []byte) error {
-	for _, elem := range proof {
-		if len(elem) != cs.HashSize() {
-			return errors.New("malformed proof")
-		}
-	}
+// 	copath := math.BatchCopath(x, n)
+// 	if len(proof) != len(copath) {
+// 		return nil, errors.New("malformed proof")
+// 	}
 
-	ids := math.ConsistencyProof(m, n)
-	calc := newSimpleRootCalculator(cs)
+// 	calc := newSimpleRootCalculator(cs)
+// 	i, j := 0, 0
+// 	for i < len(x) && j < len(copath) {
+// 		if 2*x[i] < copath[j] {
+// 			calc.Insert(0, values[i])
+// 			i++
+// 		} else {
+// 			calc.Insert(int(math.Level(copath[j])), proof[j])
+// 			j++
+// 		}
+// 	}
+// 	for i < len(x) {
+// 		calc.Insert(0, values[i])
+// 		i++
+// 	}
+// 	for j < len(copath) {
+// 		calc.Insert(int(math.Level(copath[j])), proof[j])
+// 		j++
+// 	}
 
-	if len(proof) != len(ids) {
-		return errors.New("malformed proof")
-	}
+// 	return calc.Root(), nil
+// }
 
-	// Step 1: Verify that the consistency proof aligns with mRoot.
-	path := math.FullSubtrees(math.Root(m), m)
-	if len(path) == 1 {
-		// m is a power of two so we don't need to verify anything.
-		calc.Insert(int(math.Level(math.Root(m))), mRoot)
-	} else {
-		for i := 0; i < len(path); i++ {
-			if ids[i] != path[i] {
-				return errors.New("unexpected error")
-			}
-			calc.Insert(int(math.Level(path[i])), proof[i])
-		}
-		if !bytes.Equal(mRoot, calc.Root()) {
-			return errors.New("first root does not match proof")
-		}
-	}
-
-	// Step 2: Verify that the consistency proof aligns with nRoot.
-	i := len(path)
-	if i == 1 {
-		i = 0
-	}
-	for ; i < len(ids); i++ {
-		calc.Insert(int(math.Level(ids[i])), proof[i])
-	}
-	if !bytes.Equal(nRoot, calc.Root()) {
-		return errors.New("second root does not match proof")
-	}
-	return nil
-}
+// // VerifyProof checks that `proof` is a valid batch inclusion proof for the
+// // given values in a tree with the given root.
+// func VerifyProof(cs suites.CipherSuite, x []uint64, n uint64, values [][]byte, proof [][]byte, root []byte) error {
+// 	cand, err := EvaluateBatchProof(cs, x, n, values, proof)
+// 	if err != nil {
+// 		return err
+// 	} else if !bytes.Equal(root, cand) {
+// 		return errors.New("root does not match proof")
+// 	}
+// 	return nil
+// }
