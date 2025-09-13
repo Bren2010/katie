@@ -4,6 +4,7 @@ package log
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
@@ -31,7 +32,7 @@ func NewTree(cs suites.CipherSuite, tx db.LogStore) *Tree {
 
 // fetch loads the chunks for the requested nodes from the database. It returns
 // an error if not all chunks are found.
-func (t *Tree) fetch(n uint64, nodes []uint64) (*chunkSet, error) {
+func (t *Tree) fetch(nodes []uint64) (*chunkSet, error) {
 	dedup := make(map[uint64]struct{})
 	for _, id := range nodes {
 		dedup[math.Chunk(id)] = struct{}{}
@@ -52,7 +53,7 @@ func (t *Tree) fetch(n uint64, nodes []uint64) (*chunkSet, error) {
 	}
 
 	// Parse chunk set.
-	set, err := newChunkSet(t.cs, n, data)
+	set, err := newChunkSet(t.cs, data)
 	if err != nil {
 		return nil, err
 	}
@@ -62,90 +63,33 @@ func (t *Tree) fetch(n uint64, nodes []uint64) (*chunkSet, error) {
 // fetchSpecific returns the values for the requested nodes, accounting for the
 // ragged right edge of the tree.
 func (t *Tree) fetchSpecific(n uint64, nodes []uint64) ([][]byte, error) {
-	lookup := make([]uint64, 0)
-
-	// Add the nodes that we need to compute the requested hashes.
-	rightEdge := make(map[uint64][]uint64)
-	for _, id := range nodes {
-		if math.IsFullSubtree(id, n) {
-			lookup = append(lookup, id)
-		} else {
-			subtrees := math.FullSubtrees(id, n)
-			rightEdge[id] = subtrees
-			lookup = append(lookup, subtrees...)
-		}
-	}
-
-	// Load everything from the database in one roundtrip.
-	set, err := t.fetch(n, lookup)
+	set, err := t.fetch(nodes)
 	if err != nil {
 		return nil, err
 	}
-
-	// Extract the data we want to return.
 	out := make([][]byte, len(nodes))
 	for i, id := range nodes {
-		if subtrees, ok := rightEdge[id]; ok {
-			// Manually calculate the intermediate.
-			nd := set.get(subtrees[len(subtrees)-1])
-			for i := len(subtrees) - 2; i >= 0; i-- {
-				nd = &nodeData{
-					leaf:  false,
-					value: treeHash(t.cs, set.get(subtrees[i]), nd),
-				}
-			}
-			out[i] = nd.value
-		} else {
-			out[i] = set.get(id).value
-		}
+		out[i] = set.get(id).value
 	}
-
 	return out, nil
 }
 
-// Get returns the value of log entry number `x` along with its proof of
-// inclusion.
-func (t *Tree) Get(x, n uint64) ([]byte, [][]byte, error) {
-	if n == 0 {
-		return nil, nil, fmt.Errorf("empty tree")
-	} else if x >= n {
-		return nil, nil, fmt.Errorf("can not get leaf beyond right edge of tree")
-	}
-
-	leaf := 2 * x
-	cpath := math.Copath(leaf, n)
-	data, err := t.fetchSpecific(n, append([]uint64{leaf}, cpath...))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return data[0], data[1:], nil
-}
-
 // GetBatch returns a batch proof for the given set of log entries.
-func (t *Tree) GetBatch(entries []uint64, n uint64) ([][]byte, error) {
+func (t *Tree) GetBatch(entries []uint64, n uint64, m *uint64) ([][]byte, error) {
 	if n == 0 {
 		return nil, fmt.Errorf("empty tree")
 	} else if len(entries) == 0 {
 		return nil, nil
 	}
-	for _, x := range entries {
+	slices.Sort(entries)
+	for i, x := range entries {
 		if x >= n {
 			return nil, fmt.Errorf("can not get leaf beyond right edge of tree")
+		} else if i > 0 && entries[i-1] == x {
+			return nil, fmt.Errorf("duplicate leaf index found")
 		}
 	}
-	return t.fetchSpecific(n, math.BatchCopath(entries, n))
-}
-
-// GetConsistencyProof returns a proof that the current log with n elements is
-// an extension of a previous log root with m elements, 0 < m < n.
-func (t *Tree) GetConsistencyProof(m, n uint64) ([][]byte, error) {
-	if m <= 0 {
-		return nil, fmt.Errorf("first parameter must be greater than zero")
-	} else if m >= n {
-		return nil, fmt.Errorf("second parameter must be greater than first")
-	}
-	return t.fetchSpecific(n, math.ConsistencyProof(m, n))
+	return t.fetchSpecific(n, math.BatchCopath(entries, n, m))
 }
 
 // Append adds a new element to the end of the log and returns the new root
@@ -159,8 +103,12 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 	// Calculate the set of nodes that we'll need to update / create.
 	leaf := 2 * n
 	path := []uint64{leaf}
-	for _, id := range math.DirectPath(leaf, n+1) {
-		path = append(path, id)
+	for _, x := range math.DirectPath(leaf, n+1) {
+		if !math.IsFullSubtree(x, n+1) {
+			break
+		} else if math.Level(x)%4 == 0 {
+			path = append(path, x)
+		}
 	}
 
 	alreadyExists := make(map[uint64]struct{})
@@ -171,7 +119,7 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 		}
 	}
 
-	updateChunks := make([]uint64, 0) // These are dedup'ed by fetch.
+	updateChunks := make([]uint64, 0)
 	createChunks := make(map[uint64]struct{})
 	for _, id := range path {
 		id = math.Chunk(id)
@@ -184,7 +132,7 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 
 	// Fetch the chunks we'll need to update along with nodes we'll need to know
 	// to compute the new root or updated intermediates.
-	set, err := t.fetch(n+1, append(updateChunks, math.Copath(leaf, n+1)...))
+	set, err := t.fetch(append(updateChunks, math.Copath(leaf, n+1)...))
 	if err != nil {
 		return nil, err
 	}
@@ -196,11 +144,9 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 
 	set.set(leaf, value)
 	for _, x := range path[1:] {
-		if math.Level(x)%4 == 0 {
-			l, r := math.Left(x), math.Right(x, n+1)
-			intermediate := treeHash(t.cs, set.get(l), set.get(r))
-			set.set(x, intermediate)
-		}
+		l, r := math.Left(x), math.RightStep(x)
+		intermediate := treeHash(t.cs, set.get(l), set.get(r))
+		set.set(x, intermediate)
 	}
 
 	// Commit to database and return new root.
@@ -209,5 +155,13 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	return set.get(math.Root(n + 1)).value, nil
+	// Compute root hash.
+	fullSubtrees := math.FullSubtrees(math.Root(n+1), n+1)
+	slices.Reverse(fullSubtrees)
+
+	acc := set.get(fullSubtrees[0])
+	for _, x := range fullSubtrees[1:] {
+		acc = &nodeData{leaf: false, value: treeHash(t.cs, set.get(x), acc)}
+	}
+	return acc.value, nil
 }

@@ -69,7 +69,7 @@ func newChunk(cs suites.CipherSuite, id uint64, data []byte) (*nodeChunk, error)
 	// Parse the serialized data.
 	hashSize := cs.HashSize()
 	leafChunk := math.Level(id) == 3
-	nodes := make([]*nodeData, 0)
+	nodes := make([]*nodeData, 0, 15)
 
 	for len(data) > 0 {
 		if len(data) < hashSize {
@@ -107,14 +107,14 @@ func (c *nodeChunk) findIndex(x uint64) uint64 {
 }
 
 // get returns the data of node x with the value populated.
-func (c *nodeChunk) get(x, n uint64, set *chunkSet) *nodeData {
+func (c *nodeChunk) get(x uint64) *nodeData {
 	i := c.findIndex(x)
 	if math.IsLeaf(x) || !c.nodes[i].isEmpty() {
 		return c.nodes[i]
 	}
 
-	l, r := math.Left(x), math.Right(x, n)
-	c.nodes[i].value = treeHash(c.cs, set.get(l), set.get(r))
+	l, r := math.Left(x), math.RightStep(x)
+	c.nodes[i].value = treeHash(c.cs, c.get(l), c.get(r))
 
 	return c.nodes[i]
 }
@@ -160,13 +160,12 @@ func (c *nodeChunk) marshal() []byte {
 // in a set.
 type chunkSet struct {
 	cs suites.CipherSuite
-	n  uint64
 
 	chunks   map[uint64]*nodeChunk
 	modified map[uint64]struct{}
 }
 
-func newChunkSet(cs suites.CipherSuite, n uint64, data map[uint64][]byte) (*chunkSet, error) {
+func newChunkSet(cs suites.CipherSuite, data map[uint64][]byte) (*chunkSet, error) {
 	chunks := make(map[uint64]*nodeChunk)
 	for id, raw := range data {
 		c, err := newChunk(cs, id, raw)
@@ -178,7 +177,6 @@ func newChunkSet(cs suites.CipherSuite, n uint64, data map[uint64][]byte) (*chun
 
 	return &chunkSet{
 		cs: cs,
-		n:  n,
 
 		chunks:   chunks,
 		modified: make(map[uint64]struct{}),
@@ -191,7 +189,7 @@ func (s *chunkSet) get(x uint64) *nodeData {
 	if !ok {
 		panic("requested hash is not available in this chunk set")
 	}
-	return c.get(x, s.n, s)
+	return c.get(x)
 }
 
 // add initializes a new empty chunk for node x.
