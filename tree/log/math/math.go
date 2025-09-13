@@ -10,8 +10,8 @@ func IsLeaf(x uint64) bool {
 	return (x & 1) == 0
 }
 
-// Log2 returns the exponent of the largest power of 2 less than x.
-func Log2(x uint64) uint64 {
+// log2 returns the exponent of the largest power of 2 less than x.
+func log2(x uint64) uint64 {
 	if x == 0 {
 		return 0
 	}
@@ -37,8 +37,8 @@ func Level(x uint64) uint64 {
 	return k
 }
 
-// NodeWidth returns the number of nodes needed to store a tree with n leaves.
-func NodeWidth(n uint64) uint64 {
+// nodeWidth returns the number of nodes needed to store a tree with n leaves.
+func nodeWidth(n uint64) uint64 {
 	if n == 0 {
 		return 0
 	}
@@ -47,8 +47,8 @@ func NodeWidth(n uint64) uint64 {
 
 // Root returns the id of the root node of a tree with n leaves.
 func Root(n uint64) uint64 {
-	w := NodeWidth(n)
-	return (1 << Log2(w)) - 1
+	w := nodeWidth(n)
+	return (1 << log2(w)) - 1
 }
 
 // Left returns the left child of an intermediate node.
@@ -71,7 +71,7 @@ func RightStep(x uint64) uint64 {
 // Right returns the right child of an intermediate node.
 func Right(x, n uint64) uint64 {
 	r := RightStep(x)
-	w := NodeWidth(n)
+	w := nodeWidth(n)
 	for r >= w {
 		r = Left(r)
 	}
@@ -91,7 +91,7 @@ func Parent(x, n uint64) uint64 {
 		panic("root node has no parent")
 	}
 
-	width := NodeWidth(n)
+	width := nodeWidth(n)
 	p := ParentStep(x)
 	for p >= width {
 		p = ParentStep(p)
@@ -159,82 +159,59 @@ func FullSubtrees(x, n uint64) []uint64 {
 	}
 }
 
-// ConsistencyProof returns the list of node ids to return for a consistency
-// proof between m and n.
-func ConsistencyProof(m, n uint64) []uint64 {
-	// Algorithm from RFC 6962.
-	return subProof(m, n, true)
-}
+// BatchCopath returns the copath nodes of a batch of leaves. `n` is the current
+// number of leaves, and `m` is the optional previous log size to prove
+// consistency with. `leaves` must be sorted and contain no duplicates.
+func BatchCopath(leaves []uint64, n uint64, m *uint64) []uint64 {
+	out := make([]uint64, 0)
 
-func subProof(m, n uint64, b bool) []uint64 {
-	if m == n {
-		if b {
-			return make([]uint64, 0)
-		}
-		return []uint64{Root(m)} // m is a power of two.
-	}
-
-	k := uint64(1) << Log2(n)
-	if k == n {
-		k = k / 2
-	}
-	if m <= k {
-		proof := subProof(m, k, b)
-		proof = append(proof, Right(Root(n), n))
-		return proof
-	}
-
-	proof := subProof(m-k, n-k, false)
-	for i := range len(proof) {
-		proof[i] = proof[i] + 2*k
-	}
-	proof = append([]uint64{Left(Root(n))}, proof...)
-	return proof
-}
-
-// BatchCopath returns the copath nodes of a batch of leaves.
-func BatchCopath(leaves []uint64, n uint64) []uint64 {
 	// Convert the leaf indices to node indices.
 	nodes := make([]uint64, len(leaves))
 	for i, x := range leaves {
 		nodes[i] = 2 * x
 	}
-	slices.Sort(nodes)
 
-	// Iteratively combine nodes until there's only one entry in the list (being
-	// the root), keeping track of the extra nodes we needed to get there.
-	out := make([]uint64, 0)
-	root := Root(n)
-	for {
-		if len(nodes) == 1 && nodes[0] == root {
-			break
+	// If we are proving consistency with a previous tree head:
+	if m != nil {
+		mRoot := Root(*m)
+		mFullSubtrees := FullSubtrees(mRoot, *m)
+		retained := make(map[uint64]struct{})
+		for _, id := range mFullSubtrees {
+			retained[id] = struct{}{}
 		}
 
-		nextLevel := make([]uint64, 0)
-		for len(nodes) > 1 {
-			p := Parent(nodes[0], n)
-			if Right(p, n) == nodes[1] { // Sibling is already here.
-				nodes = nodes[2:]
-			} else { // Need to fetch sibling.
-				out = append(out, Sibling(nodes[0], n))
-				nodes = nodes[1:]
-			}
-			nextLevel = append(nextLevel, p)
-		}
-		if len(nodes) == 1 {
-			if len(nextLevel) > 0 && Level(Parent(nodes[0], n)) > Level(nextLevel[0]) {
-				nextLevel = append(nextLevel, nodes[0])
-			} else {
-				out = append(out, Sibling(nodes[0], n))
-				nextLevel = append(nextLevel, Parent(nodes[0], n))
-			}
-		}
+		// For all leaves that existed in `m`, compute their copath in `m`,
+		// omitting subtree hashes that are already retained by the verifier.
+		i, _ := slices.BinarySearch(nodes, nodeWidth(*m))
+		out = append(out, batchCopath(mRoot, *m, nodes[:i], retained)...)
 
-		nodes = nextLevel
+		// Moving forward, pretend the leaves that existed in `m` are replaced
+		// with the full subtrees of `m`.
+		nodes = append(mFullSubtrees, nodes[i:]...)
 	}
-	slices.Sort(out)
 
+	out = append(out, batchCopath(Root(n), n, nodes, nil)...)
 	return out
+}
+
+func batchCopath(x, n uint64, nodes []uint64, retained map[uint64]struct{}) []uint64 {
+	if len(nodes) == 0 {
+		out := make([]uint64, 0)
+		for _, id := range FullSubtrees(x, n) {
+			if _, ok := retained[id]; !ok {
+				out = append(out, id)
+			}
+		}
+		return out
+	} else if len(nodes) == 1 && nodes[0] == x {
+		return nil
+	}
+	i, found := slices.BinarySearch(nodes, x)
+	if found {
+		i++
+	}
+	return append(batchCopath(Left(x), n, nodes[:i], retained),
+		batchCopath(Right(x, n), n, nodes[i:], retained)...)
 }
 
 // Chunk takes a node id as input and returns the id of the chunk that the node

@@ -23,9 +23,9 @@ func slicesEq(left, right []uint64) bool {
 }
 
 func TestMath(t *testing.T) {
-	assert(Log2(0) == 0)
-	assert(Log2(8) == 3)
-	assert(Log2(10000) == 13)
+	assert(log2(0) == 0)
+	assert(log2(8) == 3)
+	assert(log2(10000) == 13)
 
 	assert(Level(1) == 1)
 	assert(Level(2) == 0)
@@ -44,8 +44,14 @@ func TestMath(t *testing.T) {
 	assert(slicesEq(DirectPath(4, 8), []uint64{5, 3, 7}))
 	assert(slicesEq(Copath(4, 8), []uint64{6, 1, 11}))
 
-	assert(slicesEq(BatchCopath([]uint64{0, 2, 3, 4}, 8), []uint64{2, 10, 13}))
-	assert(slicesEq(BatchCopath([]uint64{0, 2, 3}, 8), []uint64{2, 11}))
-
 	assert(slicesEq(FullSubtrees(7, 6), []uint64{3, 9}))
+
+	assert(slicesEq(BatchCopath([]uint64{0, 2, 3, 4}, 8, nil), []uint64{2, 10, 13}))
+	assert(slicesEq(BatchCopath([]uint64{0, 2, 3}, 8, nil), []uint64{2, 11}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 12}, 13, nil), []uint64{1, 10, 12, 19}))
+	prev := uint64(13)
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 12, 13}, 15, &prev), []uint64{1, 10, 12, 28}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 13}, 15, &prev), []uint64{1, 10, 12, 28}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 14}, 15, &prev), []uint64{1, 10, 12, 26}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7}, 15, &prev), []uint64{1, 10, 12, 26, 28}))
 }
