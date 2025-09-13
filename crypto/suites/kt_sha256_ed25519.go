@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"fmt"
+	"errors"
 	"hash"
 
 	"github.com/Bren2010/katie/crypto/vrf"
@@ -31,14 +31,14 @@ func (s KTSha256Ed25519) CommitmentFixedBytes() []byte {
 
 func (s KTSha256Ed25519) ParseSigningPrivateKey(raw []byte) (SigningPrivateKey, error) {
 	if len(raw) != ed25519.SeedSize {
-		return nil, fmt.Errorf("encoding private key is unexpected size")
+		return nil, errors.New("encoding private key is unexpected size")
 	}
 	return ed25519PrivateKey{ed25519.NewKeyFromSeed(raw)}, nil
 }
 
 func (s KTSha256Ed25519) ParseSigningPublicKey(raw []byte) (SigningPublicKey, error) {
 	if len(raw) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("encoded public key is unexpected size")
+		return nil, errors.New("encoded public key is unexpected size")
 	}
 	return ed25519PublicKey{ed25519.PublicKey(raw)}, nil
 }

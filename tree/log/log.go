@@ -3,7 +3,7 @@
 package log
 
 import (
-	"fmt"
+	"errors"
 	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -48,20 +48,14 @@ func (t *Tree) fetch(nodes []uint64) (*chunkSet, error) {
 	}
 	for _, id := range ids {
 		if _, ok := data[id]; !ok {
-			return nil, fmt.Errorf("not all expected data was found in the database")
+			return nil, errors.New("not all expected data was found in the database")
 		}
 	}
 
-	// Parse chunk set.
-	set, err := newChunkSet(t.cs, data)
-	if err != nil {
-		return nil, err
-	}
-	return set, nil
+	return newChunkSet(t.cs, data)
 }
 
-// fetchSpecific returns the values for the requested nodes, accounting for the
-// ragged right edge of the tree.
+// fetchSpecific returns the values for the requested nodes.
 func (t *Tree) fetchSpecific(n uint64, nodes []uint64) ([][]byte, error) {
 	set, err := t.fetch(nodes)
 	if err != nil {
@@ -76,17 +70,19 @@ func (t *Tree) fetchSpecific(n uint64, nodes []uint64) ([][]byte, error) {
 
 // GetBatch returns a batch proof for the given set of log entries.
 func (t *Tree) GetBatch(entries []uint64, n uint64, m *uint64) ([][]byte, error) {
-	if n == 0 {
-		return nil, fmt.Errorf("empty tree")
+	if n == 0 || n > math.MaxTreeSize {
+		return nil, errors.New("invalid value for current tree size")
+	} else if m != nil && (*m == 0 || *m > n || *m > math.MaxTreeSize) {
+		return nil, errors.New("invalid value for previous tree size")
 	} else if len(entries) == 0 {
 		return nil, nil
 	}
 	slices.Sort(entries)
 	for i, x := range entries {
 		if x >= n {
-			return nil, fmt.Errorf("can not get leaf beyond right edge of tree")
+			return nil, errors.New("can not get leaf beyond right edge of tree")
 		} else if i > 0 && entries[i-1] == x {
-			return nil, fmt.Errorf("duplicate leaf index found")
+			return nil, errors.New("duplicate leaf index found")
 		}
 	}
 	return t.fetchSpecific(n, math.BatchCopath(entries, n, m))
@@ -96,8 +92,10 @@ func (t *Tree) GetBatch(entries []uint64, n uint64, m *uint64) ([][]byte, error)
 // value. n is the current value; after this operation is complete, methods to
 // this class should be called with n+1.
 func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
-	if len(value) != t.cs.HashSize() {
-		return nil, fmt.Errorf("value has wrong length: %v", len(value))
+	if n >= math.MaxTreeSize {
+		return nil, errors.New("invalid value for current tree size")
+	} else if len(value) != t.cs.HashSize() {
+		return nil, errors.New("value has wrong length")
 	}
 
 	// Calculate the set of nodes that we'll need to update / create.
@@ -141,7 +139,6 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 	for id := range createChunks {
 		set.add(id)
 	}
-
 	set.set(leaf, value)
 	for _, x := range path[1:] {
 		l, r := math.Left(x), math.RightStep(x)

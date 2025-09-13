@@ -1,7 +1,7 @@
 package log
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/tree/log/math"
@@ -73,7 +73,7 @@ func newChunk(cs suites.CipherSuite, id uint64, data []byte) (*nodeChunk, error)
 
 	for len(data) > 0 {
 		if len(data) < hashSize {
-			return nil, fmt.Errorf("unable to parse chunk")
+			return nil, errors.New("unable to parse chunk")
 		}
 		if len(nodes) > 0 {
 			nodes = append(nodes, &nodeData{leaf: false, value: nil})
@@ -85,7 +85,7 @@ func newChunk(cs suites.CipherSuite, id uint64, data []byte) (*nodeChunk, error)
 		data = data[hashSize:]
 	}
 	if len(nodes) > 15 {
-		return nil, fmt.Errorf("unable to parse chunk")
+		return nil, errors.New("unable to parse chunk")
 	}
 	for len(nodes) < 15 {
 		nodes = append(nodes, &nodeData{

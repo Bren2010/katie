@@ -5,6 +5,8 @@ import (
 	"slices"
 )
 
+const MaxTreeSize uint64 = 1 << 63
+
 // IsLeaf returns true if x is the id of a leaf node.
 func IsLeaf(x uint64) bool {
 	return (x & 1) == 0
