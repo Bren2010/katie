@@ -84,7 +84,7 @@ func (v *Verifier) Evaluate(entries []uint64, n uint64, values [][]byte, proof [
 
 	// Build sorted list of node indices.
 	nodes := make([]uint64, 0, len(valuesMap))
-	for x, _ := range valuesMap {
+	for x := range valuesMap {
 		nodes = append(nodes, x)
 	}
 	slices.Sort(nodes)
@@ -105,11 +105,19 @@ func (v *Verifier) Evaluate(entries []uint64, n uint64, values [][]byte, proof [
 
 	for {
 		if math.IsFullSubtree(root, n) {
-			out = append(out, v.evaluate(root, n, nodes[offset:], valuesMap, proofMap).value)
+			elem, err := v.evaluate(root, n, nodes[offset:], valuesMap, proofMap)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, elem.value)
 			return out, nil
 		}
 		i, _ := slices.BinarySearch(nodes, root)
-		out = append(out, v.evaluate(math.Left(root), n, nodes[offset:i], valuesMap, proofMap).value)
+		elem, err := v.evaluate(math.Left(root), n, nodes[offset:i], valuesMap, proofMap)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, elem.value)
 		root = math.Right(root, n)
 		offset = i
 	}
