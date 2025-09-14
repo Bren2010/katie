@@ -12,11 +12,11 @@ import (
 )
 
 // treeHash returns the intermediate hash of left and right.
-func treeHash(cs suites.CipherSuite, left, right *nodeData) []byte {
+func treeHash(cs suites.CipherSuite, left, right *nodeData) *nodeData {
 	h := cs.Hash()
 	h.Write(left.marshal())
 	h.Write(right.marshal())
-	return h.Sum(nil)
+	return &nodeData{leaf: false, value: h.Sum(nil)}
 }
 
 // Tree is an implementation of a Log Tree where all new data is added as the
@@ -139,7 +139,7 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 	for id := range createChunks {
 		set.add(id)
 	}
-	set.set(leaf, value)
+	set.set(leaf, &nodeData{leaf: true, value: value})
 	for _, x := range path[1:] {
 		l, r := math.Left(x), math.RightStep(x)
 		intermediate := treeHash(t.cs, set.get(l), set.get(r))
@@ -158,7 +158,7 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 
 	acc := set.get(fullSubtrees[0])
 	for _, x := range fullSubtrees[1:] {
-		acc = &nodeData{leaf: false, value: treeHash(t.cs, set.get(x), acc)}
+		acc = treeHash(t.cs, set.get(x), acc)
 	}
 	return acc.value, nil
 }

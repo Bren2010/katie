@@ -163,57 +163,41 @@ func FullSubtrees(x, n uint64) []uint64 {
 
 // BatchCopath returns the copath nodes of a batch of leaves. `n` is the current
 // number of leaves, and `m` is the optional previous log size to prove
-// consistency with. `leaves` must be sorted and contain no duplicates.
+// consistency with.
 func BatchCopath(leaves []uint64, n uint64, m *uint64) []uint64 {
-	out := make([]uint64, 0)
-
-	// Convert the leaf indices to node indices.
-	nodes := make([]uint64, len(leaves))
-	for i, x := range leaves {
-		nodes[i] = 2 * x
+	// Compute the set of node indices to prove inclusion for. This is a
+	// combination of the requested leaves and any retained subtrees from `m`.
+	dedup := make(map[uint64]struct{})
+	for _, x := range leaves {
+		dedup[2*x] = struct{}{}
 	}
-
-	// If we are proving consistency with a previous tree head:
 	if m != nil {
-		mRoot := Root(*m)
-		mFullSubtrees := FullSubtrees(mRoot, *m)
-		retained := make(map[uint64]struct{})
-		for _, id := range mFullSubtrees {
-			retained[id] = struct{}{}
+		for _, x := range FullSubtrees(Root(*m), *m) {
+			dedup[x] = struct{}{}
 		}
-
-		// For all leaves that existed in `m`, compute their copath in `m`,
-		// omitting subtree hashes that are already retained by the verifier.
-		i, _ := slices.BinarySearch(nodes, nodeWidth(*m))
-		out = append(out, batchCopath(mRoot, *m, nodes[:i], retained)...)
-
-		// Moving forward, pretend the leaves that existed in `m` are replaced
-		// with the full subtrees of `m`.
-		nodes = append(mFullSubtrees, nodes[i:]...)
 	}
+	nodes := make([]uint64, 0, len(dedup))
+	for x := range dedup {
+		nodes = append(nodes, x)
+	}
+	slices.Sort(nodes)
 
-	out = append(out, batchCopath(Root(n), n, nodes, nil)...)
-	return out
+	return batchCopath(Root(n), n, nodes)
 }
 
-func batchCopath(x, n uint64, nodes []uint64, retained map[uint64]struct{}) []uint64 {
+func batchCopath(x, n uint64, nodes []uint64) []uint64 {
 	if len(nodes) == 0 {
-		out := make([]uint64, 0)
-		for _, id := range FullSubtrees(x, n) {
-			if _, ok := retained[id]; !ok {
-				out = append(out, id)
-			}
-		}
-		return out
+		return FullSubtrees(x, n)
 	} else if len(nodes) == 1 && nodes[0] == x {
 		return nil
 	}
 	i, found := slices.BinarySearch(nodes, x)
+	j := i
 	if found {
-		i++
+		j++
 	}
-	return append(batchCopath(Left(x), n, nodes[:i], retained),
-		batchCopath(Right(x, n), n, nodes[i:], retained)...)
+	return append(batchCopath(Left(x), n, nodes[:i]),
+		batchCopath(Right(x, n), n, nodes[j:])...)
 }
 
 // Chunk takes a node id as input and returns the id of the chunk that the node

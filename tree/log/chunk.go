@@ -114,18 +114,13 @@ func (c *nodeChunk) get(x uint64) *nodeData {
 	}
 
 	l, r := math.Left(x), math.RightStep(x)
-	c.nodes[i].value = treeHash(c.cs, c.get(l), c.get(r))
+	c.nodes[i] = treeHash(c.cs, c.get(l), c.get(r))
 
 	return c.nodes[i]
 }
 
 // set updates node x to contain the given value.
-func (c *nodeChunk) set(x uint64, value []byte) {
-	nd := &nodeData{
-		leaf:  math.IsLeaf(x),
-		value: value,
-	}
-
+func (c *nodeChunk) set(x uint64, nd *nodeData) {
 	i := c.findIndex(x)
 	c.nodes[i] = nd
 	for i != 7 {
@@ -206,13 +201,13 @@ func (s *chunkSet) add(x uint64) {
 }
 
 // set changes node x to the given value.
-func (s *chunkSet) set(x uint64, value []byte) {
+func (s *chunkSet) set(x uint64, nd *nodeData) {
 	id := math.Chunk(x)
 	c, ok := s.chunks[id]
 	if !ok {
 		panic("requested hash is not available in this chunk set")
 	}
-	c.set(x, value)
+	c.set(x, nd)
 	s.modified[id] = struct{}{}
 }
 
