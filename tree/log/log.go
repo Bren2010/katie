@@ -56,7 +56,7 @@ func (t *Tree) fetch(nodes []uint64) (*chunkSet, error) {
 }
 
 // fetchSpecific returns the values for the requested nodes.
-func (t *Tree) fetchSpecific(n uint64, nodes []uint64) ([][]byte, error) {
+func (t *Tree) fetchSpecific(nodes []uint64) ([][]byte, error) {
 	set, err := t.fetch(nodes)
 	if err != nil {
 		return nil, err
@@ -85,7 +85,7 @@ func (t *Tree) GetBatch(entries []uint64, n uint64, m *uint64) ([][]byte, error)
 			return nil, errors.New("duplicate leaf index found")
 		}
 	}
-	return t.fetchSpecific(n, math.BatchCopath(entries, n, m))
+	return t.fetchSpecific(math.BatchCopath(entries, n, m))
 }
 
 // Append adds a new element to the end of the log and returns the new root
@@ -102,41 +102,41 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 	leaf := 2 * n
 	path := []uint64{leaf}
 	for _, x := range math.DirectPath(leaf, n+1) {
-		if !math.IsFullSubtree(x, n+1) {
-			break
-		} else if math.Level(x)%4 == 0 {
+		if math.IsFullSubtree(x, n+1) && math.Level(x)%4 == 0 {
 			path = append(path, x)
 		}
 	}
 
 	alreadyExists := make(map[uint64]struct{})
 	if n > 0 {
-		alreadyExists[math.Chunk(leaf-2)] = struct{}{}
-		for _, id := range math.DirectPath(leaf-2, n) {
-			alreadyExists[math.Chunk(id)] = struct{}{}
+		for _, x := range math.Copath(leaf, n+1) {
+			alreadyExists[math.Chunk(x)] = struct{}{}
 		}
 	}
 
-	updateChunks := make([]uint64, 0)
-	createChunks := make(map[uint64]struct{})
-	for _, id := range path {
-		id = math.Chunk(id)
-		if _, ok := alreadyExists[id]; ok {
-			updateChunks = append(updateChunks, id)
+	toFetch := make([]uint64, 0)
+	toCreate := make(map[uint64]struct{})
+	for _, x := range path {
+		x = math.Chunk(x)
+		if _, ok := alreadyExists[x]; ok {
+			toFetch = append(toFetch, x)
 		} else {
-			createChunks[id] = struct{}{}
+			toCreate[x] = struct{}{}
 		}
+	}
+	for x := range alreadyExists {
+		toFetch = append(toFetch, math.Chunk(x))
 	}
 
 	// Fetch the chunks we'll need to update along with nodes we'll need to know
 	// to compute the new root or updated intermediates.
-	set, err := t.fetch(append(updateChunks, math.Copath(leaf, n+1)...))
+	set, err := t.fetch(toFetch)
 	if err != nil {
 		return nil, err
 	}
 
 	// Add any new chunks to the set and set the correct hashes everywhere.
-	for id := range createChunks {
+	for id := range toCreate {
 		set.add(id)
 	}
 	set.set(leaf, &nodeData{leaf: true, value: value})
