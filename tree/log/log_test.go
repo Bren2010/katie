@@ -59,20 +59,20 @@ func TestGetBatch(t *testing.T) {
 	// Populate tree with random leaves. Retain leaf values and frontier after
 	// each append.
 	var (
-		leaves   [][]byte
-		frontier [][]byte
-		err      error
+		leaves    [][]byte
+		frontiers [][][]byte
 	)
 	for i := range uint64(2000) {
 		leaf := random()
 		leaves = append(leaves, leaf)
 
-		frontier, err = tree.Append(i, leaf)
+		frontier, err := tree.Append(i, leaf)
 		if err != nil {
 			t.Fatal(err)
 		}
+		frontiers = append(frontiers, frontier)
 	}
-	root, err := Root(cs, 2000, frontier)
+	root, err := Root(cs, 2000, frontiers[len(frontiers)-1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,18 +94,24 @@ func TestGetBatch(t *testing.T) {
 			values = append(values, leaves[x])
 		}
 
-		// Request inclusion proof for chosen leaves, with previously-observed
+		// Request inclusion proof for chosen leaves, with previously observed
 		// tree size increasing in increments of 10.
 		for i := uint64(0); i <= 2000; i += 10 {
+			verifier := NewVerifier(cs)
+
 			var m *uint64
 			if i > 0 {
 				m = &i
+				if err := verifier.Retain(*m, frontiers[*m-1]); err != nil {
+					t.Fatal(err)
+				}
 			}
+
 			proof, err := tree.GetBatch(entries, 2000, m)
 			if err != nil {
 				t.Fatal(err)
 			}
-			frontier, err := NewVerifier(cs).Evaluate(entries, 2000, values, proof)
+			frontier, err := verifier.Evaluate(entries, 2000, values, proof)
 			if err != nil {
 				t.Fatal(err)
 			}
