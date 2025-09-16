@@ -88,10 +88,10 @@ func (t *Tree) GetBatch(entries []uint64, n uint64, m *uint64) ([][]byte, error)
 	return t.fetchSpecific(math.BatchCopath(entries, n, m))
 }
 
-// Append adds a new element to the end of the log and returns the new root
-// value. n is the current value; after this operation is complete, methods to
-// this class should be called with n+1.
-func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
+// Append adds a new element to the end of the log and returns the new frontier.
+// n is the current value; after this operation is complete, methods to this
+// class should be called with n+1.
+func (t *Tree) Append(n uint64, value []byte) ([][]byte, error) {
 	if n >= math.MaxTreeSize {
 		return nil, errors.New("invalid value for current tree size")
 	} else if len(value) != t.cs.HashSize() {
@@ -125,7 +125,7 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 		}
 	}
 	for x := range alreadyExists {
-		toFetch = append(toFetch, math.Chunk(x))
+		toFetch = append(toFetch, x)
 	}
 
 	// Fetch the chunks we'll need to update along with nodes we'll need to know
@@ -146,19 +146,49 @@ func (t *Tree) Append(n uint64, value []byte) ([]byte, error) {
 		set.set(x, intermediate)
 	}
 
-	// Commit to database and return new root.
+	// Commit modifications to database.
 	data := set.marshal()
 	if err := t.tx.BatchPut(data); err != nil {
 		return nil, err
 	}
 
-	// Compute root hash.
+	// Get frontier elements and return.
 	fullSubtrees := math.FullSubtrees(math.Root(n+1), n+1)
-	slices.Reverse(fullSubtrees)
+	out := make([][]byte, 0, len(fullSubtrees))
+	for _, x := range fullSubtrees {
+		out = append(out, set.get(x).value)
+	}
+	return out, nil
+}
 
-	acc := set.get(fullSubtrees[0])
-	for _, x := range fullSubtrees[1:] {
-		acc = treeHash(t.cs, set.get(x), acc)
+// Root takes the tree size and frontier as input and returns the root hash of
+// the tree.
+func Root(cs suites.CipherSuite, n uint64, frontier [][]byte) ([]byte, error) {
+	// Input validation.
+	if n == 0 || n > math.MaxTreeSize {
+		return nil, errors.New("invalid value for current tree size")
+	}
+	subtrees := math.FullSubtrees(math.Root(n), n)
+	if len(frontier) != len(subtrees) {
+		return nil, errors.New("frontier is unexpected size")
+	}
+	for _, elem := range frontier {
+		if len(elem) != cs.HashSize() {
+			return nil, errors.New("frontier element is unexpected size")
+		}
+	}
+
+	// Roll-up frontier elements into singular root hash.
+	acc := &nodeData{
+		leaf:  math.IsLeaf(subtrees[len(subtrees)-1]),
+		value: frontier[len(frontier)-1],
+	}
+	for i := len(frontier) - 2; i >= 0; i-- {
+		acc = treeHash(
+			cs,
+			&nodeData{leaf: math.IsLeaf(subtrees[i]), value: frontier[i]},
+			acc,
+		)
 	}
 	return acc.value, nil
 }

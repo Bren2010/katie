@@ -22,6 +22,9 @@ type nodeData struct {
 }
 
 func (nd *nodeData) marshal() []byte {
+	if nd.isEmpty() {
+		panic("can not marshal empty node")
+	}
 	out := make([]byte, 1+len(nd.value))
 	if nd.leaf {
 		out[0] = 0
@@ -33,7 +36,7 @@ func (nd *nodeData) marshal() []byte {
 }
 
 func (nd *nodeData) isEmpty() bool {
-	return nd.value == nil
+	return len(nd.value) == 0
 }
 
 // nodeChunk is a helper struct that handles computing/caching the intermediate

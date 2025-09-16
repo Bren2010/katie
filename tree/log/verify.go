@@ -146,7 +146,7 @@ func (v *Verifier) evaluate(x, n uint64, nodes []uint64, values, proof map[uint6
 		}
 		return treeHash(v.cs, left, right), nil
 	} else if len(nodes) == 1 && nodes[0] == x {
-		return &nodeData{leaf: math.IsLeaf(x), value: proof[x]}, nil
+		return &nodeData{leaf: math.IsLeaf(x), value: values[x]}, nil
 	}
 
 	i, found := slices.BinarySearch(nodes, x)
@@ -168,36 +168,4 @@ func (v *Verifier) evaluate(x, n uint64, nodes []uint64, values, proof map[uint6
 		return nil, errors.New("unexpected value computed for intermediate node")
 	}
 	return intermediate, nil
-}
-
-// Root takes the tree size and frontier as input and returns the root hash of
-// the tree.
-func Root(cs suites.CipherSuite, n uint64, frontier [][]byte) ([]byte, error) {
-	// Input validation.
-	if n == 0 || n > math.MaxTreeSize {
-		return nil, errors.New("invalid value for current tree size")
-	}
-	subtrees := math.FullSubtrees(math.Root(n), n)
-	if len(frontier) != len(subtrees) {
-		return nil, errors.New("frontier is unexpected size")
-	}
-	for _, elem := range frontier {
-		if len(elem) != cs.HashSize() {
-			return nil, errors.New("frontier element is unexpected size")
-		}
-	}
-
-	// Roll-up frontier elements into singular root hash.
-	acc := &nodeData{
-		leaf:  math.IsLeaf(subtrees[len(subtrees)-1]),
-		value: frontier[len(frontier)-1],
-	}
-	for i := len(frontier) - 2; i >= 0; i-- {
-		acc = treeHash(
-			cs,
-			&nodeData{leaf: math.IsLeaf(subtrees[i]), value: frontier[i]},
-			acc,
-		)
-	}
-	return acc.value, nil
 }
