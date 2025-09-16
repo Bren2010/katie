@@ -52,53 +52,69 @@ func (m *memoryStore) BatchPut(data map[uint64][]byte) error {
 	return nil
 }
 
-func TestGetBatchStateless(t *testing.T) {
+func TestGetBatch(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, new(memoryStore))
+
+	// Populate tree with random leaves. Retain leaf values and frontier after
+	// each append.
 	var (
-		leaves [][]byte
-		root   []byte
-		err    error
+		leaves   [][]byte
+		frontier [][]byte
+		err      error
 	)
-	for i := range 2000 {
+	for i := range uint64(2000) {
 		leaf := random()
 		leaves = append(leaves, leaf)
 
-		root, err = tree.Append(uint64(i), leaf)
+		frontier, err = tree.Append(i, leaf)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+	root, err := Root(cs, 2000, frontier)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for range 100 {
-		xDedup := make(map[uint64]struct{})
+		// Choose 10 random leaf values to request inclusion for.
+		dedup := make(map[uint64]struct{})
 		for range 10 {
-			xDedup[uint64(mrand.Intn(2000))] = struct{}{}
+			dedup[uint64(mrand.Intn(2000))] = struct{}{}
 		}
-		x := make([]uint64, 0)
-		for id := range xDedup {
-			x = append(x, id)
+		entries := make([]uint64, 0)
+		for x := range dedup {
+			entries = append(entries, x)
 		}
-		slices.Sort(x)
+		slices.Sort(entries)
 
-		values := make([][]byte, 0, len(x))
-		for _, id := range x {
-			values = append(values, leaves[id])
+		values := make([][]byte, 0, len(entries))
+		for _, x := range entries {
+			values = append(values, leaves[x])
 		}
 
-		proof, err := tree.GetBatch(x, 2000, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		frontier, err := NewVerifier(cs).Evaluate(x, 2000, values, proof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		cand, err := Root(cs, 2000, frontier)
-		if err != nil {
-			t.Fatal(err)
-		} else if !bytes.Equal(root, cand) {
-			t.Fatal("root hash does not match")
+		// Request inclusion proof for chosen leaves, with previously-observed
+		// tree size increasing in increments of 10.
+		for i := uint64(0); i <= 2000; i += 10 {
+			var m *uint64
+			if i > 0 {
+				m = &i
+			}
+			proof, err := tree.GetBatch(entries, 2000, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frontier, err := NewVerifier(cs).Evaluate(entries, 2000, values, proof)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cand, err := Root(cs, 2000, frontier)
+			if err != nil {
+				t.Fatal(err)
+			} else if !bytes.Equal(root, cand) {
+				t.Fatal("root hash does not match")
+			}
 		}
 	}
 }
