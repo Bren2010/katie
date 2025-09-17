@@ -40,11 +40,6 @@ func FixedVersionBinaryLadder(
 	out := make([]uint64, 0)
 
 	for _, v := range baseBinaryLadder(n) {
-		// Ladder ends early in two scenarios:
-		// - Inclusion proof for version greater than or equal to the target.
-		// - Non-inclusion proof for version less than or equal to the target.
-		wouldEnd := (v <= n && v >= t) || (v > n && n <= t)
-
 		// Lookup is duplicate in two scenarios:
 		// - Inclusion proof for version was already provided to the left.
 		// - Non-inclusion proof for version was already provided to the right.
@@ -55,6 +50,10 @@ func FixedVersionBinaryLadder(
 			out = append(out, v)
 		}
 
+		// Ladder ends early in two scenarios:
+		// - Inclusion proof for version greater than or equal to the target.
+		// - Non-inclusion proof for version less than or equal to the target.
+		wouldEnd := (v <= n && v >= t) || (v > n && v <= t)
 		if wouldEnd {
 			break
 		}
@@ -100,10 +99,6 @@ func GreatestVersionBinaryLadder(
 	out := make([]uint64, 0)
 
 	for _, v := range baseBinaryLadder(t) {
-		// Ladder ends early if a non-inclusion proof is produced for a version
-		// less than or equal to t.
-		wouldEnd := v > n && v <= t
-
 		var wouldBeDuplicate bool
 		if distinguished {
 			// Lookup is duplicate only if the same lookup has already been
@@ -122,6 +117,9 @@ func GreatestVersionBinaryLadder(
 			out = append(out, v)
 		}
 
+		// Ladder ends early if a non-inclusion proof is produced for a version
+		// less than or equal to t.
+		wouldEnd := v > n && v <= t
 		if wouldEnd {
 			break
 		}

@@ -17,7 +17,6 @@ func log2(x uint64) uint64 {
 	if x == 0 {
 		return 0
 	}
-
 	k := uint64(0)
 	for (x >> k) > 0 {
 		k += 1
@@ -31,7 +30,6 @@ func Level(x uint64) uint64 {
 	if IsLeaf(x) {
 		return 0
 	}
-
 	k := uint64(0)
 	for ((x >> k) & 1) == 1 {
 		k += 1
@@ -92,7 +90,6 @@ func Parent(x, n uint64) uint64 {
 	if x == Root(n) {
 		panic("root node has no parent")
 	}
-
 	width := nodeWidth(n)
 	p := ParentStep(x)
 	for p >= width {
