@@ -8,7 +8,7 @@ import (
 	"github.com/Bren2010/katie/crypto/vrf"
 )
 
-type DeploymentMode int
+type DeploymentMode byte
 
 const (
 	ContactMonitoring DeploymentMode = iota + 1

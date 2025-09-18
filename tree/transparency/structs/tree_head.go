@@ -3,6 +3,7 @@ package structs
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 )
 
 type TreeHead struct {
@@ -19,7 +20,7 @@ func NewTreeHead(buf *bytes.Buffer) (*TreeHead, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TreeHead{TreeSize: treeSize, Signature: signature}, nil
+	return &TreeHead{treeSize, signature}, nil
 }
 
 func (th *TreeHead) Marshal(buf *bytes.Buffer) error {
@@ -67,7 +68,7 @@ func NewAuditorTreeHead(buf *bytes.Buffer) (*AuditorTreeHead, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &AuditorTreeHead{Timestamp: timestamp, TreeSize: treeSize, Signature: signature}, nil
+	return &AuditorTreeHead{timestamp, treeSize, signature}, nil
 }
 
 func (ath *AuditorTreeHead) Marshal(buf *bytes.Buffer) error {
@@ -75,7 +76,7 @@ func (ath *AuditorTreeHead) Marshal(buf *bytes.Buffer) error {
 		return err
 	} else if err := binary.Write(buf, binary.BigEndian, ath.TreeSize); err != nil {
 		return err
-	} else if err := writeU16Bytes(buf, ath.Signature, "auditor tree head signature"); err != nil {
+	} else if err := writeU16Bytes(buf, ath.Signature, "auditor signature"); err != nil {
 		return err
 	}
 	return nil
@@ -97,6 +98,65 @@ func (tbs *AuditorTreeHeadTBS) Marshal(buf *bytes.Buffer) error {
 		return err
 	} else if _, err := buf.Write(tbs.Root); err != nil {
 		return err
+	}
+	return nil
+}
+
+type FullTreeHeadType byte
+
+const (
+	SameHead FullTreeHeadType = iota + 1
+	UpdatedHead
+)
+
+type FullTreeHead struct {
+	TreeHead        *TreeHead
+	AuditorTreeHead *AuditorTreeHead
+}
+
+func NewFullTreeHead(config *PublicConfig, buf *bytes.Buffer) (*FullTreeHead, error) {
+	b, err := buf.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	headType := FullTreeHeadType(b)
+	if headType != SameHead && headType != UpdatedHead {
+		return nil, errors.New("unexpected head type read")
+	}
+
+	var (
+		treeHead        *TreeHead
+		auditorTreeHead *AuditorTreeHead
+	)
+	if headType == UpdatedHead {
+		treeHead, err = NewTreeHead(buf)
+		if err != nil {
+			return nil, err
+		}
+		if config.Mode == ThirdPartyAuditing {
+			auditorTreeHead, err = NewAuditorTreeHead(buf)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return &FullTreeHead{treeHead, auditorTreeHead}, nil
+}
+
+func (fth *FullTreeHead) Marshal(buf *bytes.Buffer) error {
+	if fth.TreeHead == nil {
+		return buf.WriteByte(byte(SameHead))
+	}
+
+	if err := buf.WriteByte(byte(UpdatedHead)); err != nil {
+		return err
+	} else if err := fth.TreeHead.Marshal(buf); err != nil {
+		return err
+	} else if fth.AuditorTreeHead != nil {
+		if err := fth.AuditorTreeHead.Marshal(buf); err != nil {
+			return err
+		}
 	}
 	return nil
 }
