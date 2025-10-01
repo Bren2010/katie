@@ -1,10 +1,7 @@
 package prefix
 
 import (
-	"bytes"
 	"errors"
-	"slices"
-	"sort"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
@@ -69,7 +66,6 @@ func (b *batch) initialize(searches map[uint64][][]byte) ([]tile, map[*node][]cu
 	for ver := range searches {
 		vers = append(vers, ver)
 	}
-	slices.Sort(vers)
 
 	tiles := make([]tile, 0, len(searches))
 	state := make(map[*node][]cursor, len(searches))
@@ -78,7 +74,6 @@ func (b *batch) initialize(searches map[uint64][][]byte) ([]tile, map[*node][]cu
 		tiles = append(tiles, tile{id: id, depth: 0, root: externalNode{nil, id}})
 
 		vrfOutputs := searches[ver]
-		slices.SortFunc(vrfOutputs, bytes.Compare)
 
 		cursors := make([]cursor, 0, len(vrfOutputs))
 		for _, vrfOutput := range vrfOutputs {
@@ -112,7 +107,6 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 		// want to do database requests when required for all active searches.
 		return out, nil
 	}
-	sort.Strings(keys)
 
 	data, err := b.tx.BatchGet(keys)
 	if err != nil {

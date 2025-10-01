@@ -211,7 +211,7 @@ func TestMultiVersionSearch(t *testing.T) {
 	})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[0:0 2:0]]" {
+	} else if lookups := fmt.Sprint(store.lookups); lookups != "[[0:0 2:0]]" && lookups != "[[2:0 0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 

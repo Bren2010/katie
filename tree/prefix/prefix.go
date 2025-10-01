@@ -49,10 +49,9 @@ func (t *Tree) Search(searches map[uint64][][]byte) (map[uint64]SearchResult, er
 
 	out := make(map[uint64]SearchResult, len(searches))
 	for _, tile := range res {
-		vrfOutputs := searches[tile.id.ver] // This is sorted already by search.
-		pb := proofBuilder{cs: t.cs}
-		pb.build(tile.root, vrfOutputs, 0)
-		out[tile.id.ver] = SearchResult{Proof: pb.proof, Commitments: pb.commitments}
+		vrfOutputs := searches[tile.id.ver]
+		proof, commitments := runProofBuilder(t.cs, tile.root, vrfOutputs)
+		out[tile.id.ver] = SearchResult{Proof: proof, Commitments: commitments}
 	}
 	return out, nil
 }
@@ -69,15 +68,17 @@ type Entry struct {
 // The current tree version is given in `ver`, which is 0 if the tree is empty.
 // After this, version `ver+1` of the tree will exist.
 func (t *Tree) Insert(ver uint64, entries []Entry) ([]byte, *PrefixProof, error) {
-	slices.SortFunc(entries, func(a, b Entry) int {
+	sortedEntries := make([]Entry, len(entries))
+	copy(sortedEntries, entries)
+	slices.SortFunc(sortedEntries, func(a, b Entry) int {
 		return bytes.Compare(a.VrfOutput, b.VrfOutput)
 	})
-	for i, entry := range entries {
+	for i, entry := range sortedEntries {
 		if len(entry.VrfOutput) != t.cs.HashSize() {
 			return nil, nil, errors.New("unexpected vrf output length")
 		} else if len(entry.Commitment) != t.cs.HashSize() {
 			return nil, nil, errors.New("unexpected commitment length")
-		} else if i > 0 && bytes.Equal(entries[i-1].VrfOutput, entry.VrfOutput) {
+		} else if i > 0 && bytes.Equal(sortedEntries[i-1].VrfOutput, entry.VrfOutput) {
 			return nil, nil, errors.New("unable to insert same vrf output multiple times")
 		}
 	}
@@ -87,7 +88,7 @@ func (t *Tree) Insert(ver uint64, entries []Entry) ([]byte, *PrefixProof, error)
 	if err != nil {
 		return nil, nil, err
 	}
-	insertEntries(t.cs, &root, entries, 0)
+	insertEntries(t.cs, &root, sortedEntries, 0)
 	rootHash := root.Hash(t.cs)
 	tiles := splitIntoTiles(t.cs, ver+1, root)
 
@@ -126,13 +127,19 @@ func (t *Tree) getInsertionRoot(ver uint64, entries []Entry) (node, *PrefixProof
 	}
 	root := res[0].root
 
-	pb := proofBuilder{cs: t.cs}
-	pb.build(root, vrfOutputs, 0)
-	if len(pb.commitments) > 0 {
-		return nil, nil, errors.New("can not insert same vrf output twice")
+	proof, commitments := runProofBuilder(t.cs, root, vrfOutputs)
+	for _, commitment := range commitments {
+		if commitment != nil {
+			return nil, nil, errors.New("can not insert same vrf output twice")
+		}
 	}
 
-	return root, &pb.proof, nil
+	return root, &proof, nil
+}
+
+type indexedVrfOutput struct {
+	index     int
+	vrfOutput []byte
 }
 
 type proofBuilder struct {
@@ -142,7 +149,29 @@ type proofBuilder struct {
 	commitments [][]byte
 }
 
-func (pb *proofBuilder) build(n node, vrfOutputs [][]byte, depth int) {
+func runProofBuilder(cs suites.CipherSuite, root node, vrfOutputs [][]byte) (PrefixProof, [][]byte) {
+	// Sorts the given VRF outputs to make proof building efficient, but retains
+	// the original positions so that we can give results in the same order.
+	indexed := make([]indexedVrfOutput, len(vrfOutputs))
+	for i, vrfOutput := range vrfOutputs {
+		indexed[i] = indexedVrfOutput{vrfOutput: vrfOutput, index: i}
+	}
+	slices.SortFunc(indexed, func(a, b indexedVrfOutput) int {
+		return bytes.Compare(a.vrfOutput, b.vrfOutput)
+	})
+
+	pb := proofBuilder{
+		cs: cs,
+
+		proof:       PrefixProof{Results: make([]PrefixSearchResult, len(indexed))},
+		commitments: make([][]byte, len(indexed)),
+	}
+	pb.build(root, indexed, 0)
+
+	return pb.proof, pb.commitments
+}
+
+func (pb *proofBuilder) build(n node, vrfOutputs []indexedVrfOutput, depth int) {
 	if len(vrfOutputs) == 0 {
 		pb.proof.Elements = append(pb.proof.Elements, n.Hash(pb.cs))
 		return
@@ -150,23 +179,23 @@ func (pb *proofBuilder) build(n node, vrfOutputs [][]byte, depth int) {
 
 	switch n := n.(type) {
 	case emptyNode:
-		for range vrfOutputs {
-			pb.proof.Results = append(pb.proof.Results, nonInclusionParentProof{depth: depth})
+		for _, out := range vrfOutputs {
+			pb.proof.Results[out.index] = nonInclusionParentProof{depth: depth}
 		}
 
 	case leafNode:
-		for _, vrfOutput := range vrfOutputs {
-			if bytes.Equal(vrfOutput, n.vrfOutput) {
-				pb.proof.Results = append(pb.proof.Results, inclusionProof{depth: depth})
-				pb.commitments = append(pb.commitments, n.commitment)
+		for _, out := range vrfOutputs {
+			if bytes.Equal(out.vrfOutput, n.vrfOutput) {
+				pb.proof.Results[out.index] = inclusionProof{depth: depth}
+				pb.commitments[out.index] = n.commitment
 			} else {
-				pb.proof.Results = append(pb.proof.Results, nonInclusionLeafProof{leaf: n, depth: depth})
+				pb.proof.Results[out.index] = nonInclusionLeafProof{leaf: n, depth: depth}
 			}
 		}
 
 	case *parentNode:
-		split, _ := slices.BinarySearchFunc(vrfOutputs, true, func(s []byte, _ bool) int {
-			if getBit(s, depth) {
+		split, _ := slices.BinarySearchFunc(vrfOutputs, true, func(out indexedVrfOutput, _ bool) int {
+			if getBit(out.vrfOutput, depth) {
 				return 0
 			}
 			return -1

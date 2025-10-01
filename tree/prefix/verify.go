@@ -99,15 +99,17 @@ func fillInCopath(n *node, elements [][]byte) ([][]byte, error) {
 
 // Evaluate returns the root hash that `proof` corresponds to.
 func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byte, error) {
-	slices.SortFunc(entries, func(a, b Entry) int {
+	sortedEntries := make([]Entry, len(entries))
+	copy(sortedEntries, entries)
+	slices.SortFunc(sortedEntries, func(a, b Entry) int {
 		return bytes.Compare(a.VrfOutput, b.VrfOutput)
 	})
-	for i, entry := range entries {
+	for i, entry := range sortedEntries {
 		if len(entry.VrfOutput) != cs.HashSize() {
 			return nil, errors.New("unexpected vrf output length")
 		} else if len(entry.Commitment) != cs.HashSize() {
 			return nil, errors.New("unexpected commitment length")
-		} else if i > 0 && bytes.Equal(entries[i-1].VrfOutput, entry.VrfOutput) {
+		} else if i > 0 && bytes.Equal(sortedEntries[i-1].VrfOutput, entry.VrfOutput) {
 			return nil, errors.New("same vrf output present multiple times")
 		}
 	}

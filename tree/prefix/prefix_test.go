@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	mrand "math/rand"
-	"slices"
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -127,9 +126,6 @@ func TestSearchOneVersion(t *testing.T) {
 		entry := entries[mrand.Intn(len(entries))]
 		selected = append(selected, entry)
 	}
-	slices.SortFunc(selected, func(a, b Entry) int {
-		return bytes.Compare(a.VrfOutput, b.VrfOutput)
-	})
 
 	// Execute search.
 	searches := make(map[uint64][][]byte)
@@ -169,9 +165,6 @@ func TestSearchMultipleVersion(t *testing.T) {
 			entry := entries[mrand.Intn(len(entries))]
 			verSelected = append(verSelected, entry)
 		}
-		slices.SortFunc(verSelected, func(a, b Entry) int {
-			return bytes.Compare(a.VrfOutput, b.VrfOutput)
-		})
 
 		selected[uint64(i+1)] = verSelected
 	}
