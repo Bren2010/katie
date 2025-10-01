@@ -94,7 +94,7 @@ func generateNonce(priv, hStr []byte) []byte {
 	V = mac(K, V)
 
 	// h. Repeat until a proper value is found:
-	for i := 0; i < 256; i++ {
+	for range 256 {
 		// V = HMAC_K(V)
 		V = mac(K, V)
 
