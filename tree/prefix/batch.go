@@ -2,6 +2,7 @@ package prefix
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
@@ -66,6 +67,7 @@ func (b *batch) initialize(searches map[uint64][][]byte) ([]tile, map[*node][]cu
 	for ver := range searches {
 		vers = append(vers, ver)
 	}
+	slices.Sort(vers)
 
 	tiles := make([]tile, 0, len(searches))
 	state := make(map[*node][]cursor, len(searches))

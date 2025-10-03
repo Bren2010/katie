@@ -20,7 +20,7 @@ func TestTree(t *testing.T) {
 	store := newMemoryPrefixStore()
 
 	tree := NewTree(cs, store)
-	roots := make([][]byte, 0)
+	roots := [][]byte{make([]byte, cs.HashSize())}
 	data := make(map[[32]byte][32]byte)
 
 	for ver := range uint64(10) {
@@ -32,21 +32,15 @@ func TestTree(t *testing.T) {
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 			data[vrfOutput] = commitment
 		}
-		root, proof, err := tree.Insert(ver, entries)
+		root, proof, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		roots = append(roots, root)
 
 		// Verify prior-version lookup proof.
-		if ver == 0 {
-			if proof != nil {
-				t.Fatal("proof unexpectedly produced")
-			}
-		} else {
-			if err := Verify(cs, entries, proof, roots[ver-1]); err != nil {
-				t.Fatal(err)
-			}
+		if err := Verify(cs, entries, proof, roots[ver]); err != nil {
+			t.Fatal(err)
 		}
 
 		// Look up every VRF output and check that it matches what was
@@ -77,17 +71,65 @@ func TestUnableToInsertSameTwice(t *testing.T) {
 	store := newMemoryPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, err := tree.Insert(0, []Entry{{makeBytes(0), makeBytes(0)}})
+	_, _, err := tree.Mutate(0, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = tree.Insert(1, []Entry{{makeBytes(1), makeBytes(1)}, {makeBytes(1), makeBytes(1)}})
+	_, _, err = tree.Mutate(1, []Entry{{makeBytes(1), makeBytes(1)}, {makeBytes(1), makeBytes(1)}}, nil)
 	if err == nil {
-		t.Fatal("insert did not return error when it should have")
+		t.Fatal("mutate did not return error when it should have")
 	}
-	_, _, err = tree.Insert(1, []Entry{{makeBytes(0), makeBytes(0)}})
+	_, _, err = tree.Mutate(1, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
 	if err == nil {
-		t.Fatal("insert did not return error when it should have")
+		t.Fatal("mutate did not return error when it should have")
+	}
+}
+
+func TestUnableToAddAndRemoveSame(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	store := newMemoryPrefixStore()
+
+	tree := NewTree(cs, store)
+	_, _, err := tree.Mutate(
+		0,
+		[]Entry{{makeBytes(0), makeBytes(0)}, {makeBytes(1), makeBytes(1)}},
+		[][]byte{makeBytes(1)},
+	)
+	if err == nil {
+		t.Fatal("mutate did not return error when it should have")
+	}
+}
+
+func TestRemove(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	store := newMemoryPrefixStore()
+
+	tree := NewTree(cs, store)
+	_, _, err := tree.Mutate(0, []Entry{
+		{makeBytes(0), makeBytes(0)},
+		{makeBytes(1), makeBytes(1)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = tree.Mutate(1, nil, [][]byte{makeBytes(0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := tree.Search(map[uint64][][]byte{2: {makeBytes(0), makeBytes(1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verRes := res[2]
+	if len(verRes.Commitments) != 2 || len(verRes.Proof.Results) != 2 {
+		t.Fatal("unexpected number of results provided")
+	} else if verRes.Commitments[0] != nil || !bytes.Equal(verRes.Commitments[1], makeBytes(1)) {
+		t.Fatal("unexpected commitments returned")
+	} else if verRes.Proof.Results[0].Inclusion() || !verRes.Proof.Results[1].Inclusion() {
+		t.Fatal("unexpected search result")
+	} else if len(verRes.Proof.Elements) != 0 {
+		t.Fatal("tree not properly reduced after removal")
 	}
 }
 
@@ -104,7 +146,7 @@ func buildRandomTree(t *testing.T, cs suites.CipherSuite) (*Tree, [][]byte, [][]
 			vrfOutput, commitment := randomBytes(), randomBytes()
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 		}
-		root, _, err := tree.Insert(ver, entries)
+		root, _, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
