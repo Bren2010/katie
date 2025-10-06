@@ -8,7 +8,8 @@ import (
 )
 
 var (
-	ErrLabelNotAvailable = errors.New("requested version of label has expired and is no longer available")
+	ErrLabelNotFound = errors.New("requested version of label does not exist")
+	ErrLabelExpired  = errors.New("requested version of label has expired")
 )
 
 type dataProvider interface {
@@ -27,6 +28,10 @@ type dataProvider interface {
 	// GetMonitoringBinaryLadder takes as input the position of a log entry and
 	// the target version for a monitoring binary ladder.
 	GetMonitoringBinaryLadder(x uint64, ver uint32) error
+
+	// GetInclusionProof takes as input the position of a log entry and the
+	// target version to get an inclusion proof for.
+	GetInclusionProof(x uint64, ver uint32) error
 }
 
 // updateView runs the algorithm from Section 4.2. The previous size of the tree
@@ -40,8 +45,6 @@ func updateView(m, n, mTimestamp uint64, provider dataProvider) (uint64, error) 
 		timestamp, err := provider.GetTimestamp(x)
 		if err != nil {
 			return 0, err
-		} else if timestamp < prev {
-			return 0, errors.New("timestamps are not monotonic")
 		}
 		prev = timestamp
 	}
@@ -49,70 +52,103 @@ func updateView(m, n, mTimestamp uint64, provider dataProvider) (uint64, error) 
 	return prev, nil
 }
 
-func fixedVersionSearch(config *structs.PublicConfig, n uint64, provider dataProvider) error {
-	x := math.Root(n)
-
-	rightmostTimestamp, err := provider.GetTimestamp(n - 1)
+// fixedVersionSearch runs the algorithm from Section 6.3.
+func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider dataProvider) (bool, uint64, error) {
+	rightmost, err := provider.GetTimestamp(n - 1)
 	if err != nil {
-		return err
+		return false, 0, err
 	}
-	pastMaxLifetime := func(t uint64) bool {
-		return t-rightmostTimestamp >= config.MaximumLifetime
+
+	type terminalLogEntry struct {
+		position      uint64
+		expired       bool
+		distinguished bool
 	}
-	lowerTimestamp := uint64(0)
-	upperTimestamp := uint64((1 << 64) - 1)
+	var terminal *terminalLogEntry
+	finish := func() (bool, uint64, error) {
+		if terminal == nil { // If there is no terminal log entry, return an error.
+			return false, 0, ErrLabelNotFound
+		} else if terminal.expired { // If the log entry is expired, return an error.
+			return false, 0, ErrLabelExpired
+		} else if err := provider.GetInclusionProof(terminal.position, ver); err != nil {
+			return false, 0, err
+		}
+		return !terminal.distinguished, terminal.position, nil
+	}
 
-	results := make(map[uint64]bool)
-	finishSearch := func() error { return nil }
-
+	var (
+		x              = math.Root(n)
+		frontier       = true
+		leftTimestamp  = uint64(0)
+		rightTimestamp = rightmost
+	)
 	for {
-		// Verify that the log entry's timestamp is consistent with the
-		// timestamps of all ancestor log entries.
 		timestamp, err := provider.GetTimestamp(x)
 		if err != nil {
-			return err
-		} else if timestamp < lowerTimestamp || timestamp > upperTimestamp {
-			return errors.New("timestamps are not monotonic")
+			return false, 0, err
 		}
 
-		// If the log entry is past its Maximum Lifetime, is on the frontier,
-		// and its right child is also past its maximum lifetime, recurse right.
-		if pastMaxLifetime(timestamp) {
+		// If the log entry is expired, is on the frontier, and its right child
+		// is also expired, recurse to the right child.
+		if config.IsExpired(timestamp, rightmost) && frontier {
 			right := math.Right(x, n)
-			childTimestamp, err := provider.GetTimestamp(right)
+			ts, err := provider.GetTimestamp(right)
 			if err != nil {
-				return err
-			} else if pastMaxLifetime(childTimestamp) {
-				x, lowerTimestamp = right, timestamp
+				return false, 0, err
+			} else if config.IsExpired(ts, rightmost) {
+				x, leftTimestamp = right, timestamp
 				continue
 			}
 		}
 
-		// Obtain a binary ladder from the current log entry.
-		present, err := provider.GetPrefixProof(x)
+		// Obtain a search binary ladder from the current log entry.
+		res, err := provider.GetSearchBinaryLadder(x, ver, true)
 		if err != nil {
-			return err
+			return false, 0, err
 		}
-		results[x] = present
-
-		// If the binary ladder terminated early due to non-inclusion of a
-		// version less than or equal to the target version, recurse right.
-		if !present {
-			if math.IsLeaf(x) {
-				return finishSearch()
+		if res >= 0 && (terminal == nil || x < terminal.position) {
+			terminal = &terminalLogEntry{
+				position:      x,
+				expired:       config.IsExpired(timestamp, rightmost),
+				distinguished: config.IsDistinguished(leftTimestamp, rightTimestamp),
 			}
-			x, lowerTimestamp = math.Right(x, n), timestamp
+		}
+
+		// If the binary ladder indicates a greatest version less than the
+		// target version, then:
+		if res == -1 {
+			if math.IsLeaf(x) || x == n-1 { // If no right child, go to step 6.
+				return finish()
+			} // Otherwise, recurse to the right child.
+			x, leftTimestamp = math.Right(x, n), timestamp
 			continue
 		}
 
-		// Check if the log entry has surpassed its maximum lifetime. If so,
-		// abort the search with an error. If not, recurse left.
-		if pastMaxLifetime(timestamp) {
-			return ErrLabelNotAvailable
-		} else if math.IsLeaf(x) {
-			return finishSearch()
+		// If the binary ladder indicates a greatest version equal to the target
+		// version, then:
+		if res == 0 {
+			if !config.IsExpired(timestamp, rightmost) { // If not expired, terminate.
+				return !config.IsDistinguished(leftTimestamp, rightTimestamp), x, nil
+			} else if math.IsLeaf(x) || x == n-1 { // If no right child, go to step 6.
+				return finish()
+			} // Otherwise, recurse to the right child.
+			x, leftTimestamp = math.Right(x, n), timestamp
+			continue
 		}
-		x, upperTimestamp = math.Left(x), timestamp
+
+		// If the binary ladder indicates a greatest version greater than the
+		// target, then:
+		if res == 1 {
+			if math.IsLeaf(x) { // If no left child, go to step 6.
+				return finish()
+			} else if config.IsExpired(timestamp, rightmost) { // If expired, return an error.
+				return false, 0, ErrLabelExpired
+			} // Otherwise, recurse to the left child.
+			x, frontier, rightTimestamp = math.Left(x), false, timestamp
+			continue
+		}
+
+		panic("unreachable")
 	}
 }
 
@@ -123,10 +159,6 @@ func fixedVersionSearch(config *structs.PublicConfig, n uint64, provider dataPro
 // It returns whether or not contact monitoring may be required, and the
 // position of the terminal node of the search.
 func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider dataProvider) (bool, uint64, error) {
-	isDistinguished := func(left, right uint64) bool {
-		return right-left >= config.ReasonableMonitoringWindow
-	}
-
 	// Identify the starting position for the search. This is either the
 	// rightmost distinguished log entry, or the root if there are no
 	// distinguished log entries.
@@ -136,13 +168,13 @@ func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 	}
 	start := math.Root(n)
 
-	rootDistinguished := isDistinguished(0, rightmost)
+	rootDistinguished := config.IsDistinguished(0, rightmost)
 	if rootDistinguished {
 		timestamp, err := provider.GetTimestamp(start)
 		if err != nil {
 			return false, 0, err
 		}
-		for start != n-1 && isDistinguished(timestamp, rightmost) {
+		for start != n-1 && config.IsDistinguished(timestamp, rightmost) {
 			start = math.Right(start, n)
 		}
 	}

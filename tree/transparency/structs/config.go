@@ -34,6 +34,14 @@ type Config struct {
 	MaximumLifetime            uint64 // Set to 0 if there is not one.
 }
 
+func (c *Config) IsExpired(ts, rightmost uint64) bool {
+	return rightmost-ts >= c.MaximumLifetime
+}
+
+func (c *Config) IsDistinguished(left, right uint64) bool {
+	return right-left >= c.ReasonableMonitoringWindow
+}
+
 type PrivateConfig struct {
 	SignatureKey suites.SigningPrivateKey
 	VrfKey       vrf.PrivateKey
