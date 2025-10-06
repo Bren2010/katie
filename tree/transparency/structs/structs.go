@@ -33,3 +33,24 @@ func writeU16Bytes(buf *bytes.Buffer, out []byte, name string) error {
 	}
 	return nil
 }
+
+type UpdatePrefix struct {
+	Signature []byte
+}
+
+type UpdateValue struct {
+	UpdatePrefix
+	Value []byte
+}
+
+type UpdateTBS struct {
+	Label   []byte
+	Version uint32
+	Value   []byte
+}
+
+type CommitmentValue struct {
+	Opening []byte
+	Label   []byte
+	Update  UpdateValue
+}
