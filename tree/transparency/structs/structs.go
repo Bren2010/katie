@@ -34,6 +34,11 @@ func writeU16Bytes(buf *bytes.Buffer, out []byte, name string) error {
 	return nil
 }
 
+type LogLeaf struct {
+	Timestamp  uint64
+	PrefixTree []byte
+}
+
 type UpdatePrefix struct {
 	Signature []byte
 }

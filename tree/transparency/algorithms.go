@@ -12,33 +12,11 @@ var (
 	ErrLabelExpired  = errors.New("requested version of label has expired")
 )
 
-type dataProvider interface {
-	// GetTimestamp takes as input the position of a log entry and returns the
-	// timestamp of the log entry. This function verifies that the timestamp is
-	// monotonic with others provided or retained.
-	GetTimestamp(x uint64) (uint64, error)
-
-	// GetSearchBinaryLadder takes as input the position of a log entry, the
-	// target version for a search binary ladder, and whether or not to omit
-	// redundant lookups. It returns -1, 0, or 1 to indicate whether the
-	// greatest version of the label proven to exist is less than, equal to, or
-	// greater than the target version, respectively.
-	GetSearchBinaryLadder(x uint64, ver uint32, omit bool) (int, error)
-
-	// GetMonitoringBinaryLadder takes as input the position of a log entry and
-	// the target version for a monitoring binary ladder.
-	GetMonitoringBinaryLadder(x uint64, ver uint32) error
-
-	// GetInclusionProof takes as input the position of a log entry and the
-	// target version to get an inclusion proof for.
-	GetInclusionProof(x uint64, ver uint32) error
-}
-
 // updateView runs the algorithm from Section 4.2. The previous size of the tree
 // is `m`, the current size of the tree is `n`, and the rightmost timestamp of
 // the previous view of the tree is `mTimestamp` (or 0 if none). It returns the
 // new rightmost timestamp.
-func updateView(m, n, mTimestamp uint64, provider dataProvider) (uint64, error) {
+func updateView(m, n, mTimestamp uint64, provider *dataProvider) (uint64, error) {
 	prev := mTimestamp
 
 	for _, x := range math.UpdateView(m, n) {
@@ -52,8 +30,13 @@ func updateView(m, n, mTimestamp uint64, provider dataProvider) (uint64, error) 
 	return prev, nil
 }
 
-// fixedVersionSearch runs the algorithm from Section 6.3.
-func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider dataProvider) (bool, uint64, error) {
+// fixedVersionSearch runs the algorithm from Section 6.3. The public config for
+// the Transparency Log is given in `config`, the target version of the search
+// is `ver`, and the size of the tree is `n`.
+//
+// It returns whether or not contact monitoring may be required, and the
+// position of the terminal node of the search.
+func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *dataProvider) (bool, uint64, error) {
 	rightmost, err := provider.GetTimestamp(n - 1)
 	if err != nil {
 		return false, 0, err
@@ -158,7 +141,7 @@ func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, prov
 //
 // It returns whether or not contact monitoring may be required, and the
 // position of the terminal node of the search.
-func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider dataProvider) (bool, uint64, error) {
+func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *dataProvider) (bool, uint64, error) {
 	// Identify the starting position for the search. This is either the
 	// rightmost distinguished log entry, or the root if there are no
 	// distinguished log entries.
