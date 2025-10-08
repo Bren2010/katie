@@ -84,7 +84,7 @@ func (dp *dataProvider) GetTimestamp(x uint64) (uint64, error) {
 
 func (dp *dataProvider) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) (int, error) {
 	if _, err := dp.GetTimestamp(x); err != nil {
-		return err
+		return 0, err
 	}
 	root, res, err := dp.handle.GetSearchBinaryLadder(x, ver, omit)
 	if err != nil {
@@ -129,15 +129,15 @@ type sortableLogLeaf struct {
 }
 
 func sortLogLeaf(a, b sortableLogLeaf) int {
-	if a.pos < b.pos {
+	if a.position < b.position {
 		return -1
-	} else if a.pos > b.pos {
+	} else if a.position > b.position {
 		return 1
 	}
 	return 0
 }
 
-func (dp *dataProvider) buildLeaves() ([][]byte, error) {
+func (dp *dataProvider) inspectedLeaves() ([]uint64, [][]byte, error) {
 	leaves := make([]sortableLogLeaf, 0)
 
 	// Put together initial list of leaves that were inspected by our proof and
@@ -164,7 +164,7 @@ func (dp *dataProvider) buildLeaves() ([][]byte, error) {
 	// In-fill missing prefix tree root values.
 	prefixTrees, err := dp.handle.GetPrefixTrees(empty)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i, leaf := range leaves {
 		if leaf.PrefixTree == nil {
@@ -173,43 +173,36 @@ func (dp *dataProvider) buildLeaves() ([][]byte, error) {
 		}
 	}
 
-	// Convert leaves into values.
+	// Convert leaves slice into slice of log entry positions and slice of log
+	// entry hashes.
+	positions := make([]uint64, len(leaves))
 	values := make([][]byte, len(leaves))
+
 	hasher := dp.cs.Hash()
 	for i, leaf := range leaves {
-		if _, err := hasher.Write(leaf.Marshal()); err != nil {
-			return nil, err
+		buf := &bytes.Buffer{}
+		if err := leaf.Marshal(buf); err != nil {
+			return nil, nil, err
+		} else if _, err := hasher.Write(buf.Bytes()); err != nil {
+			return nil, nil, err
 		}
+		positions[i] = leaf.position
 		values[i] = hasher.Sum(nil)
 		hasher.Reset()
 	}
 
-	return values, nil
+	return positions, values, nil
 }
 
-// Finish takes as input the previous size of the tree `m` and the current size
-// of the tree `n`. It returns the log tree root value and the set of log
-// entries to retain.
+// Finish takes as input the current tree size `n`, an optional additional tree
+// size `nP`, and the optional previous tree size `m`. It returns the result of
+// the proof evaluation that was done.
 func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
-	leaves := make([]sortableLogLeaf, 0)
-	for x, ts := range dp.timestamps {
-		if _, ok := dp.logEntries[x]; ok {
-			continue
-		}
-		leaves = append(leaves, sortableLogLeaf{
-			pos: x,
-			structs.LogLeaf{Timestamp: ts, PrefixTree: dp.prefixTrees[x]},
-		})
+	entries, values, err := dp.inspectedLeaves()
+	if err != nil {
+		return nil, err
 	}
-	slices.SortFunc(leaves, sortLogLeaf)
-	emptyCount := 0
-	for _, leaf := range leaves {
-		if leaf.PrefixTree == nil {
-			emptyCount++
-		}
-	}
-
-	prefixTrees, proof, err := dp.handle.Finish()
+	proof, err := dp.handle.Finish()
 	if err != nil {
 		return nil, err
 	}
