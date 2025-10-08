@@ -79,6 +79,15 @@ func Parent(x, n uint64) uint64 {
 	return p
 }
 
+// Frontier returns the log entries on the frontier.
+func Frontier(n uint64) []uint64 {
+	out := []uint64{Root(n)}
+	for out[len(out)-1] != n-1 {
+		out = append(out, Right(out[len(out)-1], n))
+	}
+	return out
+}
+
 // rightDirectPath returns the nodes which are in the direct path of a node and
 // to its right, ordered from leaf to root.
 func rightDirectPath(x, n uint64) []uint64 {

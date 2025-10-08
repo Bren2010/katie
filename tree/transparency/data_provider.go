@@ -3,16 +3,13 @@ package transparency
 import (
 	"bytes"
 	"errors"
+	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
-	"github.com/Bren2010/katie/tree/prefix"
+	"github.com/Bren2010/katie/tree/log"
+	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
-
-type innerDataProvider interface {
-	ConsumeTimestamp() (uint64, error)
-	ConsumePrefixProof() (*prefix.PrefixProof, error)
-}
 
 func addTimestamp(collection map[uint64]uint64, pos1, ts1 uint64) error {
 	for pos2, ts2 := range collection {
@@ -37,65 +34,46 @@ func addPrefixTree(collection map[uint64][]byte, pos uint64, root []byte) error 
 }
 
 type dataProvider struct {
-	cs    suites.CipherSuite
-	inner innerDataProvider
+	cs     suites.CipherSuite
+	handle proofHandle
 
-	vrfOutputs  map[uint32][]byte // Map from label version to VRF output.
-	commitments map[uint32][]byte // Map from label version to commitment.
+	fullSubtrees [][]byte                   // Retained full subtrees of the log tree.
+	logEntries   map[uint64]structs.LogLeaf // Retained log entries.
+
 	timestamps  map[uint64]uint64 // Map from log entry to timestamp.
 	prefixTrees map[uint64][]byte // Map from log entry to prefix tree root value.
 }
 
-func newDataProvider(cs suites.CipherSuite, inner innerDataProvider) *dataProvider {
+func newDataProvider(cs suites.CipherSuite, handle proofHandle) *dataProvider {
 	return &dataProvider{
-		cs:    cs,
-		inner: inner,
+		cs:     cs,
+		handle: handle,
 
-		vrfOutputs:  make(map[uint32][]byte),
-		commitments: make(map[uint32][]byte),
 		timestamps:  make(map[uint64]uint64),
 		prefixTrees: make(map[uint64][]byte),
 	}
 }
 
-func (dp *dataProvider) AddVRFOutput(ver uint32, vrfOutput []byte) error {
-	if len(vrfOutput) != dp.cs.HashSize() {
-		return errors.New("malformed vrf output")
-	} else if _, ok := dp.vrfOutputs[ver]; ok {
-		return errors.New("can not add the same vrf output twice")
-	}
-	dp.vrfOutputs[ver] = vrfOutput
-	return nil
-}
+func (dp *dataProvider) AddRetained(fullSubtrees [][]byte, logEntries map[uint64]structs.LogLeaf) error {
+	dp.fullSubtrees = fullSubtrees
+	dp.logEntries = logEntries
 
-func (dp *dataProvider) AddCommitment(ver uint32, commitment []byte) error {
-	if len(commitment) != dp.cs.HashSize() {
-		return errors.New("malformed commitment")
-	} else if _, ok := dp.commitments[ver]; ok {
-		return errors.New("can not add the same commitment twice")
-	}
-	dp.commitments[ver] = commitment
-	return nil
-}
-
-func (dp *dataProvider) AddRetained(retained map[uint64]structs.LogLeaf) error {
-	for pos, leaf := range retained {
+	for pos, leaf := range logEntries {
 		if err := addTimestamp(dp.timestamps, pos, leaf.Timestamp); err != nil {
 			return err
+		} else if err := addPrefixTree(dp.prefixTrees, pos, leaf.PrefixTree); err != nil {
+			return err
 		}
-		dp.prefixTrees[pos] = leaf.PrefixTree
 	}
+
 	return nil
 }
 
-// GetTimestamp takes as input the position of a log entry and returns the
-// timestamp of the log entry. This function verifies that the timestamp is
-// monotonic with others provided or retained.
 func (dp *dataProvider) GetTimestamp(x uint64) (uint64, error) {
 	if ts, ok := dp.timestamps[x]; ok {
 		return ts, nil
 	}
-	ts, err := dp.inner.ConsumeTimestamp()
+	ts, err := dp.handle.GetTimestamp(x)
 	if err != nil {
 		return 0, err
 	} else if err := addTimestamp(dp.timestamps, x, ts); err != nil {
@@ -104,42 +82,163 @@ func (dp *dataProvider) GetTimestamp(x uint64) (uint64, error) {
 	return ts, nil
 }
 
-// GetSearchBinaryLadder takes as input the position of a log entry, the target
-// version for a search binary ladder, and whether or not to omit redundant
-// lookups. It returns -1, 0, or 1 to indicate whether the greatest version of
-// the label proven to exist is less than, equal to, or greater than the target
-// version, respectively.
 func (dp *dataProvider) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) (int, error) {
-
+	if _, err := dp.GetTimestamp(x); err != nil {
+		return err
+	}
+	root, res, err := dp.handle.GetSearchBinaryLadder(x, ver, omit)
+	if err != nil {
+		return 0, err
+	} else if err := addPrefixTree(dp.prefixTrees, x, root); err != nil {
+		return 0, err
+	}
+	return res, nil
 }
 
-// GetMonitoringBinaryLadder takes as input the position of a log entry and
-// the target version for a monitoring binary ladder.
 func (dp *dataProvider) GetMonitoringBinaryLadder(x uint64, ver uint32) error {
-	ladder :=
+	if _, err := dp.GetTimestamp(x); err != nil {
+		return err
+	}
+	root, err := dp.handle.GetMonitoringBinaryLadder(x, ver)
+	if err != nil {
+		return err
+	}
+	return addPrefixTree(dp.prefixTrees, x, root)
 }
 
-// GetInclusionProof takes as input the position of a log entry and the
-// target version to get an inclusion proof for.
 func (dp *dataProvider) GetInclusionProof(x uint64, ver uint32) error {
-	vrfOutput, ok := dp.vrfOutputs[ver]
-	if !ok {
-		return errors.New("vrf output for version not known")
+	if _, err := dp.GetTimestamp(x); err != nil {
+		return err
 	}
-	commitment, ok := dp.commitments[ver]
-	if !ok {
-		return errors.New("commitment for version not known")
-	}
-
-	proof, err := dp.inner.ConsumePrefixProof()
+	root, err := dp.handle.GetInclusionProof(x, ver)
 	if err != nil {
 		return err
 	}
-	entries := []prefix.Entry{{VrfOutput: vrfOutput, Commitment: commitment}}
-	candidate, err := prefix.Evaluate(dp.cs, entries, proof)
-	if err != nil {
-		return err
+	return addPrefixTree(dp.prefixTrees, x, root)
+}
+
+type proofResult struct {
+	frontier   [][]byte                   // The frontier for the user to retain.
+	additional [][]byte                   // The additional frontier, if requested.
+	logEntries map[uint64]structs.LogLeaf // Log entries for the user to retain.
+}
+
+type sortableLogLeaf struct {
+	position uint64
+	structs.LogLeaf
+}
+
+func sortLogLeaf(a, b sortableLogLeaf) int {
+	if a.pos < b.pos {
+		return -1
+	} else if a.pos > b.pos {
+		return 1
+	}
+	return 0
+}
+
+func (dp *dataProvider) buildLeaves() ([][]byte, error) {
+	leaves := make([]sortableLogLeaf, 0)
+
+	// Put together initial list of leaves that were inspected by our proof and
+	// sort them.
+	for x, ts := range dp.timestamps {
+		if _, ok := dp.logEntries[x]; ok {
+			continue
+		}
+		leaves = append(leaves, sortableLogLeaf{
+			position: x,
+			LogLeaf:  structs.LogLeaf{Timestamp: ts, PrefixTree: dp.prefixTrees[x]},
+		})
+	}
+	slices.SortFunc(leaves, sortLogLeaf)
+
+	// Identify the leaves that we have only the timestamp for.
+	empty := make([]uint64, 0)
+	for _, leaf := range leaves {
+		if leaf.PrefixTree == nil {
+			empty = append(empty, leaf.position)
+		}
 	}
 
-	return addPrefixTree(dp.prefixTrees, x, candidate)
+	// In-fill missing prefix tree root values.
+	prefixTrees, err := dp.handle.GetPrefixTrees(empty)
+	if err != nil {
+		return nil, err
+	}
+	for i, leaf := range leaves {
+		if leaf.PrefixTree == nil {
+			leaves[i].PrefixTree = prefixTrees[0]
+			prefixTrees = prefixTrees[1:]
+		}
+	}
+
+	// Convert leaves into values.
+	values := make([][]byte, len(leaves))
+	hasher := dp.cs.Hash()
+	for i, leaf := range leaves {
+		if _, err := hasher.Write(leaf.Marshal()); err != nil {
+			return nil, err
+		}
+		values[i] = hasher.Sum(nil)
+		hasher.Reset()
+	}
+
+	return values, nil
+}
+
+// Finish takes as input the previous size of the tree `m` and the current size
+// of the tree `n`. It returns the log tree root value and the set of log
+// entries to retain.
+func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
+	leaves := make([]sortableLogLeaf, 0)
+	for x, ts := range dp.timestamps {
+		if _, ok := dp.logEntries[x]; ok {
+			continue
+		}
+		leaves = append(leaves, sortableLogLeaf{
+			pos: x,
+			structs.LogLeaf{Timestamp: ts, PrefixTree: dp.prefixTrees[x]},
+		})
+	}
+	slices.SortFunc(leaves, sortLogLeaf)
+	emptyCount := 0
+	for _, leaf := range leaves {
+		if leaf.PrefixTree == nil {
+			emptyCount++
+		}
+	}
+
+	prefixTrees, proof, err := dp.handle.Finish()
+	if err != nil {
+		return nil, err
+	}
+
+	// Evaluate the inclusion proof to find the log's new frontier.
+	verifier := log.NewVerifier(dp.cs)
+	if m != nil {
+		if err := verifier.Retain(*m, dp.fullSubtrees); err != nil {
+			return nil, err
+		}
+	}
+	frontier, additional, err := verifier.Evaluate(entries, n, nP, values, proof)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the set of log entries to retain.
+	logEntries := make(map[uint64]structs.LogLeaf)
+	for _, x := range math.Frontier(n) {
+		ts, ok := dp.timestamps[x]
+		if !ok {
+			return nil, errors.New("expected timestamp not retained")
+		}
+		prefixTree, ok := dp.prefixTrees[x]
+		if !ok {
+			return nil, errors.New("expected prefix tree root not retained")
+		}
+		logEntries[x] = structs.LogLeaf{Timestamp: ts, PrefixTree: prefixTree}
+	}
+
+	return &proofResult{frontier, additional, logEntries}, nil
 }
