@@ -51,121 +51,106 @@ func (v *Verifier) Retain(prev uint64, frontier [][]byte) error {
 }
 
 // Evaluate returns the root that would result in `proof` being valid.
-func (v *Verifier) Evaluate(entries []uint64, n uint64, values [][]byte, proof [][]byte) ([][]byte, error) {
+func (v *Verifier) Evaluate(entries []uint64, n uint64, nP *uint64, values [][]byte, proof [][]byte) ([][]byte, [][]byte, error) {
 	// Input validation.
 	if n == 0 || n > math.MaxTreeSize {
-		return nil, errors.New("invalid value for current tree size")
+		return nil, nil, errors.New("invalid value for current tree size")
+	} else if nP != nil && (*nP == 0 || *nP > n || *nP > math.MaxTreeSize) {
+		return nil, nil, errors.New("invalid value for additional tree size")
 	} else if len(entries) != len(values) {
-		return nil, errors.New("number of leaves indices must equal number of leaf values")
+		return nil, nil, errors.New("number of leaves indices must equal number of leaf values")
 	}
 	for _, x := range entries {
 		if x >= n {
-			return nil, errors.New("leaf is beyond right edge of tree")
+			return nil, nil, errors.New("leaf is beyond right edge of tree")
 		}
 	}
-	copath := math.BatchCopath(entries, n, v.prev)
+	copath := math.BatchCopath(entries, n, nP, v.prev)
 	if len(proof) != len(copath) {
-		return nil, errors.New("malformed proof")
+		return nil, nil, errors.New("malformed proof")
 	}
 
 	// Build a map from node index to value for all the nodes where we are
 	// proving inclusion.
-	valuesMap := make(map[uint64][]byte)
+	nodes := make(map[uint64]*nodeData)
 	for i, x := range entries {
-		if err := v.addToMap(valuesMap, 2*x, values[i]); err != nil {
-			return nil, err
+		if err := v.addToMap(nodes, 2*x, values[i]); err != nil {
+			return nil, nil, err
 		}
 	}
 	for i, x := range v.subtrees {
-		if err := v.addToMap(valuesMap, x, v.frontier[i]); err != nil {
-			return nil, err
+		if err := v.addToMap(nodes, x, v.frontier[i]); err != nil {
+			return nil, nil, err
 		}
 	}
-
-	// Build sorted list of node indices.
-	nodes := make([]uint64, 0, len(valuesMap))
-	for x := range valuesMap {
-		nodes = append(nodes, x)
-	}
-	slices.Sort(nodes)
-
-	// Build a map from node index to value for all the nodes that were provided
-	// as part of the proof.
-	proofMap := make(map[uint64][]byte)
 	for i, x := range copath {
-		if err := v.addToMap(proofMap, x, proof[i]); err != nil {
-			return nil, err
+		if err := v.addToMap(nodes, x, proof[i]); err != nil {
+			return nil, nil, err
 		}
 	}
 
-	// Compute the expected frontier.
-	out := make([][]byte, 0)
-	root := math.Root(n)
-	offset := 0
-
-	for {
-		if math.IsFullSubtree(root, n) {
-			elem, err := v.evaluate(root, n, nodes[offset:], valuesMap, proofMap)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, elem.value)
-			return out, nil
-		}
-		i, _ := slices.BinarySearch(nodes, root)
-		elem, err := v.evaluate(math.Left(root), n, nodes[offset:i], valuesMap, proofMap)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, elem.value)
-		root = math.Right(root, n)
-		offset = i
+	// Build a sorted list of node indices. This is used to ensure that we know
+	// when we need to recurse further down and recompute a node value even
+	// though we may already know it.
+	sorted := make([]uint64, 0)
+	for x := range nodes {
+		sorted = append(sorted, x)
 	}
+	slices.Sort(sorted)
+
+	// Evaluate the proof by computing all intermediate node values.
+	if err := v.evaluate(math.Root(n), n, nodes, sorted); err != nil {
+		return nil, nil, err
+	}
+
+	// Extract frontier(s) and return.
+	var frontier [][]byte
+	for _, x := range math.FullSubtrees(math.Root(n), n) {
+		frontier = append(frontier, nodes[x].value)
+	}
+	var additional [][]byte
+	if nP != nil {
+		for _, x := range math.FullSubtrees(math.Root(*nP), *nP) {
+			additional = append(additional, nodes[x].value)
+		}
+	}
+	return frontier, additional, nil
 }
 
-func (v *Verifier) addToMap(m map[uint64][]byte, x uint64, val []byte) error {
+func (v *Verifier) addToMap(m map[uint64]*nodeData, x uint64, val []byte) error {
 	if len(val) != v.cs.HashSize() {
 		return errors.New("value is unexpected size")
-	} else if expected, ok := m[x]; ok && !bytes.Equal(val, expected) {
+	} else if expected, ok := m[x]; ok && !bytes.Equal(val, expected.value) {
 		return errors.New("different values presented for same node index")
 	} else if !ok {
-		m[x] = val
+		m[x] = &nodeData{leaf: math.IsLeaf(x), value: val}
 	}
 	return nil
 }
 
-func (v *Verifier) evaluate(x, n uint64, nodes []uint64, values, proof map[uint64][]byte) (*nodeData, error) {
-	if len(nodes) == 0 {
-		if math.IsFullSubtree(x, n) {
-			return &nodeData{leaf: math.IsLeaf(x), value: proof[x]}, nil
-		}
-		left := &nodeData{leaf: false, value: proof[math.Left(x)]}
-		right, err := v.evaluate(math.Right(x, n), n, nil, nil, proof)
-		if err != nil {
-			return nil, err
-		}
-		return treeHash(v.cs, left, right), nil
-	} else if len(nodes) == 1 && nodes[0] == x {
-		return &nodeData{leaf: math.IsLeaf(x), value: values[x]}, nil
+func (v *Verifier) evaluate(x, n uint64, nodes map[uint64]*nodeData, sorted []uint64) error {
+	if len(sorted) == 1 && sorted[0] == x {
+		return nil
 	}
 
-	i, found := slices.BinarySearch(nodes, x)
+	i, found := slices.BinarySearch(sorted, x)
 	j := i
 	if found {
 		j++
 	}
-	left, err := v.evaluate(math.Left(x), n, nodes[:i], values, proof)
-	if err != nil {
-		return nil, err
-	}
-	right, err := v.evaluate(math.Right(x, n), n, nodes[j:], values, proof)
-	if err != nil {
-		return nil, err
-	}
-	intermediate := treeHash(v.cs, left, right)
+	left, right := math.Left(x), math.Right(x, n)
 
-	if found && !bytes.Equal(intermediate.value, values[x]) {
-		return nil, errors.New("unexpected value computed for intermediate node")
+	if err := v.evaluate(left, n, nodes, sorted[:i]); err != nil {
+		return err
+	} else if err := v.evaluate(right, n, nodes, sorted[j:]); err != nil {
+		return err
 	}
-	return intermediate, nil
+
+	if math.IsFullSubtree(x, n) {
+		intermediate := treeHash(v.cs, nodes[left], nodes[right])
+		if err := v.addToMap(nodes, x, intermediate.value); err != nil {
+			return err
+		}
+	}
+	return nil
 }

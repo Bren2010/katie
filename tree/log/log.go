@@ -69,13 +69,13 @@ func (t *Tree) fetchSpecific(nodes []uint64) ([][]byte, error) {
 }
 
 // GetBatch returns a batch proof for the given set of log entries.
-func (t *Tree) GetBatch(entries []uint64, n uint64, m *uint64) ([][]byte, error) {
+func (t *Tree) GetBatch(entries []uint64, n uint64, nP, m *uint64) ([][]byte, error) {
 	if n == 0 || n > math.MaxTreeSize {
 		return nil, errors.New("invalid value for current tree size")
+	} else if nP != nil && (*nP == 0 || *nP > n || *nP > math.MaxTreeSize) {
+		return nil, errors.New("invalid value for additional tree size")
 	} else if m != nil && (*m == 0 || *m > n || *m > math.MaxTreeSize) {
 		return nil, errors.New("invalid value for previous tree size")
-	} else if len(entries) == 0 {
-		return nil, nil
 	}
 	slices.Sort(entries)
 	for i, x := range entries {
@@ -85,7 +85,7 @@ func (t *Tree) GetBatch(entries []uint64, n uint64, m *uint64) ([][]byte, error)
 			return nil, errors.New("duplicate leaf index found")
 		}
 	}
-	return t.fetchSpecific(math.BatchCopath(entries, n, m))
+	return t.fetchSpecific(math.BatchCopath(entries, n, nP, m))
 }
 
 // Append adds a new element to the end of the log and returns the new frontier.

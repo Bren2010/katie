@@ -46,12 +46,20 @@ func TestMath(t *testing.T) {
 
 	assert(slicesEq(FullSubtrees(7, 6), []uint64{3, 9}))
 
-	assert(slicesEq(BatchCopath([]uint64{0, 2, 3, 4}, 8, nil), []uint64{2, 10, 13}))
-	assert(slicesEq(BatchCopath([]uint64{0, 2, 3}, 8, nil), []uint64{2, 11}))
-	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 12}, 13, nil), []uint64{1, 10, 12, 19}))
+	assert(slicesEq(BatchCopath([]uint64{0, 2, 3, 4}, 8, nil, nil), []uint64{2, 10, 13}))
+	assert(slicesEq(BatchCopath([]uint64{0, 2, 3}, 8, nil, nil), []uint64{2, 11}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 12}, 13, nil, nil), []uint64{1, 10, 12, 19}))
 	prev := uint64(13)
-	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 12, 13}, 15, &prev), []uint64{1, 10, 12, 28}))
-	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 13}, 15, &prev), []uint64{1, 10, 12, 28}))
-	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 14}, 15, &prev), []uint64{1, 10, 12, 26}))
-	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7}, 15, &prev), []uint64{1, 10, 12, 26, 28}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 12, 13}, 15, nil, &prev), []uint64{1, 10, 12, 28}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 13}, 15, nil, &prev), []uint64{1, 10, 12, 28}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7, 14}, 15, nil, &prev), []uint64{1, 10, 12, 26}))
+	assert(slicesEq(BatchCopath([]uint64{2, 3, 4, 7}, 15, nil, &prev), []uint64{1, 10, 12, 26, 28}))
+
+	thirty := uint64(30)
+	forty := uint64(40)
+	assert(slicesEq(BatchCopath([]uint64{}, 50, &forty, &thirty), []uint64{61, 71, 87, 97}))
+	assert(slicesEq(BatchCopath([]uint64{}, 50, &thirty, &forty), []uint64{15, 39, 51, 57, 61, 87, 97}))
+
+	thirtyNine := uint64(39)
+	assert(slicesEq(BatchCopath([]uint64{38}, 39, nil, &thirtyNine), []uint64{}))
 }

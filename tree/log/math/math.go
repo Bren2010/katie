@@ -159,14 +159,21 @@ func FullSubtrees(x, n uint64) []uint64 {
 }
 
 // BatchCopath returns the copath nodes of a batch of leaves. `n` is the current
-// number of leaves, and `m` is the optional previous log size to prove
-// consistency with.
-func BatchCopath(leaves []uint64, n uint64, m *uint64) []uint64 {
+// number of leaves. `nP` is an optional additional tree size that the verifier
+// wishes to be able to compute the root of. `m` is the optional previous log
+// size to prove consistency with.
+func BatchCopath(leaves []uint64, n uint64, nP, m *uint64) []uint64 {
 	// Compute the set of node indices to prove inclusion for. This is a
 	// combination of the requested leaves and any retained subtrees from `m`.
-	dedup := make(map[uint64]struct{})
+	dedup, include := make(map[uint64]struct{}), make(map[uint64]struct{})
 	for _, x := range leaves {
 		dedup[2*x] = struct{}{}
+	}
+	if nP != nil {
+		for _, x := range FullSubtrees(Root(*nP), *nP) {
+			dedup[x] = struct{}{}
+			include[x] = struct{}{}
+		}
 	}
 	if m != nil {
 		for _, x := range FullSubtrees(Root(*m), *m) {
@@ -179,13 +186,16 @@ func BatchCopath(leaves []uint64, n uint64, m *uint64) []uint64 {
 	}
 	slices.Sort(nodes)
 
-	return batchCopath(Root(n), n, nodes)
+	return batchCopath(Root(n), n, nodes, include)
 }
 
-func batchCopath(x, n uint64, nodes []uint64) []uint64 {
+func batchCopath(x, n uint64, nodes []uint64, include map[uint64]struct{}) []uint64 {
 	if len(nodes) == 0 {
 		return FullSubtrees(x, n)
 	} else if len(nodes) == 1 && nodes[0] == x {
+		if _, ok := include[x]; ok {
+			return []uint64{x}
+		}
 		return nil
 	}
 	i, found := slices.BinarySearch(nodes, x)
@@ -193,8 +203,8 @@ func batchCopath(x, n uint64, nodes []uint64) []uint64 {
 	if found {
 		j++
 	}
-	return append(batchCopath(Left(x), n, nodes[:i]),
-		batchCopath(Right(x, n), n, nodes[j:])...)
+	return append(batchCopath(Left(x), n, nodes[:i], include),
+		batchCopath(Right(x, n), n, nodes[j:], include)...)
 }
 
 // Chunk takes a node id as input and returns the id of the chunk that the node

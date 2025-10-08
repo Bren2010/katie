@@ -107,13 +107,15 @@ func TestGetBatch(t *testing.T) {
 				}
 			}
 
-			proof, err := tree.GetBatch(entries, 2000, m)
+			proof, err := tree.GetBatch(entries, 2000, nil, m)
 			if err != nil {
 				t.Fatal(err)
 			}
-			frontier, err := verifier.Evaluate(entries, 2000, values, proof)
+			frontier, addl, err := verifier.Evaluate(entries, 2000, nil, values, proof)
 			if err != nil {
 				t.Fatal(err)
+			} else if addl != nil {
+				t.Fatal("expected additional frontier to be nil")
 			}
 			cand, err := Root(cs, 2000, frontier)
 			if err != nil {
@@ -121,6 +123,59 @@ func TestGetBatch(t *testing.T) {
 			} else if !bytes.Equal(root, cand) {
 				t.Fatal("root hash does not match")
 			}
+		}
+	}
+}
+
+func TestAdditional(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, new(memoryStore))
+
+	var (
+		n, m     uint64 = 2000, 1000
+		retained [][]byte
+		roots    [][]byte
+	)
+	for i := range n {
+		frontier, err := tree.Append(i, random())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i+1 == m {
+			retained = frontier
+		}
+		root, err := Root(cs, i+1, frontier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roots = append(roots, root)
+	}
+
+	for nP := uint64(1); nP <= 2000; nP++ {
+		proof, err := tree.GetBatch(nil, n, &nP, &m)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		verifier := NewVerifier(cs)
+		if err := verifier.Retain(m, retained); err != nil {
+			t.Fatal(err)
+		}
+		frontier, addl, err := verifier.Evaluate(nil, n, &nP, nil, proof)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root1, err := Root(cs, n, frontier)
+		if err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(root1, roots[n-1]) {
+			t.Fatal("unexpected root value computed")
+		}
+		root2, err := Root(cs, nP, addl)
+		if err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(root2, roots[nP-1]) {
+			t.Fatal("unexpected root value computed")
 		}
 	}
 }
