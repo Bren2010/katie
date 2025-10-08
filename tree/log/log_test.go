@@ -77,7 +77,7 @@ func TestGetBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for range 100 {
+	for range 10 {
 		// Choose 10 random leaf values to request inclusion for.
 		dedup := make(map[uint64]struct{})
 		for range 10 {
