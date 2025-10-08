@@ -26,7 +26,7 @@ func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, err
 	if err != nil {
 		return nil, err
 	}
-	var results []PrefixSearchResult
+	results := make([]PrefixSearchResult, 0, numResults)
 	for range int(numResults) {
 		result, err := unmarshalSearchResult(cs, buf)
 		if err != nil {
@@ -39,7 +39,7 @@ func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, err
 	if err := binary.Read(buf, binary.BigEndian, &numElements); err != nil {
 		return nil, err
 	}
-	var elements [][]byte
+	elements := make([][]byte, 0, numElements)
 	for range int(numElements) {
 		elem := make([]byte, cs.HashSize())
 		if _, err := io.ReadFull(buf, elem); err != nil {
@@ -54,7 +54,7 @@ func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, err
 func (pp *PrefixProof) Marshal(buf *bytes.Buffer) error {
 	if len(pp.Results) > 255 {
 		return errors.New("results too long to marshal")
-	} else if err := buf.WriteByte(byte(len(pp.Results))); err != nil {
+	} else if err := buf.WriteByte(uint8(len(pp.Results))); err != nil {
 		return err
 	}
 	for _, res := range pp.Results {
