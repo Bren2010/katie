@@ -5,6 +5,7 @@ import (
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/tree/prefix"
+	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
@@ -46,10 +47,19 @@ type receivedProofHandler struct {
 
 	vrfOutputs  map[uint32][]byte
 	commitments map[uint32][]byte
+
+	leftInclusion     map[uint32]struct{}
+	rightNonInclusion map[uint32]struct{}
 }
 
 func newReceivedProofHandler(cs suites.CipherSuite, inner structs.CombinedTreeProof) *receivedProofHandler {
-	return &receivedProofHandler{cs: cs, inner: inner}
+	return &receivedProofHandler{
+		cs:    cs,
+		inner: inner,
+
+		leftInclusion:     make(map[uint32]struct{}),
+		rightNonInclusion: make(map[uint32]struct{}),
+	}
 }
 
 func (rph *receivedProofHandler) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
@@ -76,12 +86,97 @@ func (rph *receivedProofHandler) GetTimestamp(x uint64) (uint64, error) {
 	return ts, nil
 }
 
-func (rph *receivedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
+func (rph *receivedProofHandler) evaluateSearchLadder(ver uint32, proof *prefix.PrefixProof) ([]prefix.Entry, int, error) {
+	entries := make([]prefix.Entry, 0)
 
+	versions := math.SearchBinaryLadder(ver, ver, rph.leftInclusion, rph.rightNonInclusion)
+	if len(proof.Results) > len(versions) {
+		return nil, 0, errors.New("unexpected number of results in prefix proof")
+	}
+	for i, version := range versions {
+		if i >= len(proof.Results) {
+			return nil, 0, errors.New("blah")
+		}
+		res := proof.Results[i]
+
+		// Put together the prefix.Entry structure for prefix proof evaluation.
+		vrfOutput, ok := rph.vrfOutputs[version]
+		if !ok {
+			return nil, 0, errors.New("vrf output not known for required version")
+		}
+		var commitment []byte
+		if res.Inclusion() {
+			commitment, ok = rph.commitments[version]
+			if !ok {
+				return nil, 0, errors.New("commitment not known for required version")
+			}
+		}
+		entries = append(entries, prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment})
+
+		// Determine if this lookup is / should've been the last one in the
+		// binary ladder.
+		if res.Inclusion() && version > ver {
+			if len(proof.Results) != i+1 {
+				return nil, 0, errors.New("unexpected number of results in prefix proof")
+			}
+			return entries, 1, nil
+		} else if !res.Inclusion() && version <= ver {
+			if len(proof.Results) != i+1 {
+				return nil, 0, errors.New("unexpected number of results in prefix proof")
+			}
+			return entries, -1, nil
+		}
+	}
+
+	return entries, 0, nil
+}
+
+func (rph *receivedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
+	if len(rph.inner.PrefixProofs) == 0 {
+		return nil, 0, errors.New("unexpected number of prefix proofs consumed")
+	}
+	proof := rph.inner.PrefixProofs[0]
+	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
+
+	entries, res, err := rph.evaluateSearchLadder(ver, &proof)
+	if err != nil {
+		return nil, 0, err
+	}
+	root, err := prefix.Evaluate(rph.cs, entries, &proof)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return root, res, nil
 }
 
 func (rph *receivedProofHandler) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
+	if len(rph.inner.PrefixProofs) == 0 {
+		return nil, errors.New("unexpected number of prefix proofs consumed")
+	}
+	proof := rph.inner.PrefixProofs[0]
+	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
 
+	versions := math.MonitoringBinaryLadder(ver, leftInclusion)
+	if len(proof.Results) != len(versions) {
+		return nil, errors.New("unexpected number of results present in prefix proof")
+	}
+	for _, res := range proof.Results {
+		if !res.Inclusion() {
+			return nil, errors.New("unexpected non-inclusion proof provided")
+		}
+	}
+	entries := make([]prefix.Entry, len(versions))
+	for i, version := range versions {
+		vrfOutput, ok1 := rph.vrfOutputs[version]
+		commitment, ok2 := rph.commitments[version]
+		if !ok1 || !ok2 {
+			return nil, errors.New("vrf output or commitment not known for required version")
+		}
+		entries[i] = prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment}
+	}
+
+	return prefix.Evaluate(rph.cs, entries, &proof)
 }
 
 func (rph *receivedProofHandler) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
@@ -99,7 +194,7 @@ func (rph *receivedProofHandler) GetInclusionProof(x uint64, ver uint32) ([]byte
 	vrfOutput, ok1 := rph.vrfOutputs[ver]
 	commitment, ok2 := rph.commitments[ver]
 	if !ok1 || !ok2 {
-		return nil, errors.New("inclusion proof requested for unknown version")
+		return nil, errors.New("vrf output or commitment not known for required version")
 	}
 	entries := []prefix.Entry{{VrfOutput: vrfOutput, Commitment: commitment}}
 

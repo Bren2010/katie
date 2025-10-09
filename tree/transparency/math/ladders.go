@@ -1,10 +1,10 @@
 package math
 
-func baseBinaryLadder(n uint64) []uint64 {
-	out := make([]uint64, 0)
+func baseBinaryLadder(n uint32) []uint32 {
+	out := make([]uint32, 0)
 
 	for {
-		val := (uint64(1) << len(out)) - 1
+		val := (uint32(1) << len(out)) - 1
 		out = append(out, val)
 		if val > n {
 			break
@@ -34,11 +34,11 @@ func baseBinaryLadder(n uint64) []uint64 {
 // contains versions where a non-inclusion proof was already provided to the
 // right.
 func SearchBinaryLadder(
-	t, n uint64,
-	leftInclusion map[uint64]struct{},
-	rightNonInclusion map[uint64]struct{},
-) []uint64 {
-	out := make([]uint64, 0)
+	t, n uint32,
+	leftInclusion map[uint32]struct{},
+	rightNonInclusion map[uint32]struct{},
+) []uint32 {
+	out := make([]uint32, 0)
 
 	for _, v := range baseBinaryLadder(t) {
 		// Lookup is duplicate in two scenarios:
@@ -68,8 +68,8 @@ func SearchBinaryLadder(
 //
 // `t` is the target version of the label. `leftInclusion` contains versions
 // where an inclusion proof was already provided to the left.
-func MonitoringBinaryLadder(t uint64, leftInclusion map[uint64]struct{}) []uint64 {
-	out := make([]uint64, 0)
+func MonitoringBinaryLadder(t uint32, leftInclusion map[uint32]struct{}) []uint32 {
+	out := make([]uint32, 0)
 
 	for _, v := range baseBinaryLadder(t) {
 		if _, ok := leftInclusion[v]; !ok && v <= t {
