@@ -107,7 +107,7 @@ func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byt
 	for i, entry := range sortedEntries {
 		if len(entry.VrfOutput) != cs.HashSize() {
 			return nil, errors.New("unexpected vrf output length")
-		} else if len(entry.Commitment) != cs.HashSize() {
+		} else if entry.Commitment != nil && len(entry.Commitment) != cs.HashSize() {
 			return nil, errors.New("unexpected commitment length")
 		} else if i > 0 && bytes.Equal(sortedEntries[i-1].VrfOutput, entry.VrfOutput) {
 			return nil, errors.New("same vrf output present multiple times")

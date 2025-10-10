@@ -88,6 +88,21 @@ func Frontier(n uint64) []uint64 {
 	return out
 }
 
+// LeftDirectPath returns the nodes which are in the direct path of a node and
+// to its left, ordered from leaf to root.
+func LeftDirectPath(x uint64) []uint64 {
+	d := make([]uint64, 0)
+	r := Root(x + 1)
+	y := x
+	for y != r {
+		y = parentStep(y)
+		if y < x {
+			d = append(d, y)
+		}
+	}
+	return d
+}
+
 // rightDirectPath returns the nodes which are in the direct path of a node and
 // to its right, ordered from leaf to root.
 func rightDirectPath(x, n uint64) []uint64 {

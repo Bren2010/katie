@@ -1,5 +1,11 @@
 package math
 
+import (
+	"errors"
+
+	"github.com/Bren2010/katie/tree/prefix"
+)
+
 func baseBinaryLadder(n uint32) []uint32 {
 	out := make([]uint32, 0)
 
@@ -35,8 +41,8 @@ func baseBinaryLadder(n uint32) []uint32 {
 // right.
 func SearchBinaryLadder(
 	t, n uint32,
-	leftInclusion map[uint32]struct{},
-	rightNonInclusion map[uint32]struct{},
+	leftInclusion map[uint32]uint64,
+	rightNonInclusion map[uint32]uint64,
 ) []uint32 {
 	out := make([]uint32, 0)
 
@@ -68,7 +74,7 @@ func SearchBinaryLadder(
 //
 // `t` is the target version of the label. `leftInclusion` contains versions
 // where an inclusion proof was already provided to the left.
-func MonitoringBinaryLadder(t uint32, leftInclusion map[uint32]struct{}) []uint32 {
+func MonitoringBinaryLadder(t uint32, leftInclusion map[uint32]uint64) []uint32 {
 	out := make([]uint32, 0)
 
 	for _, v := range baseBinaryLadder(t) {
@@ -78,4 +84,40 @@ func MonitoringBinaryLadder(t uint32, leftInclusion map[uint32]struct{}) []uint3
 	}
 
 	return out
+}
+
+// InterpretSearchLadder takes as input the output of SearchBinaryLadder
+// `ladder`, where the target version was `target`, and a PrefixProof `proof`
+// corresponding to an execution of the search binary ladder.
+//
+// It returns -1 if the binary ladder indicates that greatest version of the
+// label present is less than the target version, 0 if it is equal, and 1 if
+// greater than the target.
+func InterpretSearchLadder(ladder []uint32, target uint32, proof *prefix.PrefixProof) (int, error) {
+	if len(proof.Results) > len(ladder) {
+		return 0, errors.New("unexpected number of results in prefix proof")
+	}
+
+	for i, version := range ladder {
+		if i >= len(proof.Results) {
+			return 0, errors.New("unexpected number of results in prefix proof")
+		}
+		res := proof.Results[i]
+
+		// Determine if this lookup is / should've been the last one in the
+		// binary ladder.
+		if res.Inclusion() && version > target {
+			if len(proof.Results) != i+1 {
+				return 0, errors.New("unexpected number of results in prefix proof")
+			}
+			return 1, nil
+		} else if !res.Inclusion() && version <= target {
+			if len(proof.Results) != i+1 {
+				return 0, errors.New("unexpected number of results in prefix proof")
+			}
+			return -1, nil
+		}
+	}
+
+	return 0, nil
 }
