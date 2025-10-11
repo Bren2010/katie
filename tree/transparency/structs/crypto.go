@@ -106,15 +106,27 @@ func (vi *VrfInput) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-type LogLeaf struct {
+type LogEntry struct {
 	Timestamp  uint64
 	PrefixTree []byte
 }
 
-func (ll *LogLeaf) Marshal(buf *bytes.Buffer) error {
-	if err := binary.Write(buf, binary.BigEndian, ll.Timestamp); err != nil {
+func NewLogEntry(cs suites.CipherSuite, buf *bytes.Buffer) (*LogEntry, error) {
+	var timestamp uint64
+	if err := binary.Read(buf, binary.BigEndian, &timestamp); err != nil {
+		return nil, err
+	}
+	prefixTree := make([]byte, cs.HashSize())
+	if _, err := io.ReadFull(buf, prefixTree); err != nil {
+		return nil, err
+	}
+	return &LogEntry{timestamp, prefixTree}, nil
+}
+
+func (le *LogEntry) Marshal(buf *bytes.Buffer) error {
+	if err := binary.Write(buf, binary.BigEndian, le.Timestamp); err != nil {
 		return err
-	} else if _, err := buf.Write(ll.PrefixTree); err != nil {
+	} else if _, err := buf.Write(le.PrefixTree); err != nil {
 		return err
 	}
 	return nil

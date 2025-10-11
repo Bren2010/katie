@@ -37,8 +37,8 @@ type dataProvider struct {
 	cs     suites.CipherSuite
 	handle proofHandle
 
-	fullSubtrees [][]byte                   // Retained full subtrees of the log tree.
-	logEntries   map[uint64]structs.LogLeaf // Retained log entries.
+	fullSubtrees [][]byte                    // Retained full subtrees of the log tree.
+	logEntries   map[uint64]structs.LogEntry // Retained log entries.
 
 	timestamps  map[uint64]uint64 // Map from log entry to timestamp.
 	prefixTrees map[uint64][]byte // Map from log entry to prefix tree root value.
@@ -54,7 +54,7 @@ func newDataProvider(cs suites.CipherSuite, handle proofHandle) *dataProvider {
 	}
 }
 
-func (dp *dataProvider) AddRetained(fullSubtrees [][]byte, logEntries map[uint64]structs.LogLeaf) error {
+func (dp *dataProvider) AddRetained(fullSubtrees [][]byte, logEntries map[uint64]structs.LogEntry) error {
 	dp.fullSubtrees = fullSubtrees
 	dp.logEntries = logEntries
 
@@ -118,14 +118,14 @@ func (dp *dataProvider) GetInclusionProof(x uint64, ver uint32) error {
 }
 
 type proofResult struct {
-	frontier   [][]byte                   // The frontier for the user to retain.
-	additional [][]byte                   // The additional frontier, if requested.
-	logEntries map[uint64]structs.LogLeaf // Log entries for the user to retain.
+	frontier   [][]byte                    // The frontier for the user to retain.
+	additional [][]byte                    // The additional frontier, if requested.
+	logEntries map[uint64]structs.LogEntry // Log entries for the user to retain.
 }
 
 type sortableLogLeaf struct {
 	position uint64
-	structs.LogLeaf
+	structs.LogEntry
 }
 
 func sortLogLeaf(a, b sortableLogLeaf) int {
@@ -148,7 +148,7 @@ func (dp *dataProvider) inspectedLeaves() ([]uint64, [][]byte, error) {
 		}
 		leaves = append(leaves, sortableLogLeaf{
 			position: x,
-			LogLeaf:  structs.LogLeaf{Timestamp: ts, PrefixTree: dp.prefixTrees[x]},
+			LogEntry: structs.LogEntry{Timestamp: ts, PrefixTree: dp.prefixTrees[x]},
 		})
 	}
 	slices.SortFunc(leaves, sortLogLeaf)
@@ -220,7 +220,7 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 	}
 
 	// Build the set of log entries to retain.
-	logEntries := make(map[uint64]structs.LogLeaf)
+	logEntries := make(map[uint64]structs.LogEntry)
 	for _, x := range math.Frontier(n) {
 		ts, ok := dp.timestamps[x]
 		if !ok {
@@ -230,7 +230,7 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 		if !ok {
 			return nil, errors.New("expected prefix tree root not retained")
 		}
-		logEntries[x] = structs.LogLeaf{Timestamp: ts, PrefixTree: prefixTree}
+		logEntries[x] = structs.LogEntry{Timestamp: ts, PrefixTree: prefixTree}
 	}
 
 	return &proofResult{frontier, additional, logEntries}, nil

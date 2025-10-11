@@ -1,13 +1,36 @@
 package transparency
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/Bren2010/katie/crypto/suites"
+	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/log"
 	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
+
+func addVersion(
+	cs suites.CipherSuite,
+	ver uint32,
+	vrfOutput, commitment []byte,
+	vrfOutputs, commitments map[uint32][]byte,
+) error {
+	if len(vrfOutput) != cs.HashSize() {
+		return errors.New("malformed vrf output")
+	} else if _, ok := vrfOutputs[ver]; ok {
+		return errors.New("can not add the same vrf output twice")
+	} else if commitment != nil && len(commitment) != cs.HashSize() {
+		return errors.New("malformed commitment")
+	} else if _, ok := commitments[ver]; ok {
+		return errors.New("can not add the same commitment twice")
+	}
+	vrfOutputs[ver] = vrfOutput
+	commitments[ver] = commitment
+	return nil
+}
 
 type proofHandle interface {
 	// GetTimestamp takes as input the position of a log entry and returns the
@@ -64,18 +87,7 @@ func newReceivedProofHandler(cs suites.CipherSuite, inner structs.CombinedTreePr
 }
 
 func (rph *receivedProofHandler) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
-	if len(vrfOutput) != rph.cs.HashSize() {
-		return errors.New("malformed vrf output")
-	} else if _, ok := rph.vrfOutputs[ver]; ok {
-		return errors.New("can not add the same vrf output twice")
-	} else if commitment != nil && len(commitment) != rph.cs.HashSize() {
-		return errors.New("malformed commitment")
-	} else if _, ok := rph.commitments[ver]; ok {
-		return errors.New("can not add the same commitment twice")
-	}
-	rph.vrfOutputs[ver] = vrfOutput
-	rph.commitments[ver] = commitment
-	return nil
+	return addVersion(rph.cs, ver, vrfOutput, commitment, rph.vrfOutputs, rph.commitments)
 }
 
 func (rph *receivedProofHandler) GetTimestamp(x uint64) (uint64, error) {
@@ -231,4 +243,98 @@ func (rph *receivedProofHandler) Finish() ([][]byte, error) {
 		return nil, errors.New("unexpected additional prefix roots found")
 	}
 	return rph.inner.Inclusion.Elements, nil
+}
+
+// producedProofHandler implements the proofHandle interface such that it can
+// output output the corresponding CombinedTreeProof.
+type producedProofHandler struct {
+	cs        suites.CipherSuite
+	tx        db.TransparencyStore
+	n         uint64
+	nP, m     *uint64
+	labelInfo []uint64
+
+	vrfOutputs  map[uint32][]byte
+	commitments map[uint32][]byte
+
+	prefixTrees       map[uint64][]byte
+	leftInclusion     map[uint32]uint64
+	rightNonInclusion map[uint32]uint64
+	inner             structs.CombinedTreeProof
+}
+
+func newProducedProofHandler(
+	cs suites.CipherSuite,
+	tx db.TransparencyStore,
+	n uint64,
+	nP, m *uint64,
+	labelInfo []uint64,
+) *producedProofHandler {
+	return &producedProofHandler{
+		cs:        cs,
+		tx:        tx,
+		n:         n,
+		nP:        nP,
+		m:         m,
+		labelInfo: labelInfo,
+
+		vrfOutputs:  make(map[uint32][]byte),
+		commitments: make(map[uint32][]byte),
+
+		prefixTrees:       make(map[uint64][]byte),
+		leftInclusion:     make(map[uint32]uint64),
+		rightNonInclusion: make(map[uint32]uint64),
+	}
+}
+
+func (pph *producedProofHandler) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
+	return addVersion(pph.cs, ver, vrfOutput, commitment, pph.vrfOutputs, pph.commitments)
+}
+
+func (pph *producedProofHandler) GetTimestamp(x uint64) (uint64, error) {
+	raw, err := pph.tx.Get(x)
+	if err != nil {
+		return 0, err
+	}
+	entry, err := structs.NewLogEntry(pph.cs, bytes.NewBuffer(raw))
+	if err != nil {
+		return 0, err
+	}
+
+	pph.inner.Timestamps = append(pph.inner.Timestamps, entry.Timestamp)
+	pph.prefixTrees[x] = entry.PrefixTree
+
+	return entry.Timestamp, nil
+}
+
+func (pph *producedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
+
+}
+
+func (pph *producedProofHandler) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
+
+}
+
+func (pph *producedProofHandler) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
+
+}
+
+func (pph *producedProofHandler) GetPrefixTrees(xs []uint64) ([][]byte, error) {
+	out := make([][]byte, 0)
+	for _, x := range xs {
+		prefixTree, ok := pph.prefixTrees[x]
+		if !ok {
+			return nil, errors.New("unexpected prefix tree requested")
+		}
+		out = append(out, prefixTree)
+	}
+	return out, nil
+}
+
+func (pph *producedProofHandler) Finish() ([][]byte, error) {
+	leaves := make([]uint64, 0, len(pph.prefixTrees))
+	for x, _ := range pph.prefixTrees {
+		leaves = append(leaves, x)
+	}
+	return log.NewTree(pph.cs, pph.tx.LogStore()).GetBatch(leaves, pph.n, pph.nP, pph.m)
 }
