@@ -1,12 +1,13 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 )
+
+const leveldbTreeHeadKey = "tree-head"
 
 func dup(in []byte) []byte {
 	out := make([]byte, len(in))
@@ -21,8 +22,6 @@ type ldbConn struct {
 	readonly bool
 	batch    map[string][]byte
 }
-
-// TODO: Consider adding LRU cache.
 
 func newLDBConn(conn *leveldb.DB, readonly bool) *ldbConn {
 	return &ldbConn{conn, readonly, make(map[string][]byte)}
@@ -49,7 +48,7 @@ func (c *ldbConn) Commit() error {
 
 	b := new(leveldb.Batch)
 	for key, value := range c.batch {
-		if key == "root" {
+		if key == leveldbTreeHeadKey {
 			continue
 		}
 		b.Put([]byte(key), value)
@@ -57,8 +56,8 @@ func (c *ldbConn) Commit() error {
 	if err := c.conn.Write(b, nil); err != nil {
 		return err
 	}
-	if value, ok := c.batch["root"]; ok {
-		if err := c.conn.Put([]byte("root"), value, nil); err != nil {
+	if value, ok := c.batch[leveldbTreeHeadKey]; ok {
+		if err := c.conn.Put([]byte(leveldbTreeHeadKey), value, nil); err != nil {
 			return err
 		}
 	}
@@ -88,35 +87,42 @@ func (ldb *ldbTransparencyStore) Clone() TransparencyStore {
 	return &ldbTransparencyStore{newLDBConn(ldb.conn.conn, true)}
 }
 
-func (ldb *ldbTransparencyStore) GetRoot() (*TransparencyTreeRoot, error) {
-	latest, err := ldb.conn.Get("root")
+func (ldb *ldbTransparencyStore) GetTreeHead() ([]byte, []byte, error) {
+	treeHead, err := ldb.conn.Get(leveldbTreeHeadKey)
 	if err == leveldb.ErrNotFound {
-		return &TransparencyTreeRoot{}, nil
+		return nil, nil, nil
 	} else if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := &TransparencyTreeRoot{}
-	if err := json.Unmarshal(latest, out); err != nil {
-		return nil, err
+	auditor, err := ldb.conn.Get("auditor-tree-head")
+	if err != leveldb.ErrNotFound && err != nil {
+		return nil, nil, err
 	}
-	return out, nil
+	return treeHead, auditor, nil
 }
 
-func (ldb *ldbTransparencyStore) SetRoot(root *TransparencyTreeRoot) error {
-	raw, err := json.Marshal(root)
-	if err != nil {
-		return err
-	}
-	ldb.conn.Put("root", raw)
+func (ldb *ldbTransparencyStore) SetTreeHead(raw []byte) error {
+	ldb.conn.Put(leveldbTreeHeadKey, raw)
+	return nil
+}
+
+func (ldb *ldbTransparencyStore) SetAuditorTreeHead(raw []byte) error {
+	ldb.conn.Put("auditor-tree-head", raw)
 	return nil
 }
 
 func (ldb *ldbTransparencyStore) GetLabelInfo(label []byte) ([]byte, error) {
-	return ldb.conn.Get("l" + fmt.Sprintf("%x", label))
+	raw, err := ldb.conn.Get("i" + fmt.Sprintf("%x", label))
+	if err == leveldb.ErrNotFound {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func (ldb *ldbTransparencyStore) SetLabelInfo(label, info []byte) error {
-	ldb.conn.Put("l"+fmt.Sprintf("%x", label), info)
+	ldb.conn.Put("i"+fmt.Sprintf("%x", label), info)
 	return nil
 }
 

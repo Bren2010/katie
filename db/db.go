@@ -14,13 +14,6 @@ type PrefixStore interface {
 	BatchPut(data map[string][]byte) error
 }
 
-// TransparencyTreeRoot represents the signed root of a transparency tree.
-type TransparencyTreeRoot struct {
-	TreeSize  uint64 `json:"n"`
-	Timestamp int64  `json:"ts"`
-	Signature []byte `json:"sig"`
-}
-
 // TransparencyStore is the interface a Transparency Log implementation uses to
 // communicate with its database.
 type TransparencyStore interface {
@@ -28,15 +21,11 @@ type TransparencyStore interface {
 	// suitable for distributing to child goroutines.
 	Clone() TransparencyStore
 
-	// GetRoot returns the most recent tree root, or the zero value of
-	// TransparencyTreeRoot if there hasn't been a signed root yet.
-	GetRoot() (*TransparencyTreeRoot, error)
-	// SetRoot sets the input value as the most recent tree root.
-	SetRoot(*TransparencyTreeRoot) error
+	GetTreeHead() (treeHead, auditor []byte, err error)
+	SetTreeHead(raw []byte) error
+	SetAuditorTreeHead(raw []byte) error
 
-	// GetLabelInfo gets stored information for a specific label.
 	GetLabelInfo(label []byte) ([]byte, error)
-	// SetLabelInfo updates the stored information for a specific label.
 	SetLabelInfo(label, info []byte) error
 
 	Get(key uint64) ([]byte, error)
@@ -45,5 +34,7 @@ type TransparencyStore interface {
 	LogStore() LogStore
 	PrefixStore() PrefixStore
 
+	// Commit writes all pending changes to the database and returns nil on
+	// success. The TransparencyStore should no longer be used after calling.
 	Commit() error
 }
