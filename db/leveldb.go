@@ -111,6 +111,15 @@ func (ldb *ldbTransparencyStore) SetRoot(root *TransparencyTreeRoot) error {
 	return nil
 }
 
+func (ldb *ldbTransparencyStore) GetLabelInfo(label []byte) ([]byte, error) {
+	return ldb.conn.Get("l" + fmt.Sprintf("%x", label))
+}
+
+func (ldb *ldbTransparencyStore) SetLabelInfo(label, info []byte) error {
+	ldb.conn.Put("l"+fmt.Sprintf("%x", label), info)
+	return nil
+}
+
 func (ldb *ldbTransparencyStore) Get(key uint64) ([]byte, error) {
 	return ldb.conn.Get("t" + fmt.Sprint(key))
 }

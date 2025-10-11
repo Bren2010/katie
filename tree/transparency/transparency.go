@@ -26,7 +26,3 @@ func NewTree(config structs.PrivateConfig, tx db.TransparencyStore) (*Tree, erro
 		latest: latest,
 	}, nil
 }
-
-func (t *Tree) FixedVersionSearch(label []byte, ver uint32) {
-
-}
