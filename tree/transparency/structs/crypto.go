@@ -3,6 +3,9 @@ package structs
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
+
+	"github.com/Bren2010/katie/crypto/suites"
 )
 
 type UpdatePrefix struct {
@@ -114,5 +117,45 @@ func (ll *LogLeaf) Marshal(buf *bytes.Buffer) error {
 	} else if _, err := buf.Write(ll.PrefixTree); err != nil {
 		return err
 	}
+	return nil
+}
+
+type BinaryLadderStep struct {
+	Proof      []byte
+	Commitment []byte
+}
+
+func NewBinaryLadderStep(cs suites.CipherSuite, buf *bytes.Buffer) (*BinaryLadderStep, error) {
+	proof := make([]byte, cs.VrfProofSize())
+	if _, err := io.ReadFull(buf, proof); err != nil {
+		return nil, err
+	}
+
+	var commitment []byte
+	if present, err := readOptional(buf); err != nil {
+		return nil, err
+	} else if present {
+		commitment = make([]byte, cs.HashSize())
+		if _, err := io.ReadFull(buf, commitment); err != nil {
+			return nil, err
+		}
+	}
+
+	return &BinaryLadderStep{proof, commitment}, nil
+}
+
+func (bls *BinaryLadderStep) Marshal(buf *bytes.Buffer) error {
+	if _, err := buf.Write(bls.Proof); err != nil {
+		return err
+	}
+
+	if err := writeOptional(buf, bls.Commitment != nil); err != nil {
+		return err
+	} else if bls.Commitment != nil {
+		if _, err := buf.Write(bls.Commitment); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

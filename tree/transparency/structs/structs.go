@@ -83,3 +83,20 @@ func writeU32Bytes(buf *bytes.Buffer, out []byte, name string) error {
 	}
 	return nil
 }
+
+func readOptional(buf *bytes.Buffer) (bool, error) {
+	present, err := buf.ReadByte()
+	if err != nil {
+		return false, err
+	} else if present != 0 && present != 1 {
+		return false, errors.New("read unexpected value in optional")
+	}
+	return present == 1, nil
+}
+
+func writeOptional(buf *bytes.Buffer, present bool) error {
+	if present {
+		return buf.WriteByte(1)
+	}
+	return buf.WriteByte(0)
+}

@@ -18,6 +18,7 @@ type CipherSuite interface {
 	HashSize() int
 	CommitmentOpeningSize() int
 	CommitmentFixedBytes() []byte
+	VrfProofSize() int
 
 	ParseSigningPrivateKey(raw []byte) (SigningPrivateKey, error)
 	ParseSigningPublicKey(raw []byte) (SigningPublicKey, error)
