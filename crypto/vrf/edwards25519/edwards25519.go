@@ -78,7 +78,7 @@ func generateChallenge(p1, p2, p3, p4, p5 *edwards25519.Point) []byte {
 }
 
 // proofToHash converts the VRF proof into the VRF output.
-func proofToHash(Gamma *edwards25519.Point) [32]byte {
+func proofToHash(Gamma *edwards25519.Point) []byte {
 	buf := &bytes.Buffer{}
 	buf.WriteByte(0x03) // Suite string
 	buf.WriteByte(0x03) // Front domain separator
@@ -87,9 +87,7 @@ func proofToHash(Gamma *edwards25519.Point) [32]byte {
 
 	h := sha512.Sum512(buf.Bytes())
 
-	out := [32]byte{}
-	copy(out[:], h[:32])
-	return out
+	return h[:32]
 }
 
 type PrivateKey struct {
@@ -119,7 +117,7 @@ func NewPrivateKey(raw []byte) (*PrivateKey, error) {
 	return &PrivateKey{scalar: scalar, point: point, upper: h[32:]}, nil
 }
 
-func (p *PrivateKey) Prove(m []byte) (index [32]byte, proof []byte) {
+func (p *PrivateKey) Prove(m []byte) (output, proof []byte) {
 	H := encodeToCurve(p.point.Bytes(), m)
 	hStr := H.Bytes()
 
@@ -142,7 +140,7 @@ func (p *PrivateKey) Prove(m []byte) (index [32]byte, proof []byte) {
 	copy(proof[32:48], c[:16])
 	copy(proof[48:], s.Bytes())
 
-	index = proofToHash(Gamma)
+	output = proofToHash(Gamma)
 
 	return
 }
@@ -171,10 +169,10 @@ func NewPublicKey(raw []byte) (*PublicKey, error) {
 	return &PublicKey{point: point}, nil
 }
 
-func (p *PublicKey) Verify(m, proof []byte) (index [32]byte, err error) {
+func (p *PublicKey) Verify(m, proof []byte) (output []byte, err error) {
 	// Decode proof.
 	if len(proof) != 32+16+32 {
-		return [32]byte{}, errors.New("vrf proof is invalid size")
+		return nil, errors.New("vrf proof is invalid size")
 	}
 
 	// Notes on point validation:
@@ -183,19 +181,19 @@ func (p *PublicKey) Verify(m, proof []byte) (index [32]byte, err error) {
 	// - The point may be in a small subgroup but this is permissible.
 	Gamma, err := new(edwards25519.Point).SetBytes(proof[:32])
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 
 	cBytes := make([]byte, 32)
 	copy(cBytes[:16], proof[32:48])
 	c, err := new(edwards25519.Scalar).SetCanonicalBytes(cBytes)
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 
 	s, err := new(edwards25519.Scalar).SetCanonicalBytes(proof[48:])
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 
 	// Verify proof.
@@ -212,7 +210,7 @@ func (p *PublicKey) Verify(m, proof []byte) (index [32]byte, err error) {
 
 	cPrime := generateChallenge(p.point, H, Gamma, U, V)
 	if !bytes.Equal(cBytes, cPrime) {
-		return [32]byte{}, errors.New("vrf proof verification failed")
+		return nil, errors.New("vrf proof verification failed")
 	}
 
 	return proofToHash(Gamma), nil

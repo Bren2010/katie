@@ -1,6 +1,7 @@
 package edwards25519
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"testing"
@@ -14,14 +15,14 @@ func TestCorrectness(t *testing.T) {
 	}
 	pub := priv.PublicKey()
 
-	index1, proof := priv.Prove([]byte("Hello, World!"))
-	t.Logf("%x", index1)
+	output1, proof := priv.Prove([]byte("Hello, World!"))
+	t.Logf("%x", output1)
 	t.Logf("%x", proof)
 
-	index2, err := pub.Verify([]byte("Hello, World!"), proof)
+	output2, err := pub.Verify([]byte("Hello, World!"), proof)
 	if err != nil {
 		t.Fatal(err)
-	} else if index1 != index2 {
+	} else if !bytes.Equal(output1, output2) {
 		t.Fatal("computed indices do not match")
 	}
 
@@ -81,16 +82,16 @@ func TestVectors(t *testing.T) {
 		if fmt.Sprintf("%x", pub.Bytes()) != vector.Pub {
 			t.Fatal("unexpected public key computed")
 		}
-		index1, proof := priv.Prove(hexDecode(vector.Message))
-		if fmt.Sprintf("%x", index1) != vector.Index {
+		output1, proof := priv.Prove(hexDecode(vector.Message))
+		if fmt.Sprintf("%x", output1) != vector.Index {
 			t.Fatal("unexpected index computed")
 		} else if fmt.Sprintf("%x", proof) != vector.Proof {
 			t.Fatal("unexpected proof computed")
 		}
-		index2, err := pub.Verify(hexDecode(vector.Message), proof)
+		output2, err := pub.Verify(hexDecode(vector.Message), proof)
 		if err != nil {
 			t.Fatal(err)
-		} else if fmt.Sprintf("%x", index2) != vector.Index {
+		} else if fmt.Sprintf("%x", output2) != vector.Index {
 			t.Fatal("unexpected index computed")
 		}
 	}

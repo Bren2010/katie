@@ -132,14 +132,15 @@ func generateChallenge(p1, p2, p3, p4, p5 *nistec.P256Point) []byte {
 }
 
 // proofToHash converts the VRF proof into the VRF output.
-func proofToHash(gamma []byte) [32]byte {
+func proofToHash(gamma []byte) []byte {
 	buf := &bytes.Buffer{}
 	buf.WriteByte(0x01) // Suite string
 	buf.WriteByte(0x03) // Front domain separator
 	buf.Write(gamma)
 	buf.WriteByte(0x00) // Back domain separator
 
-	return sha256.Sum256(buf.Bytes())
+	sum := sha256.Sum256(buf.Bytes())
+	return sum[:]
 }
 
 type PrivateKey struct {
@@ -179,7 +180,7 @@ func NewPrivateKey(raw []byte) (*PrivateKey, error) {
 	return &PrivateKey{scalar: scalar, point: point}, nil
 }
 
-func (p *PrivateKey) Prove(m []byte) (index [32]byte, proof []byte) {
+func (p *PrivateKey) Prove(m []byte) (output []byte, proof []byte) {
 	H := encodeToCurve(p.point.BytesCompressed(), m)
 	hStr := H.BytesCompressed()
 
@@ -211,7 +212,7 @@ func (p *PrivateKey) Prove(m []byte) (index [32]byte, proof []byte) {
 	copy(proof[33:49], c)
 	sInt.FillBytes(proof[49:])
 
-	index = proofToHash(proof[:33])
+	output = proofToHash(proof[:33])
 
 	return
 }
@@ -297,12 +298,12 @@ func (p *PublicKey) verify(m, proof []byte) error {
 	return nil
 }
 
-func (p *PublicKey) Verify(m, proof []byte) (index [32]byte, err error) {
+func (p *PublicKey) Verify(m, proof []byte) (output []byte, err error) {
 	err = p.verify(m, proof)
 	if err != nil {
 		return
 	}
-	index = proofToHash(proof[:33])
+	output = proofToHash(proof[:33])
 	return
 }
 
