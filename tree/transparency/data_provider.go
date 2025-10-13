@@ -202,7 +202,7 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	proof, err := dp.handle.Finish()
+	proof, err := dp.handle.Finish(n, nP, m)
 	if err != nil {
 		return nil, err
 	}
