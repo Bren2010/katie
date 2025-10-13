@@ -6,8 +6,6 @@ import (
 	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
-	"github.com/Bren2010/katie/tree/log"
-	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
@@ -137,7 +135,7 @@ func sortLogLeaf(a, b sortableLogLeaf) int {
 	return 0
 }
 
-func (dp *dataProvider) inspectedLeaves() ([]uint64, [][]byte, error) {
+func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	leaves := make([]sortableLogLeaf, 0)
 
 	// Put together initial list of leaves that were inspected by our proof and
@@ -164,7 +162,7 @@ func (dp *dataProvider) inspectedLeaves() ([]uint64, [][]byte, error) {
 	// In-fill missing prefix tree root values.
 	prefixTrees, err := dp.handle.GetPrefixTrees(empty)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for i, leaf := range leaves {
 		if leaf.PrefixTree == nil {
@@ -173,65 +171,68 @@ func (dp *dataProvider) inspectedLeaves() ([]uint64, [][]byte, error) {
 		}
 	}
 
-	// Convert leaves slice into slice of log entry positions and slice of log
-	// entry hashes.
-	positions := make([]uint64, len(leaves))
-	values := make([][]byte, len(leaves))
-
-	hasher := dp.cs.Hash()
-	for i, leaf := range leaves {
-		buf := &bytes.Buffer{}
-		if err := leaf.Marshal(buf); err != nil {
-			return nil, nil, err
-		} else if _, err := hasher.Write(buf.Bytes()); err != nil {
-			return nil, nil, err
-		}
-		positions[i] = leaf.position
-		values[i] = hasher.Sum(nil)
-		hasher.Reset()
-	}
-
-	return positions, values, nil
+	return leaves, nil
 }
 
-// Finish takes as input the current tree size `n`, an optional additional tree
-// size `nP`, and the optional previous tree size `m`. It returns the result of
-// the proof evaluation that was done.
-func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
-	entries, values, err := dp.inspectedLeaves()
-	if err != nil {
-		return nil, err
-	}
-	proof, err := dp.handle.Finish(n, nP, m)
-	if err != nil {
-		return nil, err
-	}
+// // Finish takes as input the current tree size `n`, an optional additional tree
+// // size `nP`, and the optional previous tree size `m`. It returns the result of
+// // the proof evaluation that was done.
+// func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
+// 	entries, values, err := dp.inspectedLeaves()
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	// Evaluate the inclusion proof to find the log's new frontier.
-	verifier := log.NewVerifier(dp.cs)
-	if m != nil {
-		if err := verifier.Retain(*m, dp.fullSubtrees); err != nil {
-			return nil, err
-		}
-	}
-	frontier, additional, err := verifier.Evaluate(entries, n, nP, values, proof)
-	if err != nil {
-		return nil, err
-	}
+// 	// Convert leaves slice into slice of log entry positions and slice of log
+// 	// entry hashes.
+// 	positions := make([]uint64, len(leaves))
+// 	values := make([][]byte, len(leaves))
 
-	// Build the set of log entries to retain.
-	logEntries := make(map[uint64]structs.LogEntry)
-	for _, x := range math.Frontier(n) {
-		ts, ok := dp.timestamps[x]
-		if !ok {
-			return nil, errors.New("expected timestamp not retained")
-		}
-		prefixTree, ok := dp.prefixTrees[x]
-		if !ok {
-			return nil, errors.New("expected prefix tree root not retained")
-		}
-		logEntries[x] = structs.LogEntry{Timestamp: ts, PrefixTree: prefixTree}
-	}
+// 	hasher := dp.cs.Hash()
+// 	for i, leaf := range leaves {
+// 		buf := &bytes.Buffer{}
+// 		if err := leaf.Marshal(buf); err != nil {
+// 			return nil, nil, err
+// 		} else if _, err := hasher.Write(buf.Bytes()); err != nil {
+// 			return nil, nil, err
+// 		}
+// 		positions[i] = leaf.position
+// 		values[i] = hasher.Sum(nil)
+// 		hasher.Reset()
+// 	}
 
-	return &proofResult{frontier, additional, logEntries}, nil
-}
+// 	return positions, values, nil
+
+// 	proof, err := dp.handle.Finish(n, nP, m)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	// Evaluate the inclusion proof to find the log's new frontier.
+// 	verifier := log.NewVerifier(dp.cs)
+// 	if m != nil {
+// 		if err := verifier.Retain(*m, dp.fullSubtrees); err != nil {
+// 			return nil, err
+// 		}
+// 	}
+// 	frontier, additional, err := verifier.Evaluate(entries, n, nP, values, proof)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	// Build the set of log entries to retain.
+// 	logEntries := make(map[uint64]structs.LogEntry)
+// 	for _, x := range math.Frontier(n) {
+// 		ts, ok := dp.timestamps[x]
+// 		if !ok {
+// 			return nil, errors.New("expected timestamp not retained")
+// 		}
+// 		prefixTree, ok := dp.prefixTrees[x]
+// 		if !ok {
+// 			return nil, errors.New("expected prefix tree root not retained")
+// 		}
+// 		logEntries[x] = structs.LogEntry{Timestamp: ts, PrefixTree: prefixTree}
+// 	}
+
+// 	return &proofResult{frontier, additional, logEntries}, nil
+// }

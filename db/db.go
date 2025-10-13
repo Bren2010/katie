@@ -3,7 +3,7 @@ package db
 
 // LogStore is the interface a Log Tree uses to communicate with its database.
 type LogStore interface {
-	BatchGet(keys []uint64) (data map[uint64][]byte, err error)
+	BatchGet(keys []uint64) (map[uint64][]byte, error)
 	BatchPut(data map[uint64][]byte) error
 }
 
@@ -25,10 +25,13 @@ type TransparencyStore interface {
 	SetTreeHead(raw []byte) error
 	SetAuditorTreeHead(raw []byte) error
 
-	GetLabelInfo(label []byte) ([]byte, error)
-	SetLabelInfo(label, info []byte) error
+	GetLabelIndex(label []byte) ([]byte, error)
+	SetLabelIndex(label, index []byte) error
 
-	Get(key uint64) ([]byte, error)
+	GetLabelValue(label []byte, ver uint32) ([]byte, error)
+	SetLabelValue(label []byte, ver uint32, data []byte) error
+
+	BatchGet(keys []uint64) (map[uint64][]byte, error)
 	Put(key uint64, data []byte) error
 
 	LogStore() LogStore

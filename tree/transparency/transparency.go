@@ -71,61 +71,105 @@ func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, 
 	return
 }
 
+func (t *Tree) updateView(last *uint64, provider *dataProvider) error {
+	if last == nil {
+		return updateView(0, t.treeHead.TreeSize, provider)
+	}
+
+	// Load frontier log entries.
+	results, err := t.tx.BatchGet(math.Frontier(*last))
+	if err != nil {
+		return err
+	}
+	frontier := make(map[uint64]structs.LogEntry)
+	for pos, raw := range results { // TODO: Iterate frontier instead.
+		entry, err := structs.NewLogEntry(t.config.Suite, bytes.NewBuffer(raw))
+		if err != nil {
+			return err
+		}
+		frontier[pos] = *entry
+	}
+	provider.AddRetained(nil, frontier)
+
+	// Evaluate algorithm to update user's view.
+	return updateView(*last, t.treeHead.TreeSize, provider)
+}
+
 func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, error) {
+	index, err := t.getLabelIndex(req.Label)
+	if err != nil {
+		return nil, err
+	}
+	greatest := uint32(len(index))
+	if greatest > 0 {
+		greatest--
+	}
+
+	// Determine which versions we will need VRF outputs for, and also load the
+	// target version of the label.
+	var (
+		ladder     []uint32
+		labelValue *structs.LabelValue
+	)
+	if req.Version == nil {
+		ladder = math.SearchBinaryLadder(greatest, greatest, nil, nil)
+		labelValue, err = t.getLabelValue(req.Label, greatest)
+	} else {
+		ladder = math.SearchBinaryLadder(*req.Version, *req.Version, nil, nil)
+		labelValue, err = t.getLabelValue(req.Label, *req.Version)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute VRF outputs and proofs for ladder.
+	vrfOutputs := make(map[uint32][]byte)
+	steps := make([]structs.BinaryLadderStep, 0, len(ladder))
+	for _, ver := range ladder {
+		vrfOutput, proof, err := t.computeVrfOutput(req.Label, ver)
+		if err != nil {
+			return nil, err
+		}
+		vrfOutputs[ver] = vrfOutput
+		steps = append(steps, structs.BinaryLadderStep{Proof: proof})
+	}
+
+	// // Execute algorithms to update the user's view of the tree, and either a
+	// // greatest-version or fixed-version search.
+	// handle := newProducedProofHandler(t.config.Suite, t.tx, labelInfo)
+	// provider := newDataProvider(t.config.Suite, handle)
+
+	// if err := t.updateView(req.Last, provider); err != nil {
+	// 	return nil, err
+	// }
+	// if req.Version == nil {
+	// 	_, _, err = greatestVersionSearch(t.config.Public(), greatest, t.treeHead.TreeSize, provider)
+	// } else {
+	// 	_, _, err = fixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
+	// }
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// // ------------------------------------
+
+	// Put together final SearchResponse structure.
 	fth, n, nP, m, err := t.fullTreeHead(req.Last)
 	if err != nil {
 		return nil, err
 	}
-	info, err := getLabelInfo(t.tx, req.Label)
-	if err != nil {
-		return nil, err
-	}
-	handle := newProducedProofHandler(t.config.Suite, t.tx, n, nP, m, info)
-
-	// Determine which versions we will need VRF outputs for and compute them.
-	var ladder []uint32
+	var outputVer *uint32
 	if req.Version == nil {
-		greatestVer := uint32(len(info))
-		ladder = math.SearchBinaryLadder(greatestVer, greatestVer, nil, nil)
-	} else {
-		ladder = math.SearchBinaryLadder(*req.Version, *req.Version, nil, nil)
+		outputVer = &greatest
 	}
-	steps := make([]structs.BinaryLadderStep, 0, len(ladder))
-	for _, ver := range ladder {
-		vrfOutput, proof := computeVrfOutput(t.config, req.Label, ver)
-		handle.AddVersion(ver, vrfOutput, nil)
-		steps = append(steps, structs.BinaryLadderStep{Proof: proof})
-	}
+	return &structs.SearchResponse{
+		FullTreeHead: *fth,
 
-	// // Build the list of log entries to fetch. These are the log entries
-	// // required to update the user's view of the log, followed by whichever log
-	// // entries (may) be needed for a fixed-version or greatest-version search.
-	// var m uint64
-	// if req.Last != nil {
-	// 	m = *req.Last
-	// }
-	// dedup := make(map[uint64]struct{})
-	// for _, pos := range math.UpdateView(m, t.treeHead.TreeSize) {
-	// 	dedup[pos] = struct{}{}
-	// }
-	// if req.Version == nil {
-	// 	for _, pos := range math.Frontier(t.treeHead.TreeSize) {
-	// 		dedup[pos] = struct{}{}
-	// 	}
-	// } else {
-	// 	var pos uint64
-	// 	if int(*req.Version) < len(info) {
-	// 		pos = info[*req.Version]
-	// 	} else if int(*req.Version) > len(info) {
-	// 		pos = t.treeHead.TreeSize - 1
-	// 	}
-	// 	for _, pos := range math.SearchPath(pos, t.treeHead.TreeSize) {
-	// 		dedup[pos] = struct{}{}
-	// 	}
-	// }
+		Version: outputVer,
+		Opening: labelValue.Opening,
+		Value:   labelValue.Value,
 
-	// fth, err := t.fullTreeHead(req.Last)
-	// if err != nil {
-	// 	return nil, err
-	// }
+		BinaryLadder: steps,
+		Search:       combinedProof,
+	}, nil
 }

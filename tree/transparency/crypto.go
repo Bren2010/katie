@@ -6,21 +6,19 @@ import (
 	"errors"
 	"io"
 
-	"github.com/Bren2010/katie/crypto/vrf"
-	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
-func getLabelInfo(tx db.TransparencyStore, label []byte) ([]uint64, error) {
-	raw, err := tx.GetLabelInfo(label)
+func (t *Tree) getLabelIndex(label []byte) ([]uint64, error) {
+	raw, err := t.tx.GetLabelIndex(label)
 	if err != nil {
 		return nil, err
 	}
 	buf := bytes.NewBuffer(raw)
 
-	info := make([]uint64, 0)
+	index := make([]uint64, 0)
 	for {
 		pos, err := binary.ReadUvarint(buf)
 		if err == io.EOF {
@@ -28,40 +26,51 @@ func getLabelInfo(tx db.TransparencyStore, label []byte) ([]uint64, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		info = append(info, pos)
+		index = append(index, pos)
 	}
 
-	for i := 1; i < len(info); i++ {
-		info[i] += info[i-1]
+	for i := 1; i < len(index); i++ {
+		index[i] += index[i-1]
 	}
-	return info, nil
+	return index, nil
 }
 
-func setLabelInfo(tx db.TransparencyStore, label []byte, info []uint64) error {
-	for i := len(info) - 1; i > 0; i-- {
-		if info[i] < info[i-1] {
+func (t *Tree) setLabelIndex(label []byte, index []uint64) error {
+	for i := len(index) - 1; i > 0; i-- {
+		if index[i] < index[i-1] {
 			return errors.New("list of label-version positions is not monotonic")
 		}
-		info[i] -= info[i-1]
+		index[i] -= index[i-1]
 	}
 
 	buf := &bytes.Buffer{}
-	for _, pos := range info {
+	for _, pos := range index {
 		temp := make([]byte, binary.MaxVarintLen64)
 		n := binary.PutUvarint(temp, pos)
 		buf.Write(temp[:n])
 	}
 
-	return tx.SetLabelInfo(label, buf.Bytes())
+	return t.tx.SetLabelIndex(label, buf.Bytes())
 }
 
-func computeVrfOutput(priv vrf.PrivateKey, label []byte, ver uint32) (vrfOutput, proof []byte, err error) {
+func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, error) {
+	raw, err := t.tx.GetLabelValue(label, ver)
+	if err != nil {
+		return nil, err
+	} else if raw == nil {
+		size := t.config.Suite.CommitmentOpeningSize()
+		return &structs.LabelValue{Opening: make([]byte, size)}, nil
+	}
+	return structs.NewLabelValue(t.config.Public(), bytes.NewBuffer(raw))
+}
+
+func (t *Tree) computeVrfOutput(label []byte, ver uint32) (vrfOutput, proof []byte, err error) {
 	input := structs.VrfInput{Label: label, Version: ver}
 	buf := &bytes.Buffer{}
 	if err := input.Marshal(buf); err != nil {
 		return nil, nil, err
 	}
-	vrfOutput, proof = priv.Prove(buf.Bytes())
+	vrfOutput, proof = t.config.VrfKey.Prove(buf.Bytes())
 	return
 }
 

@@ -111,7 +111,7 @@ func (ldb *ldbTransparencyStore) SetAuditorTreeHead(raw []byte) error {
 	return nil
 }
 
-func (ldb *ldbTransparencyStore) GetLabelInfo(label []byte) ([]byte, error) {
+func (ldb *ldbTransparencyStore) GetLabelIndex(label []byte) ([]byte, error) {
 	raw, err := ldb.conn.Get("i" + fmt.Sprintf("%x", label))
 	if err == leveldb.ErrNotFound {
 		return nil, nil
@@ -121,13 +121,40 @@ func (ldb *ldbTransparencyStore) GetLabelInfo(label []byte) ([]byte, error) {
 	return raw, nil
 }
 
-func (ldb *ldbTransparencyStore) SetLabelInfo(label, info []byte) error {
-	ldb.conn.Put("i"+fmt.Sprintf("%x", label), info)
+func (ldb *ldbTransparencyStore) SetLabelIndex(label, index []byte) error {
+	ldb.conn.Put("i"+fmt.Sprintf("%x", label), index)
 	return nil
 }
 
-func (ldb *ldbTransparencyStore) Get(key uint64) ([]byte, error) {
-	return ldb.conn.Get("t" + fmt.Sprint(key))
+func (ldb *ldbTransparencyStore) GetLabelValue(label []byte, ver uint32) ([]byte, error) {
+	raw, err := ldb.conn.Get("v" + fmt.Sprintf("%x:%x", label, ver))
+	if err == leveldb.ErrNotFound {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (ldb *ldbTransparencyStore) SetLabelValue(label []byte, ver uint32, data []byte) error {
+	ldb.conn.Put("v"+fmt.Sprintf("%x:%x", label, ver), data)
+	return nil
+}
+
+func (ldb *ldbTransparencyStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
+	out := make(map[uint64][]byte)
+
+	for _, key := range keys {
+		value, err := ldb.conn.Get("t" + fmt.Sprint(key))
+		if err == leveldb.ErrNotFound {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out[key] = value
+	}
+
+	return out, nil
 }
 
 func (ldb *ldbTransparencyStore) Put(key uint64, data []byte) error {

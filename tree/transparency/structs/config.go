@@ -48,8 +48,8 @@ type PrivateConfig struct {
 	Config
 }
 
-func (pc *PrivateConfig) Public() PublicConfig {
-	return PublicConfig{
+func (pc *PrivateConfig) Public() *PublicConfig {
+	return &PublicConfig{
 		SignatureKey: pc.SignatureKey.Public(),
 		VrfKey:       pc.VrfKey.PublicKey(),
 		Config:       pc.Config,

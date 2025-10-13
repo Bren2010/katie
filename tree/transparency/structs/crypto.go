@@ -171,3 +171,29 @@ func (bls *BinaryLadderStep) Marshal(buf *bytes.Buffer) error {
 
 	return nil
 }
+
+type LabelValue struct {
+	Opening []byte
+	Value   UpdateValue
+}
+
+func NewLabelValue(config *PublicConfig, buf *bytes.Buffer) (*LabelValue, error) {
+	opening := make([]byte, config.Suite.CommitmentOpeningSize())
+	if _, err := io.ReadFull(buf, opening); err != nil {
+		return nil, err
+	}
+	value, err := NewUpdateValue(config, buf)
+	if err != nil {
+		return nil, err
+	}
+	return &LabelValue{Opening: opening, Value: *value}, nil
+}
+
+func (lv *LabelValue) Marshal(buf *bytes.Buffer) error {
+	if _, err := buf.Write(lv.Opening); err != nil {
+		return err
+	} else if err := lv.Value.Marshal(buf); err != nil {
+		return err
+	}
+	return nil
+}

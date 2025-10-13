@@ -13,21 +13,14 @@ var (
 )
 
 // updateView runs the algorithm from Section 4.2. The previous size of the tree
-// is `m`, the current size of the tree is `n`, and the rightmost timestamp of
-// the previous view of the tree is `mTimestamp` (or 0 if none). It returns the
-// new rightmost timestamp.
-func updateView(m, n, mTimestamp uint64, provider *dataProvider) (uint64, error) {
-	prev := mTimestamp
-
+// is `m`, the current size of the tree is `n`.
+func updateView(m, n uint64, provider *dataProvider) error {
 	for _, x := range math.UpdateView(m, n) {
-		timestamp, err := provider.GetTimestamp(x)
-		if err != nil {
-			return 0, err
+		if _, err := provider.GetTimestamp(x); err != nil {
+			return err
 		}
-		prev = timestamp
 	}
-
-	return prev, nil
+	return nil
 }
 
 // fixedVersionSearch runs the algorithm from Section 6.3. The public config for
