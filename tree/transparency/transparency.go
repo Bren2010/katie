@@ -77,19 +77,24 @@ func (t *Tree) updateView(last *uint64, provider *dataProvider) error {
 	}
 
 	// Load frontier log entries.
-	results, err := t.tx.BatchGet(math.Frontier(*last))
+	frontier := math.Frontier(*last)
+	results, err := t.tx.BatchGet(frontier)
 	if err != nil {
 		return err
 	}
-	frontier := make(map[uint64]structs.LogEntry)
-	for pos, raw := range results { // TODO: Iterate frontier instead.
+	logEntries := make(map[uint64]structs.LogEntry)
+	for _, pos := range frontier {
+		raw, ok := results[pos]
+		if !ok {
+			return errors.New("expected frontier log entry not found")
+		}
 		entry, err := structs.NewLogEntry(t.config.Suite, bytes.NewBuffer(raw))
 		if err != nil {
 			return err
 		}
-		frontier[pos] = *entry
+		logEntries[pos] = *entry
 	}
-	provider.AddRetained(nil, frontier)
+	provider.AddRetained(nil, logEntries)
 
 	// Evaluate algorithm to update user's view.
 	return updateView(*last, t.treeHead.TreeSize, provider)
@@ -134,10 +139,10 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 		steps = append(steps, structs.BinaryLadderStep{Proof: proof})
 	}
 
-	// // Execute algorithms to update the user's view of the tree, and either a
-	// // greatest-version or fixed-version search.
-	// handle := newProducedProofHandler(t.config.Suite, t.tx, labelInfo)
-	// provider := newDataProvider(t.config.Suite, handle)
+	// Execute algorithms to update the user's view of the tree, and either a
+	// greatest-version or fixed-version search.
+	handle := newProducedProofHandler(t.config.Suite, t.tx, index)
+	provider := newDataProvider(t.config.Suite, handle)
 
 	// if err := t.updateView(req.Last, provider); err != nil {
 	// 	return nil, err
@@ -152,6 +157,9 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 	// }
 
 	// // ------------------------------------
+
+	// TODO: Populate binary ladder step commitments
+	// TODO: Compute combined tree proof.
 
 	// Put together final SearchResponse structure.
 	fth, n, nP, m, err := t.fullTreeHead(req.Last)

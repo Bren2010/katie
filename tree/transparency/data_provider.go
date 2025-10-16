@@ -6,8 +6,24 @@ import (
 	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
+	"github.com/Bren2010/katie/tree/log"
+	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
+
+type sortableLogLeaf struct {
+	position uint64
+	structs.LogEntry
+}
+
+func sortLogLeaf(a, b sortableLogLeaf) int {
+	if a.position < b.position {
+		return -1
+	} else if a.position > b.position {
+		return 1
+	}
+	return 0
+}
 
 func addTimestamp(collection map[uint64]uint64, pos1, ts1 uint64) error {
 	for pos2, ts2 := range collection {
@@ -31,6 +47,9 @@ func addPrefixTree(collection map[uint64][]byte, pos uint64, root []byte) error 
 	return nil
 }
 
+// dataProvider is given as an input to several of the algorithm
+// implementations. It handles the deduplication aspect of extracting
+// information from a CombinedTreeProof.
 type dataProvider struct {
 	cs     suites.CipherSuite
 	handle proofHandle
@@ -115,26 +134,6 @@ func (dp *dataProvider) GetInclusionProof(x uint64, ver uint32) error {
 	return addPrefixTree(dp.prefixTrees, x, root)
 }
 
-type proofResult struct {
-	frontier   [][]byte                    // The frontier for the user to retain.
-	additional [][]byte                    // The additional frontier, if requested.
-	logEntries map[uint64]structs.LogEntry // Log entries for the user to retain.
-}
-
-type sortableLogLeaf struct {
-	position uint64
-	structs.LogEntry
-}
-
-func sortLogLeaf(a, b sortableLogLeaf) int {
-	if a.position < b.position {
-		return -1
-	} else if a.position > b.position {
-		return 1
-	}
-	return 0
-}
-
 func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	leaves := make([]sortableLogLeaf, 0)
 
@@ -174,65 +173,76 @@ func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	return leaves, nil
 }
 
-// // Finish takes as input the current tree size `n`, an optional additional tree
-// // size `nP`, and the optional previous tree size `m`. It returns the result of
-// // the proof evaluation that was done.
-// func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
-// 	entries, values, err := dp.inspectedLeaves()
-// 	if err != nil {
-// 		return nil, err
-// 	}
+// DryFinish ensures that handle.GetPrefixTrees is called with the correct
+// arguments, but doesn't actually do any of the work to determine the final
+// proof result.
+func (dp *dataProvider) DryFinish() error {
+	_, err := dp.inspectedLeaves()
+	return err
+}
 
-// 	// Convert leaves slice into slice of log entry positions and slice of log
-// 	// entry hashes.
-// 	positions := make([]uint64, len(leaves))
-// 	values := make([][]byte, len(leaves))
+type proofResult struct {
+	frontier   [][]byte                    // The frontier for the user to retain.
+	additional [][]byte                    // The additional frontier, if requested.
+	logEntries map[uint64]structs.LogEntry // Log entries for the user to retain.
+}
 
-// 	hasher := dp.cs.Hash()
-// 	for i, leaf := range leaves {
-// 		buf := &bytes.Buffer{}
-// 		if err := leaf.Marshal(buf); err != nil {
-// 			return nil, nil, err
-// 		} else if _, err := hasher.Write(buf.Bytes()); err != nil {
-// 			return nil, nil, err
-// 		}
-// 		positions[i] = leaf.position
-// 		values[i] = hasher.Sum(nil)
-// 		hasher.Reset()
-// 	}
+// Finish takes as input the current tree size `n`, an optional additional tree
+// size `nP`, and the optional previous tree size `m`. It returns the result of
+// the proof evaluation that was done.
+func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
+	leaves, err := dp.inspectedLeaves()
+	if err != nil {
+		return nil, err
+	}
 
-// 	return positions, values, nil
+	// Convert leaves slice into a slice of log entry positions and a slice of
+	// log entry hashes.
+	positions := make([]uint64, len(leaves))
+	values := make([][]byte, len(leaves))
 
-// 	proof, err := dp.handle.Finish(n, nP, m)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	hasher := dp.cs.Hash()
+	for i, leaf := range leaves {
+		buf := &bytes.Buffer{}
+		if err := leaf.Marshal(buf); err != nil {
+			return nil, err
+		} else if _, err := hasher.Write(buf.Bytes()); err != nil {
+			return nil, err
+		}
+		positions[i] = leaf.position
+		values[i] = hasher.Sum(nil)
+		hasher.Reset()
+	}
 
-// 	// Evaluate the inclusion proof to find the log's new frontier.
-// 	verifier := log.NewVerifier(dp.cs)
-// 	if m != nil {
-// 		if err := verifier.Retain(*m, dp.fullSubtrees); err != nil {
-// 			return nil, err
-// 		}
-// 	}
-// 	frontier, additional, err := verifier.Evaluate(entries, n, nP, values, proof)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	// Evaluate the inclusion proof to find the log's new frontier.
+	proof, err := dp.handle.Finish()
+	if err != nil {
+		return nil, err
+	}
+	verifier := log.NewVerifier(dp.cs)
+	if m != nil {
+		if err := verifier.Retain(*m, dp.fullSubtrees); err != nil {
+			return nil, err
+		}
+	}
+	frontier, additional, err := verifier.Evaluate(positions, n, nP, values, proof)
+	if err != nil {
+		return nil, err
+	}
 
-// 	// Build the set of log entries to retain.
-// 	logEntries := make(map[uint64]structs.LogEntry)
-// 	for _, x := range math.Frontier(n) {
-// 		ts, ok := dp.timestamps[x]
-// 		if !ok {
-// 			return nil, errors.New("expected timestamp not retained")
-// 		}
-// 		prefixTree, ok := dp.prefixTrees[x]
-// 		if !ok {
-// 			return nil, errors.New("expected prefix tree root not retained")
-// 		}
-// 		logEntries[x] = structs.LogEntry{Timestamp: ts, PrefixTree: prefixTree}
-// 	}
+	// Build the set of log entries to retain.
+	logEntries := make(map[uint64]structs.LogEntry)
+	for _, x := range math.Frontier(n) {
+		ts, ok := dp.timestamps[x]
+		if !ok {
+			return nil, errors.New("expected timestamp not retained")
+		}
+		prefixTree, ok := dp.prefixTrees[x]
+		if !ok {
+			return nil, errors.New("expected prefix tree root not retained")
+		}
+		logEntries[x] = structs.LogEntry{Timestamp: ts, PrefixTree: prefixTree}
+	}
 
-// 	return &proofResult{frontier, additional, logEntries}, nil
-// }
+	return &proofResult{frontier, additional, logEntries}, nil
+}

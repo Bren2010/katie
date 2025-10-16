@@ -7,7 +7,6 @@ import (
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
-	"github.com/Bren2010/katie/tree/log"
 	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -42,7 +41,7 @@ type proofHandle interface {
 
 	// Finish verifies that the proof is done being consumed and returns and
 	// inclusion proof in the log tree for the inspected leaves.
-	Finish(n uint64, nP, m *uint64) ([][]byte, error)
+	Finish() ([][]byte, error)
 }
 
 // receivedProofHandler implements the proofHandle interface over a
@@ -86,12 +85,11 @@ func (rph *receivedProofHandler) GetTimestamp(x uint64) (uint64, error) {
 }
 
 func (rph *receivedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
-	// Pop next PrefixProof to consume off of queue.
+	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, 0, errors.New("unexpected number of prefix proofs consumed")
 	}
 	proof := rph.inner.PrefixProofs[0]
-	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
 
 	// Interpret the binary ladder provided in `proof` to determine which
 	// direction our search should go after processing it.
@@ -101,7 +99,6 @@ func (rph *receivedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omi
 	if err != nil {
 		return nil, 0, err
 	}
-	rph.tracker.AddResults(x, omit, ladder, proof.Results)
 
 	// Put together the prefix.Entry structures we'll need for proof evaluation.
 	entries := make([]prefix.Entry, len(proof.Results))
@@ -120,16 +117,18 @@ func (rph *receivedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omi
 	if err != nil {
 		return nil, 0, err
 	}
+
+	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
+	rph.tracker.AddResults(x, omit, ladder, proof.Results)
 	return root, res, nil
 }
 
 func (rph *receivedProofHandler) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
-	// Pop next PrefixProof to consume off of queue.
+	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, errors.New("unexpected number of prefix proofs consumed")
 	}
 	proof := rph.inner.PrefixProofs[0]
-	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
 
 	// Verify that proof matches what we'd expect of a proper monitoring binary
 	// ladder (correct number of entries, all showing inclusion).
@@ -154,17 +153,21 @@ func (rph *receivedProofHandler) GetMonitoringBinaryLadder(x uint64, ver uint32)
 		}
 		entries[i] = entry
 	}
+	root, err := prefix.Evaluate(rph.cs, entries, &proof)
+	if err != nil {
+		return nil, err
+	}
 
-	return prefix.Evaluate(rph.cs, entries, &proof)
+	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
+	return root, nil
 }
 
 func (rph *receivedProofHandler) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
-	// Pop next PrefixProof to consume off of queue.
+	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, errors.New("unexpected number of prefix proofs consumed")
 	}
 	proof := rph.inner.PrefixProofs[0]
-	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
 
 	// Verify that proof shows inclusion for a single version.
 	if len(proof.Results) != 1 {
@@ -180,9 +183,13 @@ func (rph *receivedProofHandler) GetInclusionProof(x uint64, ver uint32) ([]byte
 	} else if entry.Commitment == nil {
 		return nil, errors.New("commitment not known for required version")
 	}
-	entries := []prefix.Entry{entry}
+	root, err := prefix.Evaluate(rph.cs, []prefix.Entry{entry}, &proof)
+	if err != nil {
+		return nil, err
+	}
 
-	return prefix.Evaluate(rph.cs, entries, &proof)
+	rph.inner.PrefixProofs = rph.inner.PrefixProofs[1:]
+	return root, nil
 }
 
 func (rph *receivedProofHandler) GetPrefixTrees(xs []uint64) ([][]byte, error) {
@@ -194,7 +201,7 @@ func (rph *receivedProofHandler) GetPrefixTrees(xs []uint64) ([][]byte, error) {
 	return roots, nil
 }
 
-func (rph *receivedProofHandler) Finish(n uint64, nP, m *uint64) ([][]byte, error) {
+func (rph *receivedProofHandler) Finish() ([][]byte, error) {
 	if len(rph.inner.Timestamps) != 0 {
 		return nil, errors.New("unexpected additional timestamps found")
 	} else if len(rph.inner.PrefixProofs) != 0 {
@@ -213,15 +220,14 @@ type requiredProof struct {
 // producedProofHandler implements the proofHandle interface such that it can
 // output the corresponding CombinedTreeProof.
 type producedProofHandler struct {
-	cs        suites.CipherSuite
-	tx        db.TransparencyStore
-	labelInfo []uint64
+	cs    suites.CipherSuite
+	tx    db.TransparencyStore
+	index []uint64
 
 	timestamps  []uint64
 	prefixTrees map[uint64][]byte
 	proofs      []requiredProof
 	roots       [][]byte
-	inclusion   [][]byte
 
 	tracker versionTracker
 }
@@ -229,21 +235,25 @@ type producedProofHandler struct {
 func newProducedProofHandler(
 	cs suites.CipherSuite,
 	tx db.TransparencyStore,
-	labelInfo []uint64,
+	index []uint64,
 ) *producedProofHandler {
 	return &producedProofHandler{
-		cs:        cs,
-		tx:        tx,
-		labelInfo: labelInfo,
+		cs:    cs,
+		tx:    tx,
+		index: index,
 
 		prefixTrees: make(map[uint64][]byte),
 	}
 }
 
 func (pph *producedProofHandler) GetTimestamp(x uint64) (uint64, error) {
-	raw, err := pph.tx.Get(x)
+	res, err := pph.tx.BatchGet([]uint64{x})
 	if err != nil {
 		return 0, err
+	}
+	raw, ok := res[x]
+	if !ok {
+		return 0, errors.New("requested log entry not found")
 	}
 	entry, err := structs.NewLogEntry(pph.cs, bytes.NewBuffer(raw))
 	if err != nil {
@@ -252,13 +262,12 @@ func (pph *producedProofHandler) GetTimestamp(x uint64) (uint64, error) {
 
 	pph.timestamps = append(pph.timestamps, entry.Timestamp)
 	pph.prefixTrees[x] = entry.PrefixTree
-
 	return entry.Timestamp, nil
 }
 
 func (pph *producedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
 	// Determine the greatest version of the label that exists at this point.
-	greatest, found := slices.BinarySearch(pph.labelInfo, x)
+	greatest, found := slices.BinarySearch(pph.index, x)
 	if !found {
 		greatest--
 	}
@@ -271,66 +280,56 @@ func (pph *producedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omi
 		leftInclusion, rightNonInclusion := pph.tracker.SearchMaps(x, omit)
 		ladder = math.SearchBinaryLadder(ver, uint32(greatest), leftInclusion, rightNonInclusion)
 	}
-	pph.tracker.AddLadder(x, omit, greatest, ladder)
-	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: ladder})
 
-	// Return prefix tree root and the result of the search.
+	// Determine the prefix tree root and the result of the search.
 	prefixTree, ok := pph.prefixTrees[x]
 	if !ok {
 		return nil, 0, errors.New("prefix tree root not known for required version")
 	}
-	var res int
+	res := 0
 	if greatest < int(ver) {
 		res = -1
 	} else if greatest > int(ver) {
 		res = 1
 	}
+
+	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: ladder})
+	pph.tracker.AddLadder(x, omit, greatest, ladder)
 	return prefixTree, res, nil
 }
 
 func (pph *producedProofHandler) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
-	ladder := math.MonitoringBinaryLadder(ver, pph.tracker.MonitoringMap(x))
-	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: ladder})
-
 	prefixTree, ok := pph.prefixTrees[x]
 	if !ok {
 		return nil, errors.New("prefix tree root not known for required version")
 	}
+	ladder := math.MonitoringBinaryLadder(ver, pph.tracker.MonitoringMap(x))
+	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: ladder})
 	return prefixTree, nil
 }
 
 func (pph *producedProofHandler) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
-	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: []uint32{ver}})
-
 	prefixTree, ok := pph.prefixTrees[x]
 	if !ok {
 		return nil, errors.New("prefix tree root not known for required version")
 	}
+	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: []uint32{ver}})
 	return prefixTree, nil
 }
 
 func (pph *producedProofHandler) GetPrefixTrees(xs []uint64) ([][]byte, error) {
-	out := make([][]byte, 0)
-	for _, x := range xs {
+	roots := make([][]byte, len(xs))
+	for i, x := range xs {
 		prefixTree, ok := pph.prefixTrees[x]
 		if !ok {
 			return nil, errors.New("unexpected prefix tree requested")
 		}
-		out = append(out, prefixTree)
+		roots[i] = prefixTree
 	}
-	pph.roots = out
-	return out, nil
+	pph.roots = roots
+	return roots, nil
 }
 
-func (pph *producedProofHandler) Finish(n uint64, nP, m *uint64) ([][]byte, error) {
-	leaves := make([]uint64, 0, len(pph.prefixTrees))
-	for x, _ := range pph.prefixTrees {
-		leaves = append(leaves, x)
-	}
-	inclusion, err := log.NewTree(pph.cs, pph.tx.LogStore()).GetBatch(leaves, n, nP, m)
-	if err != nil {
-		return nil, err
-	}
-	pph.inclusion = inclusion
-	return inclusion, nil
+func (pph *producedProofHandler) Finish() ([][]byte, error) {
+	panic("unreachable")
 }

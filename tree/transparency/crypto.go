@@ -11,6 +11,11 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
+// getLabelIndex returns the index (the list of log entries where each new
+// version was added) of a given label.
+//
+// The index is stored as an encoded series of uvarints. For compression, only
+// the difference between each subsequent entry is stored.
 func (t *Tree) getLabelIndex(label []byte) ([]uint64, error) {
 	raw, err := t.tx.GetLabelIndex(label)
 	if err != nil {
@@ -35,6 +40,7 @@ func (t *Tree) getLabelIndex(label []byte) ([]uint64, error) {
 	return index, nil
 }
 
+// setLabelIndex updates the stored index of the label.
 func (t *Tree) setLabelIndex(label []byte, index []uint64) error {
 	for i := len(index) - 1; i > 0; i-- {
 		if index[i] < index[i-1] {
@@ -53,6 +59,8 @@ func (t *Tree) setLabelIndex(label []byte, index []uint64) error {
 	return t.tx.SetLabelIndex(label, buf.Bytes())
 }
 
+// getLabelValue returns the commitment opening and the value of the requested
+// label-version pair.
 func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, error) {
 	raw, err := t.tx.GetLabelValue(label, ver)
 	if err != nil {
@@ -64,6 +72,8 @@ func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, err
 	return structs.NewLabelValue(t.config.Public(), bytes.NewBuffer(raw))
 }
 
+// computeVrfOutput returns the VRF output for the requested label-version pair
+// and the proof that the output is correct.
 func (t *Tree) computeVrfOutput(label []byte, ver uint32) (vrfOutput, proof []byte, err error) {
 	input := structs.VrfInput{Label: label, Version: ver}
 	buf := &bytes.Buffer{}
@@ -89,7 +99,6 @@ func (vt *versionTracker) AddResults(x uint64, omit bool, ladder []uint32, resul
 	}
 
 	var inclusion, nonInclusion []uint32
-
 	for i, res := range results {
 		if res.Inclusion() {
 			inclusion = append(inclusion, ladder[i])
@@ -97,7 +106,6 @@ func (vt *versionTracker) AddResults(x uint64, omit bool, ladder []uint32, resul
 			nonInclusion = append(nonInclusion, ladder[i])
 		}
 	}
-
 	vt.inclusion = append(vt.inclusion, posAndVersions{pos: x, vers: inclusion})
 	vt.nonInclusion = append(vt.nonInclusion, posAndVersions{pos: x, vers: nonInclusion})
 }
@@ -108,7 +116,6 @@ func (vt *versionTracker) AddLadder(x uint64, omit bool, greatest int, ladder []
 	}
 
 	var inclusion, nonInclusion []uint32
-
 	for _, version := range ladder {
 		if int(version) <= greatest {
 			inclusion = append(inclusion, version)
@@ -116,7 +123,6 @@ func (vt *versionTracker) AddLadder(x uint64, omit bool, greatest int, ladder []
 			nonInclusion = append(nonInclusion, version)
 		}
 	}
-
 	vt.inclusion = append(vt.inclusion, posAndVersions{pos: x, vers: inclusion})
 	vt.nonInclusion = append(vt.nonInclusion, posAndVersions{pos: x, vers: nonInclusion})
 }
@@ -127,8 +133,6 @@ func (vt *versionTracker) SearchMaps(x uint64, omit bool) (leftInclusion, rightN
 	}
 
 	leftInclusion = make(map[uint32]struct{})
-	rightNonInclusion = make(map[uint32]struct{})
-
 	for _, entry := range vt.inclusion {
 		if entry.pos < x {
 			for _, ver := range entry.vers {
@@ -136,6 +140,7 @@ func (vt *versionTracker) SearchMaps(x uint64, omit bool) (leftInclusion, rightN
 			}
 		}
 	}
+	rightNonInclusion = make(map[uint32]struct{})
 	for _, entry := range vt.nonInclusion {
 		if entry.pos > x {
 			for _, ver := range entry.vers {
@@ -143,17 +148,16 @@ func (vt *versionTracker) SearchMaps(x uint64, omit bool) (leftInclusion, rightN
 			}
 		}
 	}
-
 	return
 }
 
 func (vt *versionTracker) MonitoringMap(x uint64) (leftInclusion map[uint32]struct{}) {
-	leftInclusion = make(map[uint32]struct{})
-
 	parents := make(map[uint64]struct{})
 	for _, parent := range math.LeftDirectPath(x) {
 		parents[parent] = struct{}{}
 	}
+
+	leftInclusion = make(map[uint32]struct{})
 	for _, entry := range vt.inclusion {
 		if _, ok := parents[entry.pos]; ok {
 			for _, ver := range entry.vers {
@@ -161,6 +165,5 @@ func (vt *versionTracker) MonitoringMap(x uint64) (leftInclusion map[uint32]stru
 			}
 		}
 	}
-
 	return
 }
