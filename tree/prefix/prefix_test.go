@@ -46,13 +46,13 @@ func TestTree(t *testing.T) {
 		// Look up every VRF output and check that it matches what was
 		// originally inserted.
 		for vrfOutput, commitment := range data {
-			res, err := tree.Search(map[uint64][][]byte{ver + 1: {vrfOutput[:]}})
+			res, err := tree.Search([]PrefixSearch{{ver + 1, [][]byte{vrfOutput[:]}}})
 			if err != nil {
 				t.Fatal(err)
 			} else if len(res) != 1 {
 				t.Fatal("unexpected number of versions returned")
 			}
-			verRes := res[ver+1]
+			verRes := res[0]
 			if len(verRes.Commitments) != 1 {
 				t.Fatal("unexpected number of commitments returned")
 			} else if !bytes.Equal(verRes.Commitments[0], commitment[:]) {
@@ -117,11 +117,13 @@ func TestRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := tree.Search(map[uint64][][]byte{2: {makeBytes(0), makeBytes(1)}})
+	res, err := tree.Search([]PrefixSearch{{2, [][]byte{makeBytes(0), makeBytes(1)}}})
 	if err != nil {
 		t.Fatal(err)
+	} else if len(res) != 1 {
+		t.Fatal("unexpected number of results returned")
 	}
-	verRes := res[2]
+	verRes := res[0]
 	if len(verRes.Commitments) != 2 || len(verRes.Proof.Results) != 2 {
 		t.Fatal("unexpected number of results provided")
 	} else if verRes.Commitments[0] != nil || !bytes.Equal(verRes.Commitments[1], makeBytes(1)) {
@@ -170,9 +172,9 @@ func TestSearchOneVersion(t *testing.T) {
 	}
 
 	// Execute search.
-	searches := make(map[uint64][][]byte)
+	searches := []PrefixSearch{{Version: ver}}
 	for _, entry := range selected {
-		searches[ver] = append(searches[ver], entry.VrfOutput)
+		searches[0].VrfOutputs = append(searches[0].VrfOutputs, entry.VrfOutput)
 	}
 	res, err := tree.Search(searches)
 	if err != nil {
@@ -180,7 +182,7 @@ func TestSearchOneVersion(t *testing.T) {
 	} else if len(res) != 1 {
 		t.Fatal("wrong number of results returned")
 	}
-	verRes := res[ver]
+	verRes := res[0]
 
 	// Verify search results.
 	if err := Verify(cs, selected, &verRes.Proof, roots[ver-1]); err != nil {
@@ -199,42 +201,39 @@ func TestSearchMultipleVersion(t *testing.T) {
 
 	// For each version of the tree: select a number of random entries from that
 	// version or prior versions.
-	selected := make(map[uint64][]Entry, 0)
+	searches := make([]PrefixSearch, 0)
+	entries := make([][]Entry, 0)
 	for i := range len(allEntries) {
-		verSelected := make([]Entry, 0)
+		vrfOutputs := make([][]byte, 0)
+		verEntries := make([]Entry, 0)
 
 		for _, entries := range allEntries[:i+1] {
 			entry := entries[mrand.Intn(len(entries))]
-			verSelected = append(verSelected, entry)
+			vrfOutputs = append(vrfOutputs, entry.VrfOutput)
+			verEntries = append(verEntries, entry)
 		}
 
-		selected[uint64(i+1)] = verSelected
+		ver := uint64(i + 1)
+		searches = append(searches, PrefixSearch{ver, vrfOutputs})
+		entries = append(entries, verEntries)
 	}
 
 	// Execute search.
-	searches := make(map[uint64][][]byte)
-	for ver, entries := range selected {
-		for _, entry := range entries {
-			searches[ver] = append(searches[ver], entry.VrfOutput)
-		}
-	}
 	res, err := tree.Search(searches)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(res) != len(selected) {
+	} else if len(res) != len(searches) {
 		t.Fatal("wrong number of results returned")
 	}
 
 	// Verify search results.
-	for ver, entries := range selected {
-		verRes, ok := res[ver]
-		if !ok {
-			t.Fatal("expected result not present")
-		} else if err := Verify(cs, entries, &verRes.Proof, roots[ver-1]); err != nil {
+	for i, search := range searches {
+		verRes, verEntries := res[i], entries[i]
+		if err := Verify(cs, verEntries, &verRes.Proof, roots[search.Version-1]); err != nil {
 			t.Fatal(err)
 		}
 		for i, commitment := range verRes.Commitments {
-			if !bytes.Equal(commitment, entries[i].Commitment) {
+			if !bytes.Equal(commitment, verEntries[i].Commitment) {
 				t.Fatal("unexpected commitment returned")
 			}
 		}

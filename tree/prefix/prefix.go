@@ -21,6 +21,11 @@ func NewTree(cs suites.CipherSuite, tx db.PrefixStore) *Tree {
 	return &Tree{cs: cs, tx: tx}
 }
 
+type PrefixSearch struct {
+	Version    uint64
+	VrfOutputs [][]byte
+}
+
 type SearchResult struct {
 	Proof       PrefixProof
 	Commitments [][]byte
@@ -29,29 +34,34 @@ type SearchResult struct {
 // Search takes as input a map from each version of the tree to search, to the
 // list of VRF outputs to search for in that version of the tree. It returns a
 // map from the searched versions of the tree to a batch PrefixProof.
-func (t *Tree) Search(searches map[uint64][][]byte) (map[uint64]SearchResult, error) {
-	for ver, vrfOutputs := range searches {
-		if ver == 0 {
+func (t *Tree) Search(searches []PrefixSearch) ([]SearchResult, error) {
+	combined := make(map[uint64][][]byte)
+	for _, search := range searches {
+		if search.Version == 0 {
 			return nil, errors.New("unable to search in version 0 of the tree")
 		}
-		for _, vrfOutput := range vrfOutputs {
+		for _, vrfOutput := range search.VrfOutputs {
 			if len(vrfOutput) != t.cs.HashSize() {
 				return nil, errors.New("unexpected vrf output length")
 			}
 		}
+		combined[search.Version] = append(combined[search.Version], search.VrfOutputs...)
 	}
 
 	b := newBatch(t.cs, t.tx)
-	res, state := b.initialize(searches)
+	res, state := b.initialize(combined)
 	if err := b.search(state); err != nil {
 		return nil, err
 	}
 
-	out := make(map[uint64]SearchResult, len(searches))
-	for _, tile := range res {
-		vrfOutputs := searches[tile.id.ver]
-		proof, commitments := runProofBuilder(t.cs, tile.root, vrfOutputs)
-		out[tile.id.ver] = SearchResult{Proof: proof, Commitments: commitments}
+	out := make([]SearchResult, len(searches))
+	for i, search := range searches {
+		tile, ok := res[search.Version]
+		if !ok {
+			return nil, errors.New("expected tile not found")
+		}
+		proof, commitments := runProofBuilder(t.cs, tile.root, search.VrfOutputs)
+		out[i] = SearchResult{Proof: proof, Commitments: commitments}
 	}
 	return out, nil
 }
@@ -99,11 +109,12 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	// Check for intersection between sortedAdd and sortedRemove
 	for i, j := 0, 0; i < len(sortedAdd) && j < len(sortedRemove); {
 		cmp := bytes.Compare(sortedAdd[i].VrfOutput, sortedRemove[j])
-		if cmp == -1 {
+		switch cmp {
+		case -1:
 			i++
-		} else if cmp == 1 {
+		case 1:
 			j++
-		} else {
+		default:
 			return nil, nil, errors.New("can not add and remove the same vrf output")
 		}
 	}
@@ -154,7 +165,7 @@ func (t *Tree) getInsertionRoot(ver uint64, add []Entry, remove [][]byte) (node,
 	if err := b.search(state); err != nil {
 		return nil, nil, err
 	}
-	root := res[0].root
+	root := res[ver].root
 
 	proof, commitments := runProofBuilder(t.cs, root, vrfOutputs)
 	for _, commitment := range commitments[:len(add)] {

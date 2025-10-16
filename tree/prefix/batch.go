@@ -2,7 +2,6 @@ package prefix
 
 import (
 	"errors"
-	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
@@ -62,26 +61,20 @@ func newBatch(cs suites.CipherSuite, tx db.PrefixStore) *batch {
 
 // initialize creates the initial state object to call search with, and creates
 // a slice of tiles where the results will be stored.
-func (b *batch) initialize(searches map[uint64][][]byte) ([]tile, map[*node][]cursor) {
-	vers := make([]uint64, 0, len(searches))
-	for ver := range searches {
-		vers = append(vers, ver)
-	}
-	slices.Sort(vers)
-
-	tiles := make([]tile, 0, len(searches))
+func (b *batch) initialize(searches map[uint64][][]byte) (map[uint64]*tile, map[*node][]cursor) {
+	tiles := make(map[uint64]*tile, len(searches))
 	state := make(map[*node][]cursor, len(searches))
-	for _, ver := range vers {
-		id := tileId{ver: ver, ctr: 0}
-		tiles = append(tiles, tile{id: id, depth: 0, root: externalNode{nil, id}})
 
-		vrfOutputs := searches[ver]
+	for ver, vrfOutputs := range searches {
+		id := tileId{ver: ver, ctr: 0}
+		out := &tile{id: id, depth: 0, root: externalNode{nil, id}}
+		tiles[ver] = out
 
 		cursors := make([]cursor, 0, len(vrfOutputs))
 		for _, vrfOutput := range vrfOutputs {
 			cursors = append(cursors, cursor{vrfOutput: vrfOutput, depth: 0})
 		}
-		state[&tiles[len(tiles)-1].root] = cursors
+		state[&out.root] = cursors
 	}
 
 	return tiles, state

@@ -121,7 +121,7 @@ func TestSearchDepth0(t *testing.T) {
 		t.Fatal("unexpected database lookups")
 	}
 
-	root := res[0].root
+	root := res[1].root
 	_ = root.(*parentNode).left.(*parentNode).left.(leafNode)
 	_ = root.(*parentNode).left.(*parentNode).right.(externalNode)
 	_ = root.(*parentNode).right.(emptyNode)
@@ -143,7 +143,7 @@ func TestSearchDepth1(t *testing.T) {
 		t.Fatal("unexpected database lookups")
 	}
 
-	root := res[0].root
+	root := res[1].root
 	_ = root.(*parentNode).left.(*parentNode).left.(leafNode)
 	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
 	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
@@ -166,7 +166,7 @@ func TestSearchDepth2(t *testing.T) {
 		t.Fatal("unexpected database lookups")
 	}
 
-	root := res[0].root
+	root := res[2].root
 	_ = root.(*parentNode).left.(*parentNode).left.(leafNode)
 	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
 	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
@@ -189,7 +189,7 @@ func TestBrokenTile(t *testing.T) {
 		t.Fatal("unexpected database lookups")
 	}
 
-	root := res[0].root
+	root := res[2].root
 	_ = root.(*parentNode).left.(externalNode)
 	_ = root.(*parentNode).right.(*parentNode).left.(leafNode)
 	_ = root.(*parentNode).right.(*parentNode).right.(leafNode)
@@ -215,7 +215,7 @@ func TestMultiVersionSearch(t *testing.T) {
 		t.Fatal("unexpected database lookups")
 	}
 
-	root1, root2 := res[0].root, res[1].root
+	root1, root2 := res[1].root, res[2].root
 	if root2.(*parentNode).left.(*parentNode) != root1.(*parentNode).left.(*parentNode) {
 		t.Fatal("root1 was not correctly inserted as left child of root2")
 	}
