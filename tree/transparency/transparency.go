@@ -72,32 +72,29 @@ func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, 
 }
 
 func (t *Tree) updateView(last *uint64, provider *dataProvider) error {
-	if last == nil {
-		return updateView(0, t.treeHead.TreeSize, provider)
-	}
-
-	// Load frontier log entries.
-	frontier := math.Frontier(*last)
-	results, err := t.tx.BatchGet(frontier)
-	if err != nil {
-		return err
-	}
-	logEntries := make(map[uint64]structs.LogEntry)
-	for _, pos := range frontier {
-		raw, ok := results[pos]
-		if !ok {
-			return errors.New("expected frontier log entry not found")
-		}
-		entry, err := structs.NewLogEntry(t.config.Suite, bytes.NewBuffer(raw))
+	if last != nil {
+		// Load frontier log entries.
+		frontier := math.Frontier(*last)
+		results, err := t.tx.BatchGet(frontier)
 		if err != nil {
 			return err
 		}
-		logEntries[pos] = *entry
+		logEntries := make(map[uint64]structs.LogEntry)
+		for _, pos := range frontier {
+			raw, ok := results[pos]
+			if !ok {
+				return errors.New("expected frontier log entry not found")
+			}
+			entry, err := structs.NewLogEntry(t.config.Suite, bytes.NewBuffer(raw))
+			if err != nil {
+				return err
+			}
+			logEntries[pos] = *entry
+		}
+		provider.AddRetained(nil, logEntries)
 	}
-	provider.AddRetained(nil, logEntries)
 
-	// Evaluate algorithm to update user's view.
-	return updateView(*last, t.treeHead.TreeSize, provider)
+	return updateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
 }
 
 func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, error) {

@@ -2,6 +2,7 @@ package transparency
 
 import (
 	"errors"
+	"time"
 
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -14,12 +15,23 @@ var (
 
 // updateView runs the algorithm from Section 4.2. The previous size of the tree
 // is `m`, the current size of the tree is `n`.
-func updateView(m, n uint64, provider *dataProvider) error {
-	for _, x := range math.UpdateView(m, n) {
+func updateView(config *structs.PublicConfig, n uint64, m *uint64, provider *dataProvider) error {
+	for _, x := range math.UpdateView(n, m) {
 		if _, err := provider.GetTimestamp(x); err != nil {
 			return err
 		}
 	}
+
+	now := uint64(time.Now().UnixMilli())
+	ts, err := provider.GetTimestamp(n - 1)
+	if err != nil {
+		return err
+	} else if now < ts && ts-now > config.MaxAhead {
+		return errors.New("rightmost timestamp is too far ahead of local clock")
+	} else if now > ts && now-ts > config.MaxBehind {
+		return errors.New("rightmost timestamp is too far behind local clock")
+	}
+
 	return nil
 }
 

@@ -120,13 +120,13 @@ func rightDirectPath(x, n uint64) []uint64 {
 
 // UpdateView returns the indices of the log entries whose timestamps need to be
 // provided for a verifier to update their view of the tree.
-func UpdateView(m, n uint64) []uint64 {
+func UpdateView(n uint64, m *uint64) []uint64 {
 	out := make([]uint64, 0)
 
-	if m == 0 {
-		out = append(out, Root(m))
+	if m == nil || *m == 0 {
+		out = append(out, Root(n))
 	} else {
-		out = append(out, rightDirectPath(m-1, n)...)
+		out = append(out, rightDirectPath(*m-1, n)...)
 	}
 
 	for out[len(out)-1] != n-1 {

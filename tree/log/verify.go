@@ -23,8 +23,8 @@ func NewVerifier(cs suites.CipherSuite) *Verifier {
 	return &Verifier{cs: cs}
 }
 
-// Previous returns the previously observed tree size.
-func (v *Verifier) Previous() *uint64 { return v.prev }
+// Last returns the previously observed tree size.
+func (v *Verifier) Last() *uint64 { return v.prev }
 
 // Frontier returns the retained frontier of the tree.
 func (v *Verifier) Frontier() [][]byte { return v.frontier }
