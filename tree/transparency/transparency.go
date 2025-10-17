@@ -101,6 +101,12 @@ func (t *Tree) updateView(last *uint64, provider *dataProvider) error {
 }
 
 func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, error) {
+	fth, n, nP, m, err := t.fullTreeHead(req.Last)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load label index and determine greatest version that exists, if any.
 	index, err := t.getLabelIndex(req.Label)
 	if err != nil {
 		return nil, err
@@ -109,6 +115,7 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 	if greatest > 0 {
 		greatest--
 	}
+	handle := newProducedProofHandler(t.config.Suite, t.tx, index)
 
 	// Determine which versions we will need VRF outputs for, and also load the
 	// target version of the label.
@@ -128,44 +135,46 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 	}
 
 	// Compute VRF outputs and proofs for ladder.
-	vrfOutputs := make(map[uint32][]byte)
-	steps := make([]structs.BinaryLadderStep, 0, len(ladder))
-	for _, ver := range ladder {
+	steps := make([]structs.BinaryLadderStep, len(ladder))
+	for i, ver := range ladder {
 		vrfOutput, proof, err := t.computeVrfOutput(req.Label, ver)
 		if err != nil {
 			return nil, err
 		}
-		vrfOutputs[ver] = vrfOutput
-		steps = append(steps, structs.BinaryLadderStep{Proof: proof})
+		handle.AddVersion(ver, vrfOutput, nil)
+		steps[i] = structs.BinaryLadderStep{Proof: proof}
 	}
 
 	// Execute algorithms to update the user's view of the tree, and either a
 	// greatest-version or fixed-version search.
-	handle := newProducedProofHandler(t.config.Suite, t.tx, index)
 	provider := newDataProvider(t.config.Suite, handle)
-
-	// if err := t.updateView(req.Last, provider); err != nil {
-	// 	return nil, err
-	// }
-	// if req.Version == nil {
-	// 	_, _, err = greatestVersionSearch(t.config.Public(), greatest, t.treeHead.TreeSize, provider)
-	// } else {
-	// 	_, _, err = fixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
-	// }
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// // ------------------------------------
-
-	// TODO: Populate binary ladder step commitments
-	// TODO: Compute combined tree proof.
-
-	// Put together final SearchResponse structure.
-	fth, n, nP, m, err := t.fullTreeHead(req.Last)
+	if err := t.updateView(req.Last, provider); err != nil {
+		return nil, err
+	}
+	if req.Version == nil {
+		_, _, err = greatestVersionSearch(t.config.Public(), greatest, t.treeHead.TreeSize, provider)
+	} else {
+		_, _, err = fixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
+	}
 	if err != nil {
 		return nil, err
 	}
+	combinedProof, err := provider.Output(n, nP, m)
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate commitment field of appropriate BinaryLadderStep structures.
+	for i, ver := range ladder {
+		commitment := handle.versions[ver].Commitment
+		if req.Version == nil && ver != greatest {
+			steps[i].Commitment = commitment
+		} else if req.Version != nil && ver != *req.Version {
+			steps[i].Commitment = commitment
+		}
+	}
+
+	// Put together final SearchResponse structure.
 	var outputVer *uint32
 	if req.Version == nil {
 		outputVer = &greatest
@@ -178,6 +187,6 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 		Value:   labelValue.Value,
 
 		BinaryLadder: steps,
-		Search:       combinedProof,
+		Search:       *combinedProof,
 	}, nil
 }
