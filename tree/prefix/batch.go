@@ -56,7 +56,7 @@ type batch struct {
 }
 
 func newBatch(cs suites.CipherSuite, tx db.PrefixStore) *batch {
-	return &batch{cs: cs, tx: tx, cache: make(map[string]tile)}
+	return &batch{cs, tx, make(map[string]tile)}
 }
 
 // initialize creates the initial state object to call search with, and creates
@@ -124,7 +124,7 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 
 // search takes a mapping from some nodes, to a list of searches that are
 // currently active on those nodes. It moves each search as far as possible
-// within each node, identifies which tiles will be need next, and initiates
+// within each node, identifies which tiles will be needed next, and initiates
 // looking them up for the next search iteration.
 func (b *batch) search(state map[*node][]cursor) error {
 	nextSteps := make(map[*cursor]nextStep)

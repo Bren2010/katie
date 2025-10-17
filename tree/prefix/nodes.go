@@ -48,7 +48,7 @@ type parentNode struct {
 	left, right node
 	hash        []byte
 
-	// Used for tracking the tile a parent node came from during insertion.
+	// Used for tracking the tile a parent node came from during mutation.
 	id *tileId
 }
 
@@ -177,7 +177,7 @@ func newExternalNode(cs suites.CipherSuite, buf *bytes.Buffer) (node, error) {
 }
 
 func (en externalNode) String() string {
-	return fmt.Sprintf("<%v;%v>", en.id.ver, en.id.ctr)
+	return fmt.Sprintf("<%v>", en.id)
 }
 
 func (en externalNode) Weight(cs suites.CipherSuite) int {
@@ -222,7 +222,7 @@ func unmarshalNode(cs suites.CipherSuite, id *tileId, depth int, buf *bytes.Buff
 		if err != nil {
 			return nil, err
 		}
-		return &parentNode{left: left, right: right, hash: hash, id: id}, nil
+		return &parentNode{left, right, hash, id}, nil
 
 	case emptyNodeType:
 		return emptyNode{}, nil

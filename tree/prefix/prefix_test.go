@@ -53,7 +53,9 @@ func TestTree(t *testing.T) {
 				t.Fatal("unexpected number of versions returned")
 			}
 			verRes := res[0]
-			if len(verRes.Commitments) != 1 {
+			if len(verRes.Proof.Results) != 1 || !verRes.Proof.Results[0].Inclusion() {
+				t.Fatal("unexpected search result returned")
+			} else if len(verRes.Commitments) != 1 {
 				t.Fatal("unexpected number of commitments returned")
 			} else if !bytes.Equal(verRes.Commitments[0], commitment[:]) {
 				t.Fatal("unexpected commitment value returned")
@@ -165,18 +167,16 @@ func TestSearchOneVersion(t *testing.T) {
 	ver := uint64(len(roots))
 
 	// Select a random entry from each version of the tree to search for.
+	search := PrefixSearch{Version: ver}
 	selected := make([]Entry, 0)
 	for _, entries := range allEntries {
 		entry := entries[mrand.Intn(len(entries))]
+		search.VrfOutputs = append(search.VrfOutputs, entry.VrfOutput)
 		selected = append(selected, entry)
 	}
 
 	// Execute search.
-	searches := []PrefixSearch{{Version: ver}}
-	for _, entry := range selected {
-		searches[0].VrfOutputs = append(searches[0].VrfOutputs, entry.VrfOutput)
-	}
-	res, err := tree.Search(searches)
+	res, err := tree.Search([]PrefixSearch{search})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {

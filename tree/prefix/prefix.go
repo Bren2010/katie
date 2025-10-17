@@ -11,16 +11,6 @@ import (
 	"github.com/Bren2010/katie/db"
 )
 
-// Tree implements a Prefix Tree backed by a connection to a database.
-type Tree struct {
-	cs suites.CipherSuite
-	tx db.PrefixStore
-}
-
-func NewTree(cs suites.CipherSuite, tx db.PrefixStore) *Tree {
-	return &Tree{cs: cs, tx: tx}
-}
-
 type PrefixSearch struct {
 	Version    uint64
 	VrfOutputs [][]byte
@@ -29,6 +19,16 @@ type PrefixSearch struct {
 type SearchResult struct {
 	Proof       PrefixProof
 	Commitments [][]byte
+}
+
+// Tree implements a Prefix Tree backed by a connection to a database.
+type Tree struct {
+	cs suites.CipherSuite
+	tx db.PrefixStore
+}
+
+func NewTree(cs suites.CipherSuite, tx db.PrefixStore) *Tree {
+	return &Tree{cs, tx}
 }
 
 // Search takes as input a map from each version of the tree to search, to the
@@ -61,7 +61,7 @@ func (t *Tree) Search(searches []PrefixSearch) ([]SearchResult, error) {
 			return nil, errors.New("expected tile not found")
 		}
 		proof, commitments := runProofBuilder(t.cs, tile.root, search.VrfOutputs)
-		out[i] = SearchResult{Proof: proof, Commitments: commitments}
+		out[i] = SearchResult{proof, commitments}
 	}
 	return out, nil
 }
@@ -120,7 +120,7 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	}
 
 	// Load necessary tiles into memory. Add new entries. Create tiles.
-	root, proof, err := t.getInsertionRoot(ver, add, remove)
+	root, proof, err := t.getMutationRoot(ver, add, remove)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -145,10 +145,10 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	return rootHash, proof, nil
 }
 
-// getInsertRoot returns the node to operate on for our insertion. It also
+// getMutationRoot returns the node to operate on for our mutation. It also
 // returns the prior-version PrefixProof.
-func (t *Tree) getInsertionRoot(ver uint64, add []Entry, remove [][]byte) (node, *PrefixProof, error) {
-	vrfOutputs := make([][]byte, 0, len(add))
+func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, *PrefixProof, error) {
+	vrfOutputs := make([][]byte, 0, len(add)+len(remove))
 	for _, entry := range add {
 		vrfOutputs = append(vrfOutputs, entry.VrfOutput)
 	}
@@ -194,7 +194,7 @@ func runProofBuilder(cs suites.CipherSuite, root node, vrfOutputs [][]byte) (Pre
 	// the original positions so that we can give results in the same order.
 	indexed := make([]indexedVrfOutput, len(vrfOutputs))
 	for i, vrfOutput := range vrfOutputs {
-		indexed[i] = indexedVrfOutput{vrfOutput: vrfOutput, index: i}
+		indexed[i] = indexedVrfOutput{index: i, vrfOutput: vrfOutput}
 	}
 	slices.SortFunc(indexed, func(a, b indexedVrfOutput) int {
 		return bytes.Compare(a.vrfOutput, b.vrfOutput)
@@ -286,7 +286,7 @@ func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]by
 			if len(add) > 0 {
 				addRemoveEntries(cs, n, add, nil, depth)
 			}
-		} else {
+		} else if len(add) > 0 {
 			// We're keeping this leaf but it's in the way of other leaves we
 			// want to add, so push it down one level and recurse.
 			if getBit(m.vrfOutput, depth) {

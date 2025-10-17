@@ -10,7 +10,7 @@ import (
 func TestVerifyRoot(t *testing.T) {
 	cs := suites.KTSha256P256{}
 
-	root := leafNode{vrfOutput: makeBytes(0x00), commitment: makeBytes(0x00)}
+	root := leafNode{makeBytes(0x00), makeBytes(0x00)}
 	want := root.Hash(cs)
 
 	entries := []Entry{{makeBytes(0x00), makeBytes(0x00)}}
@@ -30,8 +30,8 @@ func TestVerifyNoCopath(t *testing.T) {
 	cs := suites.KTSha256P256{}
 
 	root := &parentNode{
-		left:  leafNode{vrfOutput: makeBytes(0x00), commitment: makeBytes(0x00)},
-		right: leafNode{vrfOutput: makeBytes(0x80), commitment: makeBytes(0x80)},
+		left:  leafNode{makeBytes(0x00), makeBytes(0x00)},
+		right: leafNode{makeBytes(0x80), makeBytes(0x80)},
 	}
 	want := root.Hash(cs)
 
@@ -61,7 +61,7 @@ func TestVerifyOneDeep(t *testing.T) {
 		left: &parentNode{
 			left: &parentNode{
 				left:  externalNode{hash: makeBytes(1)},
-				right: leafNode{vrfOutput: makeBytes(0x20), commitment: makeBytes(0xFF)},
+				right: leafNode{makeBytes(0x20), makeBytes(0xFF)},
 			},
 			right: externalNode{hash: makeBytes(2)},
 		},
@@ -89,14 +89,14 @@ func TestVerifyTwoDeep(t *testing.T) {
 		left: &parentNode{
 			left: &parentNode{
 				left:  externalNode{hash: makeBytes(1)},
-				right: leafNode{vrfOutput: makeBytes(0x20), commitment: makeBytes(0xFF)},
+				right: leafNode{makeBytes(0x20), makeBytes(0xFF)},
 			},
 			right: externalNode{hash: makeBytes(2)},
 		},
 		right: &parentNode{
 			left: &parentNode{
 				left:  externalNode{hash: makeBytes(3)},
-				right: leafNode{vrfOutput: makeBytes(0xA0), commitment: makeBytes(0xBB)},
+				right: leafNode{makeBytes(0xA0), makeBytes(0xBB)},
 			},
 			right: externalNode{hash: makeBytes(4)},
 		},

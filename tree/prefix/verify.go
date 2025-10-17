@@ -12,7 +12,7 @@ import (
 func terminalNode(entry Entry, res PrefixSearchResult) node {
 	switch res := res.(type) {
 	case inclusionProof:
-		return leafNode{vrfOutput: entry.VrfOutput, commitment: entry.Commitment}
+		return leafNode{entry.VrfOutput, entry.Commitment}
 	case nonInclusionLeafProof:
 		return res.leaf
 	case nonInclusionParentProof:
