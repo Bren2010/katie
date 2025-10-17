@@ -7,12 +7,33 @@ import (
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/log"
 	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
+func addVersion(
+	cs suites.CipherSuite,
+	versions map[uint32]prefix.Entry,
+	ver uint32, vrfOutput, commitment []byte,
+) error {
+	if len(vrfOutput) != cs.HashSize() {
+		return errors.New("malformed vrf output")
+	} else if commitment != nil && len(commitment) != cs.HashSize() {
+		return errors.New("malformed commitment")
+	} else if _, ok := versions[ver]; ok {
+		return errors.New("can not add the same version twice")
+	}
+	versions[ver] = prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment}
+	return nil
+}
+
 type proofHandle interface {
+	// AddVersion adds the VRF output and commitment corresponding to a version
+	// of a label to the proofHandle.
+	AddVersion(ver uint32, vrfOutput, commitment []byte) error
+
 	// GetTimestamp takes as input the position of a log entry and returns the
 	// timestamp of the log entry.
 	GetTimestamp(x uint64) (uint64, error)
@@ -42,6 +63,11 @@ type proofHandle interface {
 	// Finish verifies that the proof is done being consumed and returns and
 	// inclusion proof in the log tree for the inspected leaves.
 	Finish() ([][]byte, error)
+
+	// Output returns the produced CombinedTreeProof. It takes as input the set
+	// of inspected log leaves `leaves`, and the tree size parameters `n`, `nP`,
+	// and `m`.
+	Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error)
 }
 
 // receivedProofHandler implements the proofHandle interface over a
@@ -64,15 +90,7 @@ func newReceivedProofHandler(cs suites.CipherSuite, inner structs.CombinedTreePr
 }
 
 func (rph *receivedProofHandler) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
-	if len(vrfOutput) != rph.cs.HashSize() {
-		return errors.New("malformed vrf output")
-	} else if commitment != nil && len(commitment) != rph.cs.HashSize() {
-		return errors.New("malformed commitment")
-	} else if _, ok := rph.versions[ver]; ok {
-		return errors.New("can not add the same version twice")
-	}
-	rph.versions[ver] = prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment}
-	return nil
+	return addVersion(rph.cs, rph.versions, ver, vrfOutput, commitment)
 }
 
 func (rph *receivedProofHandler) GetTimestamp(x uint64) (uint64, error) {
@@ -212,6 +230,10 @@ func (rph *receivedProofHandler) Finish() ([][]byte, error) {
 	return rph.inner.Inclusion.Elements, nil
 }
 
+func (rph *receivedProofHandler) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+	panic("unreachable")
+}
+
 type requiredProof struct {
 	pos  uint64
 	vers []uint32
@@ -229,7 +251,8 @@ type producedProofHandler struct {
 	proofs      []requiredProof
 	roots       [][]byte
 
-	tracker versionTracker
+	versions map[uint32]prefix.Entry
+	tracker  versionTracker
 }
 
 func newProducedProofHandler(
@@ -243,7 +266,13 @@ func newProducedProofHandler(
 		index: index,
 
 		prefixTrees: make(map[uint64][]byte),
+
+		versions: make(map[uint32]prefix.Entry),
 	}
+}
+
+func (pph *producedProofHandler) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
+	return addVersion(pph.cs, pph.versions, ver, vrfOutput, commitment)
 }
 
 func (pph *producedProofHandler) GetTimestamp(x uint64) (uint64, error) {
@@ -332,4 +361,59 @@ func (pph *producedProofHandler) GetPrefixTrees(xs []uint64) ([][]byte, error) {
 
 func (pph *producedProofHandler) Finish() ([][]byte, error) {
 	panic("unreachable")
+}
+
+func (pph *producedProofHandler) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+	// Construct the list of prefix tree searches to execute.
+	searches := make([]prefix.PrefixSearch, len(pph.proofs))
+	for i, proof := range pph.proofs {
+		vrfOutputs := make([][]byte, len(proof.vers))
+		for j, ver := range proof.vers {
+			entry, ok := pph.versions[ver]
+			if !ok {
+				return nil, errors.New("required version not known")
+			}
+			vrfOutputs[j] = entry.VrfOutput
+		}
+		searches[i] = prefix.PrefixSearch{Version: proof.pos + 1, VrfOutputs: vrfOutputs}
+	}
+
+	// Execute prefix tree searches.
+	res, err := prefix.NewTree(pph.cs, pph.tx.PrefixStore()).Search(searches)
+	if err != nil {
+		return nil, err
+	}
+
+	// Pull out individual proofs. Pull out commitment values / check for
+	// consistency if there is duplication.
+	proofs := make([]prefix.PrefixProof, len(res))
+	for i, result := range res {
+		proofs[i] = result.Proof
+
+		for j, commitment := range result.Commitments {
+			if commitment == nil {
+				continue
+			}
+			ver := pph.proofs[i].vers[j]
+			entry := pph.versions[ver]
+			if entry.Commitment == nil {
+				pph.versions[ver] = prefix.Entry{VrfOutput: entry.VrfOutput, Commitment: commitment}
+			} else if !bytes.Equal(commitment, entry.Commitment) {
+				return nil, errors.New("different values for same commitment found")
+			}
+		}
+	}
+
+	// Fetch inclusion proof and return final CombinedTreeProof.
+	inclusion, err := log.NewTree(pph.cs, pph.tx.LogStore()).GetBatch(leaves, n, nP, m)
+	if err != nil {
+		return nil, err
+	}
+	return &structs.CombinedTreeProof{
+		Timestamps:   pph.timestamps,
+		PrefixProofs: proofs,
+		PrefixRoots:  pph.roots,
+
+		Inclusion: structs.InclusionProof{Elements: inclusion},
+	}, nil
 }

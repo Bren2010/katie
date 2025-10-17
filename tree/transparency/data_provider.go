@@ -173,14 +173,6 @@ func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	return leaves, nil
 }
 
-// DryFinish ensures that handle.GetPrefixTrees is called with the correct
-// arguments, but doesn't actually do any of the work to determine the final
-// proof result.
-func (dp *dataProvider) DryFinish() error {
-	_, err := dp.inspectedLeaves()
-	return err
-}
-
 type proofResult struct {
 	frontier   [][]byte                    // The frontier for the user to retain.
 	additional [][]byte                    // The additional frontier, if requested.
@@ -245,4 +237,19 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 	}
 
 	return &proofResult{frontier, additional, logEntries}, nil
+}
+
+// Output takes as input the current tree size `n`, an optional additional tree
+// size `nP`, and the optional previous tree size `m`. It returns the produced
+// CombinedTreeProof structure.
+func (dp *dataProvider) Output(n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+	leaves, err := dp.inspectedLeaves()
+	if err != nil {
+		return nil, err
+	}
+	positions := make([]uint64, len(leaves))
+	for i, leaf := range leaves {
+		positions[i] = leaf.position
+	}
+	return dp.handle.Output(positions, n, nP, m)
 }
