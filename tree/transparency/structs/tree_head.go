@@ -33,7 +33,7 @@ func (th *TreeHead) Marshal(buf *bytes.Buffer) error {
 }
 
 type TreeHeadTBS struct {
-	Config   PublicConfig
+	Config   *PublicConfig
 	TreeSize uint64
 	Root     []byte
 }
@@ -83,7 +83,7 @@ func (ath *AuditorTreeHead) Marshal(buf *bytes.Buffer) error {
 }
 
 type AuditorTreeHeadTBS struct {
-	Config    PublicConfig
+	Config    *PublicConfig
 	Timestamp uint64
 	TreeSize  uint64
 	Root      []byte
