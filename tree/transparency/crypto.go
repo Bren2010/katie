@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/Bren2010/katie/crypto/commitments"
 	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -70,6 +71,29 @@ func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, err
 		return &structs.LabelValue{Opening: make([]byte, size)}, nil
 	}
 	return structs.NewLabelValue(t.config.Public(), bytes.NewBuffer(raw))
+}
+
+// setLabelValue generates a new commitment opening and sets the given
+// label-version pair to the given value. It returns the new commitment.
+func (t *Tree) setLabelValue(label []byte, ver uint32, value structs.UpdateValue) ([]byte, error) {
+	opening := commitments.GenerateOpening(t.config.Suite)
+
+	// Serialize opening and UpdateValue structure. Write to database.
+	labelValue := structs.LabelValue{Opening: opening, Value: value}
+	buf := &bytes.Buffer{}
+	if err := labelValue.Marshal(buf); err != nil {
+		return nil, err
+	} else if err := t.tx.SetLabelValue(label, ver, buf.Bytes()); err != nil {
+		return nil, err
+	}
+
+	// Serialize the data that will be committed to and compute the commitment.
+	commitmentValue := structs.CommitmentValue{Label: label, Update: value}
+	buf.Reset()
+	if err := commitmentValue.Marshal(buf); err != nil {
+		return nil, err
+	}
+	return commitments.Commit(t.config.Suite, opening, buf.Bytes()), nil
 }
 
 // computeVrfOutput returns the VRF output for the requested label-version pair

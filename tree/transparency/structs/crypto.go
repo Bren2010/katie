@@ -76,15 +76,12 @@ func (tbs *UpdateTBS) Marshal(buf *bytes.Buffer) error {
 }
 
 type CommitmentValue struct {
-	Opening []byte
-	Label   []byte
-	Update  UpdateValue
+	Label  []byte
+	Update UpdateValue
 }
 
 func (cv *CommitmentValue) Marshal(buf *bytes.Buffer) error {
-	if _, err := buf.Write(cv.Opening); err != nil {
-		return err
-	} else if err := writeU8Bytes(buf, cv.Label, "label"); err != nil {
+	if err := writeU8Bytes(buf, cv.Label, "label"); err != nil {
 		return err
 	} else if err := cv.Update.Marshal(buf); err != nil {
 		return err
