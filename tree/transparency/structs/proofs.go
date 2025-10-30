@@ -19,13 +19,13 @@ func NewInclusionProof(cs suites.CipherSuite, buf *bytes.Buffer) (*InclusionProo
 	if err := binary.Read(buf, binary.BigEndian, &numElements); err != nil {
 		return nil, err
 	}
-	elements := make([][]byte, 0, numElements)
-	for range int(numElements) {
+	elements := make([][]byte, numElements)
+	for i := range int(numElements) {
 		elem := make([]byte, cs.HashSize())
 		if _, err := io.ReadFull(buf, elem); err != nil {
 			return nil, err
 		}
-		elements = append(elements, elem)
+		elements[i] = elem
 	}
 	return &InclusionProof{elements}, nil
 }
@@ -55,43 +55,43 @@ type CombinedTreeProof struct {
 }
 
 func NewCombinedTreeProof(cs suites.CipherSuite, buf *bytes.Buffer) (*CombinedTreeProof, error) {
-	var numTimestamps uint8
-	if err := binary.Read(buf, binary.BigEndian, &numTimestamps); err != nil {
+	numTimestamps, err := buf.ReadByte()
+	if err != nil {
 		return nil, err
 	}
-	timestamps := make([]uint64, 0, numTimestamps)
-	for range int(numTimestamps) {
+	timestamps := make([]uint64, numTimestamps)
+	for i := range int(numTimestamps) {
 		var timestamp uint64
 		if err := binary.Read(buf, binary.BigEndian, &timestamp); err != nil {
 			return nil, err
 		}
-		timestamps = append(timestamps, timestamp)
+		timestamps[i] = timestamp
 	}
 
-	var numProofs uint8
-	if err := binary.Read(buf, binary.BigEndian, &numProofs); err != nil {
+	numProofs, err := buf.ReadByte()
+	if err != nil {
 		return nil, err
 	}
-	proofs := make([]prefix.PrefixProof, 0, numProofs)
-	for range int(numProofs) {
+	proofs := make([]prefix.PrefixProof, numProofs)
+	for i := range int(numProofs) {
 		proof, err := prefix.NewPrefixProof(cs, buf)
 		if err != nil {
 			return nil, err
 		}
-		proofs = append(proofs, *proof)
+		proofs[i] = *proof
 	}
 
-	var numRoots uint8
-	if err := binary.Read(buf, binary.BigEndian, &numRoots); err != nil {
+	numRoots, err := buf.ReadByte()
+	if err != nil {
 		return nil, err
 	}
-	roots := make([][]byte, 0, numRoots)
-	for range int(numRoots) {
+	roots := make([][]byte, numRoots)
+	for i := range int(numRoots) {
 		root := make([]byte, cs.HashSize())
 		if _, err := io.ReadFull(buf, root); err != nil {
 			return nil, err
 		}
-		roots = append(roots, root)
+		roots[i] = root
 	}
 
 	inclusion, err := NewInclusionProof(cs, buf)
@@ -105,9 +105,7 @@ func NewCombinedTreeProof(cs suites.CipherSuite, buf *bytes.Buffer) (*CombinedTr
 func (ctp *CombinedTreeProof) Marshal(buf *bytes.Buffer) error {
 	if len(ctp.Timestamps) > maxUint8 {
 		return errors.New("timestamps are too long to marshal")
-	}
-	err := binary.Write(buf, binary.BigEndian, uint8(len(ctp.Timestamps)))
-	if err != nil {
+	} else if err := buf.WriteByte(byte(len(ctp.Timestamps))); err != nil {
 		return err
 	}
 	for _, timestamp := range ctp.Timestamps {
@@ -118,9 +116,7 @@ func (ctp *CombinedTreeProof) Marshal(buf *bytes.Buffer) error {
 
 	if len(ctp.PrefixProofs) > maxUint8 {
 		return errors.New("prefix proofs are too long to marshal")
-	}
-	err = binary.Write(buf, binary.BigEndian, uint8(len(ctp.PrefixProofs)))
-	if err != nil {
+	} else if err := buf.WriteByte(byte(len(ctp.PrefixProofs))); err != nil {
 		return err
 	}
 	for _, proof := range ctp.PrefixProofs {
@@ -131,9 +127,7 @@ func (ctp *CombinedTreeProof) Marshal(buf *bytes.Buffer) error {
 
 	if len(ctp.PrefixRoots) > maxUint8 {
 		return errors.New("prefix roots are too long to marshal")
-	}
-	err = binary.Write(buf, binary.BigEndian, uint8(len(ctp.PrefixRoots)))
-	if err != nil {
+	} else if err := buf.WriteByte(byte(len(ctp.PrefixRoots))); err != nil {
 		return err
 	}
 	for _, root := range ctp.PrefixRoots {

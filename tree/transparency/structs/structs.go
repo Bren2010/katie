@@ -16,8 +16,8 @@ const (
 )
 
 func readU8Bytes(buf *bytes.Buffer) ([]byte, error) {
-	var size uint8
-	if err := binary.Read(buf, binary.BigEndian, &size); err != nil {
+	size, err := buf.ReadByte()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]byte, size)
@@ -30,7 +30,7 @@ func readU8Bytes(buf *bytes.Buffer) ([]byte, error) {
 func writeU8Bytes(buf *bytes.Buffer, out []byte, name string) error {
 	if len(out) > maxUint8 {
 		return errors.New(name + " is too long to marshal")
-	} else if err := binary.Write(buf, binary.BigEndian, uint8(len(out))); err != nil {
+	} else if err := buf.WriteByte(byte(len(out))); err != nil {
 		return err
 	} else if _, err := buf.Write(out); err != nil {
 		return err

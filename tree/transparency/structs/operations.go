@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-
-	"github.com/Bren2010/katie/crypto/suites"
 )
 
 type SearchRequest struct {
@@ -83,7 +81,6 @@ type SearchResponse struct {
 }
 
 func NewSearchResponse(
-	cs suites.CipherSuite,
 	config *PublicConfig,
 	req *SearchRequest,
 	buf *bytes.Buffer,
@@ -102,7 +99,7 @@ func NewSearchResponse(
 		version = &versionActual
 	}
 
-	opening := make([]byte, cs.CommitmentOpeningSize())
+	opening := make([]byte, config.Suite.CommitmentOpeningSize())
 	if _, err := io.ReadFull(buf, opening); err != nil {
 		return nil, err
 	}
@@ -118,14 +115,14 @@ func NewSearchResponse(
 	}
 	steps := make([]BinaryLadderStep, numSteps)
 	for i := range steps {
-		step, err := NewBinaryLadderStep(cs, buf)
+		step, err := NewBinaryLadderStep(config.Suite, buf)
 		if err != nil {
 			return nil, err
 		}
 		steps[i] = *step
 	}
 
-	search, err := NewCombinedTreeProof(cs, buf)
+	search, err := NewCombinedTreeProof(config.Suite, buf)
 	if err != nil {
 		return nil, err
 	}
