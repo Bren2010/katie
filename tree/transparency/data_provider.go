@@ -165,6 +165,7 @@ func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	}
 	for i, leaf := range leaves {
 		if leaf.PrefixTree == nil {
+			dp.prefixTrees[leaves[i].position] = prefixTrees[0]
 			leaves[i].PrefixTree = prefixTrees[0]
 			prefixTrees = prefixTrees[1:]
 		}

@@ -67,6 +67,9 @@ func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, err
 	if err != nil {
 		return nil, err
 	} else if raw == nil {
+		// Returning a zero value for the commitment opening ensures that the
+		// SearchResponse doesn't end up getting serialized wrong when a search
+		// produces a non-inclusion proof.
 		size := t.config.Suite.CommitmentOpeningSize()
 		return &structs.LabelValue{Opening: make([]byte, size)}, nil
 	}
