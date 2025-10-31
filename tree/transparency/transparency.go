@@ -3,11 +3,18 @@ package transparency
 import (
 	"bytes"
 	"errors"
+	"slices"
 
 	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
+
+// LabelValue combines a label with its new value.
+type LabelValue struct {
+	Label []byte
+	Value structs.UpdateValue
+}
 
 // Tree is an implementation of a Transparency Tree that handles all state
 // management, the evaluation of a VRF, and generating/opening commitments.
@@ -47,6 +54,56 @@ func NewTree(config structs.PrivateConfig, tx db.TransparencyStore) (*Tree, erro
 		treeHead:    treeHead,
 		auditorHead: auditorHead,
 	}, nil
+}
+
+func (t *Tree) Mutate(add []LabelValue) (*structs.AuditorUpdate, error) {
+	slices.SortStableFunc(add, func(a, b LabelValue) int {
+		return bytes.Compare(a.Label, b.Label)
+	})
+
+	var group []LabelValue
+	for _, pair := range add {
+		if len(group) == 0 || bytes.Equal(group[0].Label, pair.Label) {
+			group = append(group, pair)
+			continue
+		} else if err := t.processGroup(group); err != nil {
+			return err
+		}
+		group = group[:0]
+	}
+	if len(group) > 0 {
+		if err := t.processGroup(group); err != nil {
+			return err
+		}
+	}
+
+	return nil, nil
+}
+
+func (t *Tree) processGroup(group []LabelValue) error {
+	index, err := t.getLabelIndex(group[0].Label)
+	if err != nil {
+		return err
+	}
+	n := 0
+	if t.treeHead != nil {
+		n = t.treeHead.TreeSize
+	}
+
+	for _, pair := range group {
+		ver := uint32(len(index))
+
+		vrfOutput, _, err := t.computeVrfOutput(pair.Label, ver)
+		if err != nil {
+			return err
+		}
+
+		index = append(index, n)
+	}
+
+	if err := t.setLabelIndex(group[0].Label, index); err != nil {
+		return err
+	}
 }
 
 func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, nP, m *uint64, err error) {
