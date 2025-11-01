@@ -14,13 +14,13 @@ import (
 )
 
 func logEntryHash(cs suites.CipherSuite, entry structs.LogEntry) ([]byte, error) {
-	buf := &bytes.Buffer{}
-	if err := entry.Marshal(buf); err != nil {
+	raw, err := structs.Marshal(&entry)
+	if err != nil {
 		return nil, err
 	}
 
 	hasher := cs.Hash()
-	hasher.Write(buf.Bytes())
+	hasher.Write(raw)
 	return hasher.Sum(nil), nil
 }
 
@@ -94,32 +94,29 @@ func (t *Tree) setLabelValue(label []byte, ver uint32, value structs.UpdateValue
 	opening := commitments.GenerateOpening(t.config.Suite)
 
 	// Serialize opening and UpdateValue structure. Write to database.
-	labelValue := structs.LabelValue{Opening: opening, Value: value}
-	buf := &bytes.Buffer{}
-	if err := labelValue.Marshal(buf); err != nil {
+	labelValue, err := structs.Marshal(&structs.LabelValue{Opening: opening, Value: value})
+	if err != nil {
 		return nil, err
-	} else if err := t.tx.SetLabelValue(label, ver, buf.Bytes()); err != nil {
+	} else if err := t.tx.SetLabelValue(label, ver, labelValue); err != nil {
 		return nil, err
 	}
 
 	// Serialize the data that will be committed to and compute the commitment.
-	commitmentValue := structs.CommitmentValue{Label: label, Update: value}
-	buf.Reset()
-	if err := commitmentValue.Marshal(buf); err != nil {
+	commitmentValue, err := structs.Marshal(&structs.CommitmentValue{Label: label, Update: value})
+	if err != nil {
 		return nil, err
 	}
-	return commitments.Commit(t.config.Suite, opening, buf.Bytes()), nil
+	return commitments.Commit(t.config.Suite, opening, commitmentValue), nil
 }
 
 // computeVrfOutput returns the VRF output for the requested label-version pair
 // and the proof that the output is correct.
 func (t *Tree) computeVrfOutput(label []byte, ver uint32) (vrfOutput, proof []byte, err error) {
-	input := structs.VrfInput{Label: label, Version: ver}
-	buf := &bytes.Buffer{}
-	if err := input.Marshal(buf); err != nil {
+	input, err := structs.Marshal(&structs.VrfInput{Label: label, Version: ver})
+	if err != nil {
 		return nil, nil, err
 	}
-	vrfOutput, proof = t.config.VrfKey.Prove(buf.Bytes())
+	vrfOutput, proof = t.config.VrfKey.Prove(input)
 	return
 }
 

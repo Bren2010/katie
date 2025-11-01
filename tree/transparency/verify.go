@@ -1,7 +1,6 @@
 package transparency
 
 import (
-	"bytes"
 	"errors"
 	"time"
 
@@ -89,16 +88,15 @@ func (v *Verifier) finish(result *proofResult, fth *structs.FullTreeHead, provid
 	if err != nil {
 		return err
 	}
-	tbs := structs.TreeHeadTBS{
+	tbs, err := structs.Marshal(&structs.TreeHeadTBS{
 		Config:   v.config,
 		TreeSize: fth.TreeHead.TreeSize,
 		Root:     root,
-	}
-	buf := &bytes.Buffer{}
-	if err := tbs.Marshal(buf); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	ok := v.config.SignatureKey.Verify(buf.Bytes(), fth.TreeHead.Signature)
+	ok := v.config.SignatureKey.Verify(tbs, fth.TreeHead.Signature)
 	if !ok {
 		return errors.New("service provider signature validation failed")
 	}
@@ -110,17 +108,16 @@ func (v *Verifier) finish(result *proofResult, fth *structs.FullTreeHead, provid
 		if err != nil {
 			return err
 		}
-		tbs := structs.AuditorTreeHeadTBS{
+		tbs, err := structs.Marshal(&structs.AuditorTreeHeadTBS{
 			Config:    v.config,
 			Timestamp: fth.AuditorTreeHead.Timestamp,
 			TreeSize:  fth.AuditorTreeHead.TreeSize,
 			Root:      root,
-		}
-		buf := &bytes.Buffer{}
-		if err := tbs.Marshal(buf); err != nil {
+		})
+		if err != nil {
 			return err
 		}
-		ok := v.config.AuditorPublicKey.Verify(buf.Bytes(), fth.AuditorTreeHead.Signature)
+		ok := v.config.AuditorPublicKey.Verify(tbs, fth.AuditorTreeHead.Signature)
 		if !ok {
 			return errors.New("auditor signature validation failed")
 		}
@@ -161,9 +158,9 @@ func (v *Verifier) VerifySearch(req *structs.SearchRequest, res *structs.SearchR
 		return err
 	}
 	if req.Version == nil {
-		_, _, err = greatestVersionSearch(v.config, *res.Version, n, provider)
+		_, err = greatestVersionSearch(v.config, *res.Version, n, provider)
 	} else {
-		_, _, err = fixedVersionSearch(v.config, *req.Version, n, provider) // TODO: contact monitoring
+		_, err = fixedVersionSearch(v.config, *req.Version, n, provider) // TODO: contact monitoring
 	}
 	if err != nil {
 		return err
@@ -180,16 +177,15 @@ func (v *Verifier) VerifySearch(req *structs.SearchRequest, res *structs.SearchR
 		} else {
 			ver = *req.Version
 		}
-		tbs := structs.UpdateTBS{
+		tbs, err := structs.Marshal(&structs.UpdateTBS{
 			Label:   req.Label,
 			Version: ver,
 			Value:   res.Value.Value,
-		}
-		buf := &bytes.Buffer{}
-		if err := tbs.Marshal(buf); err != nil {
+		})
+		if err != nil {
 			return err
 		}
-		ok := v.config.LeafPublicKey.Verify(buf.Bytes(), res.Value.Signature)
+		ok := v.config.LeafPublicKey.Verify(tbs, res.Value.Signature)
 		if !ok {
 			return errors.New("leaf signature verification failed")
 		}

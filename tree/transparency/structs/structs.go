@@ -100,3 +100,17 @@ func writeOptional(buf *bytes.Buffer, present bool) error {
 	}
 	return buf.WriteByte(0)
 }
+
+type Marshaller interface {
+	Marshal(buf *bytes.Buffer) error
+}
+
+// Marshal takes a structure as input and returns the marshalled struct as a
+// byte slice.
+func Marshal(x Marshaller) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	if err := x.Marshal(buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}

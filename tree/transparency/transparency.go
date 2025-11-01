@@ -125,20 +125,18 @@ func (t *Tree) Mutate(add []LabelValue) (*structs.AuditorUpdate, error) {
 	}
 
 	// Sign and persist the new tree head.
-	tbs := structs.TreeHeadTBS{Config: t.config.Public(), TreeSize: n + 1, Root: root}
-	buf := &bytes.Buffer{}
-	if err := tbs.Marshal(buf); err != nil {
-		return nil, err
-	}
-	signature, err := t.config.SignatureKey.Sign(buf.Bytes())
+	tbs, err := structs.Marshal(&structs.TreeHeadTBS{Config: t.config.Public(), TreeSize: n + 1, Root: root})
 	if err != nil {
 		return nil, err
 	}
-	treeHead := structs.TreeHead{TreeSize: n + 1, Signature: signature}
-	buf.Reset()
-	if err := treeHead.Marshal(buf); err != nil {
+	signature, err := t.config.SignatureKey.Sign(tbs)
+	if err != nil {
 		return nil, err
-	} else if err := t.tx.SetTreeHead(buf.Bytes()); err != nil {
+	}
+	treeHead, err := structs.Marshal(&structs.TreeHead{TreeSize: n + 1, Signature: signature})
+	if err != nil {
+		return nil, err
+	} else if err := t.tx.SetTreeHead(treeHead); err != nil {
 		return nil, err
 	} else if err := t.tx.Commit(); err != nil {
 		return nil, err
