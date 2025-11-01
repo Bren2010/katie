@@ -194,17 +194,12 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 	positions := make([]uint64, len(leaves))
 	values := make([][]byte, len(leaves))
 
-	hasher := dp.cs.Hash()
 	for i, leaf := range leaves {
-		buf := &bytes.Buffer{}
-		if err := leaf.Marshal(buf); err != nil {
-			return nil, err
-		} else if _, err := hasher.Write(buf.Bytes()); err != nil {
+		positions[i] = leaf.position
+		values[i], err = logEntryHash(dp.cs, leaf.LogEntry)
+		if err != nil {
 			return nil, err
 		}
-		positions[i] = leaf.position
-		values[i] = hasher.Sum(nil)
-		hasher.Reset()
 	}
 
 	// Evaluate the inclusion proof to find the log's new frontier.

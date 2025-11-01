@@ -7,10 +7,22 @@ import (
 	"io"
 
 	"github.com/Bren2010/katie/crypto/commitments"
+	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
+
+func logEntryHash(cs suites.CipherSuite, entry structs.LogEntry) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	if err := entry.Marshal(buf); err != nil {
+		return nil, err
+	}
+
+	hasher := cs.Hash()
+	hasher.Write(buf.Bytes())
+	return hasher.Sum(nil), nil
+}
 
 // getLabelIndex returns the index (the list of log entries where each new
 // version was added) of a given label.

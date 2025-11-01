@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/log"
+	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
@@ -56,7 +59,20 @@ func NewTree(config structs.PrivateConfig, tx db.TransparencyStore) (*Tree, erro
 	}, nil
 }
 
+// Mutate takes a set of new label-value pairs to insert. Version counters are
+// automatically assigned. The same label may be present multiple times, in
+// which case each subsequent instance is assigned to the subsequent version.
+//
+// It returns the AuditorUpdate structure for the Third-Party Auditor, if any.
 func (t *Tree) Mutate(add []LabelValue) (*structs.AuditorUpdate, error) {
+	n := uint64(0)
+	if t.treeHead != nil {
+		n = t.treeHead.TreeSize
+	}
+	var prefixAdd []prefix.Entry
+
+	// Take the requested additions and break them up into groups of the same
+	// label. Process creating the new versions of each label separately.
 	slices.SortStableFunc(add, func(a, b LabelValue) int {
 		return bytes.Compare(a.Label, b.Label)
 	})
@@ -66,28 +82,82 @@ func (t *Tree) Mutate(add []LabelValue) (*structs.AuditorUpdate, error) {
 		if len(group) == 0 || bytes.Equal(group[0].Label, pair.Label) {
 			group = append(group, pair)
 			continue
-		} else if err := t.processGroup(group); err != nil {
-			return err
+		} else if err := t.addLabelValues(n, &prefixAdd, group); err != nil {
+			return nil, err
 		}
 		group = group[:0]
 	}
 	if len(group) > 0 {
-		if err := t.processGroup(group); err != nil {
-			return err
+		if err := t.addLabelValues(n, &prefixAdd, group); err != nil {
+			return nil, err
 		}
 	}
 
-	return nil, nil
+	// Make the required modifications to the prefix tree. Sort new additions by
+	// VRF output to avoid unintentionally leaking unnecessary information to
+	// the Third-Party Auditor, if there is one.
+	slices.SortFunc(prefixAdd, func(a, b prefix.Entry) int {
+		return bytes.Compare(a.VrfOutput, b.VrfOutput)
+	})
+
+	prefixTree := prefix.NewTree(t.config.Suite, t.tx.PrefixStore())
+	prefixRoot, prefixProof, err := prefixTree.Mutate(n, prefixAdd, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute the new log entry leaf hash and append it to the log tree.
+	logEntry := structs.LogEntry{
+		Timestamp:  uint64(time.Now().UnixMilli()),
+		PrefixTree: prefixRoot,
+	}
+	leaf, err := logEntryHash(t.config.Suite, logEntry)
+	if err != nil {
+		return nil, err
+	}
+	frontier, err := log.NewTree(t.config.Suite, t.tx.LogStore()).Append(n, leaf)
+	if err != nil {
+		return nil, err
+	}
+	root, err := log.Root(t.config.Suite, n+1, frontier)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sign and persist the new tree head.
+	tbs := structs.TreeHeadTBS{Config: t.config.Public(), TreeSize: n + 1, Root: root}
+	buf := &bytes.Buffer{}
+	if err := tbs.Marshal(buf); err != nil {
+		return nil, err
+	}
+	signature, err := t.config.SignatureKey.Sign(buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	treeHead := structs.TreeHead{TreeSize: n + 1, Signature: signature}
+	buf.Reset()
+	if err := treeHead.Marshal(buf); err != nil {
+		return nil, err
+	} else if err := t.tx.SetTreeHead(buf.Bytes()); err != nil {
+		return nil, err
+	} else if err := t.tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return &structs.AuditorUpdate{
+		Timestamp: logEntry.Timestamp,
+		Added:     prefixAdd,
+		Removed:   nil,
+		Proof:     *prefixProof,
+	}, nil
 }
 
-func (t *Tree) processGroup(group []LabelValue) error {
+// addLabelValues adds a new set of label values to the Transparency Log. All
+// entries in `add` must be for the same label.
+func (t *Tree) addLabelValues(n uint64, prefixAdd *[]prefix.Entry, group []LabelValue) error {
 	index, err := t.getLabelIndex(group[0].Label)
 	if err != nil {
 		return err
-	}
-	n := 0
-	if t.treeHead != nil {
-		n = t.treeHead.TreeSize
 	}
 
 	for _, pair := range group {
@@ -97,13 +167,16 @@ func (t *Tree) processGroup(group []LabelValue) error {
 		if err != nil {
 			return err
 		}
+		commitment, err := t.setLabelValue(group[0].Label, ver, pair.Value)
+		if err != nil {
+			return err
+		}
 
+		*prefixAdd = append(*prefixAdd, prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment})
 		index = append(index, n)
 	}
 
-	if err := t.setLabelIndex(group[0].Label, index); err != nil {
-		return err
-	}
+	return t.setLabelIndex(group[0].Label, index)
 }
 
 func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, nP, m *uint64, err error) {
@@ -206,9 +279,9 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 		return nil, err
 	}
 	if req.Version == nil {
-		_, _, err = greatestVersionSearch(t.config.Public(), greatest, t.treeHead.TreeSize, provider)
+		_, err = greatestVersionSearch(t.config.Public(), greatest, t.treeHead.TreeSize, provider)
 	} else {
-		_, _, err = fixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
+		_, err = fixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
 	}
 	if err != nil {
 		return nil, err

@@ -60,12 +60,12 @@ type proofHandle interface {
 	// the `prefix_roots` field of a CombinedTreeProof.
 	GetPrefixTrees(xs []uint64) ([][]byte, error)
 
-	// Finish verifies that the proof is done being consumed and returns and
+	// Finish verifies that the proof is done being consumed and returns an
 	// inclusion proof in the log tree for the inspected leaves.
 	Finish() ([][]byte, error)
 
 	// Output returns the produced CombinedTreeProof. It takes as input the set
-	// of inspected log leaves `leaves`, and the tree size parameters `n`, `nP`,
+	// of inspected log leaves `leaves` and the tree size parameters `n`, `nP`,
 	// and `m`.
 	Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error)
 }
@@ -296,7 +296,7 @@ func (pph *producedProofHandler) GetTimestamp(x uint64) (uint64, error) {
 
 func (pph *producedProofHandler) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
 	// Determine the greatest version of the label that exists at this point.
-	greatest, found := slices.BinarySearch(pph.index, x)
+	greatest, found := slices.BinarySearch(pph.index, x) // TODO: What if there are duplicate values?
 	if !found {
 		greatest--
 	}
