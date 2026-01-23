@@ -56,23 +56,23 @@ func TestGetBatch(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, new(memoryStore))
 
-	// Populate tree with random leaves. Retain leaf values and frontier after
-	// each append.
+	// Populate tree with random leaves. Retain leaf and full subtree values
+	// after each append.
 	var (
-		leaves    [][]byte
-		frontiers [][][]byte
+		leaves       [][]byte
+		fullSubtrees [][][]byte
 	)
 	for i := range uint64(2000) {
 		leaf := random()
 		leaves = append(leaves, leaf)
 
-		frontier, err := tree.Append(i, leaf)
+		subtrees, err := tree.Append(i, leaf)
 		if err != nil {
 			t.Fatal(err)
 		}
-		frontiers = append(frontiers, frontier)
+		fullSubtrees = append(fullSubtrees, subtrees)
 	}
-	root, err := Root(cs, 2000, frontiers[len(frontiers)-1])
+	root, err := Root(cs, 2000, fullSubtrees[len(fullSubtrees)-1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestGetBatch(t *testing.T) {
 			var m *uint64
 			if i > 0 {
 				m = &i
-				if err := verifier.Retain(*m, frontiers[*m-1]); err != nil {
+				if err := verifier.Retain(*m, fullSubtrees[*m-1]); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -111,13 +111,13 @@ func TestGetBatch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			frontier, addl, err := verifier.Evaluate(entries, 2000, nil, values, proof)
+			subtrees, addl, err := verifier.Evaluate(entries, 2000, nil, values, proof)
 			if err != nil {
 				t.Fatal(err)
 			} else if addl != nil {
-				t.Fatal("expected additional frontier to be nil")
+				t.Fatal("expected additional full subtree values to be nil")
 			}
-			cand, err := Root(cs, 2000, frontier)
+			cand, err := Root(cs, 2000, subtrees)
 			if err != nil {
 				t.Fatal(err)
 			} else if !bytes.Equal(root, cand) {
@@ -137,14 +137,14 @@ func TestAdditional(t *testing.T) {
 		roots    [][]byte
 	)
 	for i := range n {
-		frontier, err := tree.Append(i, random())
+		subtrees, err := tree.Append(i, random())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if i+1 == m {
-			retained = frontier
+			retained = subtrees
 		}
-		root, err := Root(cs, i+1, frontier)
+		root, err := Root(cs, i+1, subtrees)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,11 +161,11 @@ func TestAdditional(t *testing.T) {
 		if err := verifier.Retain(m, retained); err != nil {
 			t.Fatal(err)
 		}
-		frontier, addl, err := verifier.Evaluate(nil, n, &nP, nil, proof)
+		subtrees, addl, err := verifier.Evaluate(nil, n, &nP, nil, proof)
 		if err != nil {
 			t.Fatal(err)
 		}
-		root1, err := Root(cs, n, frontier)
+		root1, err := Root(cs, n, subtrees)
 		if err != nil {
 			t.Fatal(err)
 		} else if !bytes.Equal(root1, roots[n-1]) {

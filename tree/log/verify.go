@@ -16,7 +16,7 @@ type Verifier struct {
 
 	prev     *uint64 // Previously observed tree size, or nil if none.
 	subtrees []uint64
-	frontier [][]byte
+	values   [][]byte
 }
 
 func NewVerifier(cs suites.CipherSuite) *Verifier {
@@ -26,19 +26,19 @@ func NewVerifier(cs suites.CipherSuite) *Verifier {
 // Last returns the previously observed tree size.
 func (v *Verifier) Last() *uint64 { return v.prev }
 
-// Frontier returns the retained frontier of the tree.
-func (v *Verifier) Frontier() [][]byte { return v.frontier }
+// FullSubtrees returns the retained full subtree values of the tree.
+func (v *Verifier) FullSubtrees() [][]byte { return v.values }
 
 // Retain updates the verifier's retained state.
-func (v *Verifier) Retain(prev uint64, frontier [][]byte) error {
+func (v *Verifier) Retain(prev uint64, fullSubtrees [][]byte) error {
 	if prev == 0 || prev > math.MaxTreeSize {
 		return errors.New("invalid value for previous tree size")
 	}
 	subtrees := math.FullSubtrees(math.Root(prev), prev)
-	if len(frontier) != len(subtrees) {
-		return errors.New("frontier has unexpected length")
+	if len(fullSubtrees) != len(subtrees) {
+		return errors.New("unexpected number of full subtree values provided")
 	}
-	for _, val := range frontier {
+	for _, val := range fullSubtrees {
 		if len(val) != v.cs.HashSize() {
 			return errors.New("hash has wrong size")
 		}
@@ -46,7 +46,7 @@ func (v *Verifier) Retain(prev uint64, frontier [][]byte) error {
 
 	v.prev = &prev
 	v.subtrees = subtrees
-	v.frontier = frontier
+	v.values = fullSubtrees
 	return nil
 }
 
@@ -79,7 +79,7 @@ func (v *Verifier) Evaluate(entries []uint64, n uint64, nP *uint64, values [][]b
 		}
 	}
 	for i, x := range v.subtrees {
-		if err := v.addToMap(nodes, x, v.frontier[i]); err != nil {
+		if err := v.addToMap(nodes, x, v.values[i]); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -103,10 +103,10 @@ func (v *Verifier) Evaluate(entries []uint64, n uint64, nP *uint64, values [][]b
 		return nil, nil, err
 	}
 
-	// Extract frontier(s) and return.
-	var frontier [][]byte
+	// Extract full subtree values and return.
+	var fullSubtrees [][]byte
 	for _, x := range math.FullSubtrees(math.Root(n), n) {
-		frontier = append(frontier, nodes[x].value)
+		fullSubtrees = append(fullSubtrees, nodes[x].value)
 	}
 	var additional [][]byte
 	if nP != nil {
@@ -114,7 +114,7 @@ func (v *Verifier) Evaluate(entries []uint64, n uint64, nP *uint64, values [][]b
 			additional = append(additional, nodes[x].value)
 		}
 	}
-	return frontier, additional, nil
+	return fullSubtrees, additional, nil
 }
 
 func (v *Verifier) addToMap(m map[uint64]*nodeData, x uint64, val []byte) error {
