@@ -8,64 +8,67 @@ import (
 	"github.com/Bren2010/katie/crypto/suites"
 )
 
-type UpdatePrefix struct {
+type UpdateSuffix struct {
 	Signature []byte
 }
 
-func NewUpdatePrefix(config *PublicConfig, buf *bytes.Buffer) (*UpdatePrefix, error) {
+func NewUpdateSuffix(config *PublicConfig, buf *bytes.Buffer) (*UpdateSuffix, error) {
 	if config.Mode != ThirdPartyManagement {
-		return &UpdatePrefix{}, nil
+		return &UpdateSuffix{}, nil
 	}
 	signature, err := readU16Bytes(buf)
 	if err != nil {
 		return nil, err
 	}
-	return &UpdatePrefix{signature}, nil
+	return &UpdateSuffix{signature}, nil
 }
 
-func (up *UpdatePrefix) Marshal(buf *bytes.Buffer) error {
-	if up.Signature == nil {
+func (us *UpdateSuffix) Marshal(buf *bytes.Buffer) error {
+	if us.Signature == nil {
 		return nil
-	} else if err := writeU16Bytes(buf, up.Signature, "service operator signature"); err != nil {
+	} else if err := writeU16Bytes(buf, us.Signature, "service operator signature"); err != nil {
 		return err
 	}
 	return nil
 }
 
 type UpdateValue struct {
-	UpdatePrefix
 	Value []byte
+	UpdateSuffix
 }
 
 func NewUpdateValue(config *PublicConfig, buf *bytes.Buffer) (*UpdateValue, error) {
-	prefix, err := NewUpdatePrefix(config, buf)
-	if err != nil {
-		return nil, err
-	}
 	value, err := readU32Bytes(buf)
 	if err != nil {
 		return nil, err
 	}
-	return &UpdateValue{*prefix, value}, nil
+	suffix, err := NewUpdateSuffix(config, buf)
+	if err != nil {
+		return nil, err
+	}
+	return &UpdateValue{value, *suffix}, nil
 }
 
 func (uv *UpdateValue) Marshal(buf *bytes.Buffer) error {
-	if err := uv.UpdatePrefix.Marshal(buf); err != nil {
+	if err := writeU32Bytes(buf, uv.Value, "label value"); err != nil {
 		return err
-	} else if err := writeU32Bytes(buf, uv.Value, "label value"); err != nil {
+	} else if err := uv.UpdateSuffix.Marshal(buf); err != nil {
 		return err
 	}
 	return nil
 }
 
 type UpdateTBS struct {
+	Config  *PublicConfig
 	Label   []byte
 	Version uint32
 	Value   []byte
 }
 
 func (tbs *UpdateTBS) Marshal(buf *bytes.Buffer) error {
-	if err := writeU8Bytes(buf, tbs.Label, "label"); err != nil {
+	if err := tbs.Config.Marshal(buf); err != nil {
+		return err
+	} else if err := writeU8Bytes(buf, tbs.Label, "label"); err != nil {
 		return err
 	} else if err := binary.Write(buf, binary.BigEndian, tbs.Version); err != nil {
 		return err

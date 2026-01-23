@@ -58,7 +58,7 @@ func SearchBinaryLadder(
 		}
 
 		// Ladder ends early in two scenarios:
-		// - Inclusion proof for version greater than to the target.
+		// - Inclusion proof for version greater than target.
 		// - Non-inclusion proof for version less than or equal to the target.
 		wouldEnd := (v <= n && v > t) || (v > n && v <= t)
 		if wouldEnd {

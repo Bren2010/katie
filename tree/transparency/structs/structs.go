@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	maxUint8  int = 255
-	maxUint16 int = 65535
-	maxUint32 int = 4294967295
+	maxUint8  int = (1 << 8) - 1
+	maxUint16 int = (1 << 16) - 1
+	maxUint32 int = (1 << 32) - 1
 )
 
 func readU8Bytes(buf *bytes.Buffer) ([]byte, error) {

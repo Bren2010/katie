@@ -35,6 +35,9 @@ type Config struct {
 }
 
 func (c *Config) IsExpired(ts, rightmost uint64) bool {
+	if c.MaximumLifetime == 0 {
+		return false
+	}
 	return rightmost-ts >= c.MaximumLifetime
 }
 
@@ -96,14 +99,10 @@ func (pc *PublicConfig) Marshal(buf *bytes.Buffer) error {
 	} else if err := binary.Write(buf, binary.BigEndian, pc.ReasonableMonitoringWindow); err != nil {
 		return err
 	}
-	if pc.MaximumLifetime == 0 {
-		if err := buf.WriteByte(0); err != nil {
-			return err
-		}
-	} else {
-		if err := buf.WriteByte(1); err != nil {
-			return err
-		} else if err := binary.Write(buf, binary.BigEndian, pc.MaximumLifetime); err != nil {
+	if err := writeOptional(buf, pc.MaximumLifetime > 0); err != nil {
+		return err
+	} else if pc.MaximumLifetime > 0 {
+		if err := binary.Write(buf, binary.BigEndian, pc.MaximumLifetime); err != nil {
 			return err
 		}
 	}
