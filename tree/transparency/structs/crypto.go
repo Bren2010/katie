@@ -79,12 +79,15 @@ func (tbs *UpdateTBS) Marshal(buf *bytes.Buffer) error {
 }
 
 type CommitmentValue struct {
-	Label  []byte
-	Update UpdateValue
+	Label   []byte
+	Version uint32
+	Update  UpdateValue
 }
 
 func (cv *CommitmentValue) Marshal(buf *bytes.Buffer) error {
 	if err := writeU8Bytes(buf, cv.Label, "label"); err != nil {
+		return err
+	} else if err := binary.Write(buf, binary.BigEndian, cv.Version); err != nil {
 		return err
 	} else if err := cv.Update.Marshal(buf); err != nil {
 		return err

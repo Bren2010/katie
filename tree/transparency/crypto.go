@@ -18,7 +18,6 @@ func logEntryHash(cs suites.CipherSuite, entry structs.LogEntry) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-
 	hasher := cs.Hash()
 	hasher.Write(raw)
 	return hasher.Sum(nil), nil
@@ -55,15 +54,17 @@ func (t *Tree) getLabelIndex(label []byte) ([]uint64, error) {
 
 // setLabelIndex updates the stored index of the label.
 func (t *Tree) setLabelIndex(label []byte, index []uint64) error {
-	for i := len(index) - 1; i > 0; i-- {
-		if index[i] < index[i-1] {
+	compressed := make([]uint64, len(index))
+	copy(compressed, index)
+	for i := len(compressed) - 1; i > 0; i-- {
+		if compressed[i] < compressed[i-1] {
 			return errors.New("list of label-version positions is not monotonic")
 		}
-		index[i] -= index[i-1]
+		compressed[i] -= compressed[i-1]
 	}
 
 	buf := &bytes.Buffer{}
-	for _, pos := range index {
+	for _, pos := range compressed {
 		temp := make([]byte, binary.MaxVarintLen64)
 		n := binary.PutUvarint(temp, pos)
 		buf.Write(temp[:n])
@@ -85,7 +86,14 @@ func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, err
 		size := t.config.Suite.CommitmentOpeningSize()
 		return &structs.LabelValue{Opening: make([]byte, size)}, nil
 	}
-	return structs.NewLabelValue(t.config.Public(), bytes.NewBuffer(raw))
+	buf := bytes.NewBuffer(raw)
+	labelValue, err := structs.NewLabelValue(t.config.Public(), buf)
+	if err != nil {
+		return nil, err
+	} else if buf.Len() != 0 {
+		return nil, errors.New("unexpected data appended to label value")
+	}
+	return labelValue, nil
 }
 
 // setLabelValue generates a new commitment opening and sets the given
@@ -102,7 +110,11 @@ func (t *Tree) setLabelValue(label []byte, ver uint32, value structs.UpdateValue
 	}
 
 	// Serialize the data that will be committed to and compute the commitment.
-	commitmentValue, err := structs.Marshal(&structs.CommitmentValue{Label: label, Update: value})
+	commitmentValue, err := structs.Marshal(&structs.CommitmentValue{
+		Label:   label,
+		Version: ver,
+		Update:  value,
+	})
 	if err != nil {
 		return nil, err
 	}

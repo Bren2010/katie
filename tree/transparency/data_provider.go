@@ -47,9 +47,9 @@ func addPrefixTree(collection map[uint64][]byte, pos uint64, root []byte) error 
 	return nil
 }
 
-// dataProvider is given as an input to several of the algorithm
-// implementations. It handles the deduplication aspect of extracting
-// information from a CombinedTreeProof.
+// dataProvider is given as an input to the algorithm implementations. It wraps
+// a proofHandle and handles the deduplication aspect of extracting information
+// from a CombinedTreeProof.
 type dataProvider struct {
 	cs     suites.CipherSuite
 	handle proofHandle
@@ -163,8 +163,8 @@ func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i, leaf := range leaves {
-		if leaf.PrefixTree == nil {
+	for i := range leaves {
+		if leaves[i].PrefixTree == nil {
 			dp.prefixTrees[leaves[i].position] = prefixTrees[0]
 			leaves[i].PrefixTree = prefixTrees[0]
 			prefixTrees = prefixTrees[1:]
@@ -175,9 +175,9 @@ func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 }
 
 type proofResult struct {
-	frontier   [][]byte                    // The frontier for the user to retain.
-	additional [][]byte                    // The additional frontier, if requested.
-	logEntries map[uint64]structs.LogEntry // Log entries for the user to retain.
+	fullSubtrees [][]byte                    // The full subtrees for the user to retain.
+	additional   [][]byte                    // The additional tree head, if requested.
+	logEntries   map[uint64]structs.LogEntry // Log entries for the user to retain.
 }
 
 // Finish takes as input the current tree size `n`, an optional additional tree
@@ -193,7 +193,6 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 	// log entry hashes.
 	positions := make([]uint64, len(leaves))
 	values := make([][]byte, len(leaves))
-
 	for i, leaf := range leaves {
 		positions[i] = leaf.position
 		values[i], err = logEntryHash(dp.cs, leaf.LogEntry)
@@ -202,7 +201,7 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 		}
 	}
 
-	// Evaluate the inclusion proof to find the log's new frontier.
+	// Evaluate the inclusion proof to find the log's new full subtrees.
 	proof, err := dp.handle.Finish()
 	if err != nil {
 		return nil, err
@@ -213,7 +212,7 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 			return nil, err
 		}
 	}
-	frontier, additional, err := verifier.Evaluate(positions, n, nP, values, proof)
+	subtrees, additional, err := verifier.Evaluate(positions, n, nP, values, proof)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +231,7 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 		logEntries[x] = structs.LogEntry{Timestamp: ts, PrefixTree: prefixTree}
 	}
 
-	return &proofResult{frontier, additional, logEntries}, nil
+	return &proofResult{subtrees, additional, logEntries}, nil
 }
 
 // Output takes as input the current tree size `n`, an optional additional tree

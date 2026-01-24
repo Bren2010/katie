@@ -284,7 +284,7 @@ func (pph *producedProofHandler) GetTimestamp(x uint64) (uint64, error) {
 	if !ok {
 		return 0, errors.New("requested log entry not found")
 	}
-	entry, err := structs.NewLogEntry(pph.cs, bytes.NewBuffer(raw))
+	entry, err := structs.NewLogEntry(pph.cs, bytes.NewBuffer(raw)) // TODO: Parse better
 	if err != nil {
 		return 0, err
 	}

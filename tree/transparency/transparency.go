@@ -125,7 +125,11 @@ func (t *Tree) Mutate(add []LabelValue) (*structs.AuditorUpdate, error) {
 	}
 
 	// Sign and persist the new tree head.
-	tbs, err := structs.Marshal(&structs.TreeHeadTBS{Config: t.config.Public(), TreeSize: n + 1, Root: root})
+	tbs, err := structs.Marshal(&structs.TreeHeadTBS{
+		Config:   t.config.Public(),
+		TreeSize: n + 1,
+		Root:     root,
+	})
 	if err != nil {
 		return nil, err
 	}
