@@ -111,14 +111,20 @@ func (ldb *ldbTransparencyStore) SetAuditorTreeHead(raw []byte) error {
 	return nil
 }
 
-func (ldb *ldbTransparencyStore) GetLabelIndex(label []byte) ([]byte, error) {
-	raw, err := ldb.conn.Get("i" + fmt.Sprintf("%x", label))
-	if err == leveldb.ErrNotFound {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
+func (ldb *ldbTransparencyStore) BatchGetLabelIndex(labels [][]byte) ([][]byte, error) {
+	out := make([][]byte, len(labels))
+
+	for i, label := range labels {
+		raw, err := ldb.conn.Get("i" + fmt.Sprintf("%x", label))
+		if err == leveldb.ErrNotFound {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out[i] = raw
 	}
-	return raw, nil
+
+	return out, nil
 }
 
 func (ldb *ldbTransparencyStore) SetLabelIndex(label, index []byte) error {

@@ -345,7 +345,7 @@ func (pph *producedProofHandler) GetMonitoringBinaryLadder(x uint64, ver uint32)
 	if err != nil {
 		return nil, err
 	}
-	ladder := math.MonitoringBinaryLadder(ver, pph.tracker.MonitoringMap(x))
+	ladder := math.MonitoringBinaryLadder(ver, pph.tracker.MonitoringMap(x)) // TODO: This is never populated with anything.
 	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: ladder})
 	return entry.PrefixTree, nil
 }

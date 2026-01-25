@@ -23,33 +23,39 @@ func logEntryHash(cs suites.CipherSuite, entry structs.LogEntry) ([]byte, error)
 	return hasher.Sum(nil), nil
 }
 
-// getLabelIndex returns the index (the list of log entries where each new
-// version was added) of a given label.
+// getLabelIndices returns the index (the list of log entries where each new
+// version was added) of each of the given labels.
 //
 // The index is stored as an encoded series of uvarints. For compression, only
 // the difference between each subsequent entry is stored.
-func (t *Tree) getLabelIndex(label []byte) ([]uint64, error) {
-	raw, err := t.tx.GetLabelIndex(label)
+func (t *Tree) getLabelIndices(labels [][]byte) ([][]uint64, error) {
+	rawIndices, err := t.tx.BatchGetLabelIndex(labels)
 	if err != nil {
 		return nil, err
 	}
-	buf := bytes.NewBuffer(raw)
 
-	index := make([]uint64, 0)
-	for {
-		pos, err := binary.ReadUvarint(buf)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, err
+	out := make([][]uint64, len(rawIndices))
+	for i, raw := range rawIndices {
+		buf := bytes.NewBuffer(raw)
+		index := make([]uint64, 0)
+
+		for {
+			pos, err := binary.ReadUvarint(buf)
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, err
+			}
+			index = append(index, pos)
 		}
-		index = append(index, pos)
+		for i := 1; i < len(index); i++ {
+			index[i] += index[i-1]
+		}
+
+		out[i] = index
 	}
 
-	for i := 1; i < len(index); i++ {
-		index[i] += index[i-1]
-	}
-	return index, nil
+	return out, nil
 }
 
 // setLabelIndex updates the stored index of the label.
