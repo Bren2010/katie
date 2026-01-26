@@ -32,9 +32,11 @@ func TestTree(t *testing.T) {
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 			data[vrfOutput] = commitment
 		}
-		root, proof, err := tree.Mutate(ver, entries, nil)
+		root, proof, commitments, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
+		} else if len(commitments) > 0 {
+			t.Fatal("unexpected number of commitments provided")
 		}
 		roots = append(roots, root)
 
@@ -73,15 +75,15 @@ func TestUnableToInsertSameTwice(t *testing.T) {
 	store := newMemoryPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, err := tree.Mutate(0, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
+	_, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = tree.Mutate(1, []Entry{{makeBytes(1), makeBytes(1)}, {makeBytes(1), makeBytes(1)}}, nil)
+	_, _, _, err = tree.Mutate(1, []Entry{{makeBytes(1), makeBytes(1)}, {makeBytes(1), makeBytes(1)}}, nil)
 	if err == nil {
 		t.Fatal("mutate did not return error when it should have")
 	}
-	_, _, err = tree.Mutate(1, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
+	_, _, _, err = tree.Mutate(1, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
 	if err == nil {
 		t.Fatal("mutate did not return error when it should have")
 	}
@@ -92,7 +94,7 @@ func TestUnableToAddAndRemoveSame(t *testing.T) {
 	store := newMemoryPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, err := tree.Mutate(
+	_, _, _, err := tree.Mutate(
 		0,
 		[]Entry{{makeBytes(0), makeBytes(0)}, {makeBytes(1), makeBytes(1)}},
 		[][]byte{makeBytes(1)},
@@ -107,16 +109,20 @@ func TestRemove(t *testing.T) {
 	store := newMemoryPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, err := tree.Mutate(0, []Entry{
+	_, _, commitments, err := tree.Mutate(0, []Entry{
 		{makeBytes(0), makeBytes(0)},
 		{makeBytes(1), makeBytes(1)},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
+	} else if len(commitments) > 0 {
+		t.Fatal("unexpected number of commitments returned")
 	}
-	_, _, err = tree.Mutate(1, nil, [][]byte{makeBytes(0)})
+	_, _, commitments, err = tree.Mutate(1, nil, [][]byte{makeBytes(0)})
 	if err != nil {
 		t.Fatal(err)
+	} else if len(commitments) != 1 || !bytes.Equal(commitments[0], makeBytes(0)) {
+		t.Fatal("unexpected commitment returned")
 	}
 
 	res, err := tree.Search([]PrefixSearch{{2, [][]byte{makeBytes(0), makeBytes(1)}}})
@@ -150,9 +156,11 @@ func buildRandomTree(t *testing.T, cs suites.CipherSuite) (*Tree, [][]byte, [][]
 			vrfOutput, commitment := randomBytes(), randomBytes()
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 		}
-		root, _, err := tree.Mutate(ver, entries, nil)
+		root, _, commitments, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
+		} else if len(commitments) > 0 {
+			t.Fatal("unexpected number of commitments returned")
 		}
 		roots = append(roots, root)
 		allEntries = append(allEntries, entries)

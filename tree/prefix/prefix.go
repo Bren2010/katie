@@ -72,12 +72,13 @@ type Entry struct {
 }
 
 // Mutate adds a set of new entries to the tree, removes the requested entries,
-// and increments the version counter. It returns the new root hash and a batch
-// proof from just before the additions and removals were applied.
+// and increments the version counter. It returns the new root hash, a batch
+// proof from just before the additions and removals were applied, and the
+// removed commitments.
 //
 // The current tree version is given in `ver`, which is 0 if the tree is empty.
 // After this, version `ver+1` of the tree will exist.
-func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *PrefixProof, error) {
+func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *PrefixProof, [][]byte, error) {
 	// Sort the list of new entries to add and verify that they're well formed.
 	sortedAdd := make([]Entry, len(add))
 	copy(sortedAdd, add)
@@ -86,11 +87,11 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	})
 	for i, entry := range sortedAdd {
 		if len(entry.VrfOutput) != t.cs.HashSize() {
-			return nil, nil, errors.New("unexpected vrf output length")
+			return nil, nil, nil, errors.New("unexpected vrf output length")
 		} else if len(entry.Commitment) != t.cs.HashSize() {
-			return nil, nil, errors.New("unexpected commitment length")
+			return nil, nil, nil, errors.New("unexpected commitment length")
 		} else if i > 0 && bytes.Equal(sortedAdd[i-1].VrfOutput, entry.VrfOutput) {
-			return nil, nil, errors.New("unable to insert same vrf output multiple times")
+			return nil, nil, nil, errors.New("unable to insert same vrf output multiple times")
 		}
 	}
 
@@ -100,9 +101,9 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	slices.SortFunc(sortedRemove, bytes.Compare)
 	for i, vrfOutput := range sortedRemove {
 		if len(vrfOutput) != t.cs.HashSize() {
-			return nil, nil, errors.New("unexpected vrf output length")
+			return nil, nil, nil, errors.New("unexpected vrf output length")
 		} else if i > 0 && bytes.Equal(sortedRemove[i-1], vrfOutput) {
-			return nil, nil, errors.New("unable to remove the same vrf output multiple times")
+			return nil, nil, nil, errors.New("unable to remove the same vrf output multiple times")
 		}
 	}
 
@@ -115,14 +116,14 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 		case 1:
 			j++
 		default:
-			return nil, nil, errors.New("can not add and remove the same vrf output")
+			return nil, nil, nil, errors.New("can not add and remove the same vrf output")
 		}
 	}
 
 	// Load necessary tiles into memory. Add new entries. Create tiles.
-	root, proof, err := t.getMutationRoot(ver, add, remove)
+	root, proof, commitments, err := t.getMutationRoot(ver, add, remove)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	addRemoveEntries(t.cs, &root, sortedAdd, sortedRemove, 0)
 
@@ -134,20 +135,20 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	for _, tile := range tiles {
 		raw, err := tile.Marshal(t.cs)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		data[tile.id.String()] = raw
 	}
 	if err := t.tx.BatchPut(data); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return rootHash, proof, nil
+	return rootHash, proof, commitments, nil
 }
 
 // getMutationRoot returns the node to operate on for our mutation. It also
 // returns the prior-version PrefixProof.
-func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, *PrefixProof, error) {
+func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, *PrefixProof, [][]byte, error) {
 	vrfOutputs := make([][]byte, 0, len(add)+len(remove))
 	for _, entry := range add {
 		vrfOutputs = append(vrfOutputs, entry.VrfOutput)
@@ -155,26 +156,34 @@ func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, 
 	vrfOutputs = append(vrfOutputs, remove...)
 
 	if ver == 0 {
+		if len(remove) > 0 {
+			return nil, nil, nil, errors.New("can not remove vrf output that does not exist")
+		}
 		root := emptyNode{}
 		proof, _ := runProofBuilder(t.cs, root, vrfOutputs)
-		return root, &proof, nil
+		return root, &proof, nil, nil
 	}
 
 	b := newBatch(t.cs, t.tx)
 	res, state := b.initialize(map[uint64][][]byte{ver: vrfOutputs})
 	if err := b.search(state); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	root := res[ver].root
 
 	proof, commitments := runProofBuilder(t.cs, root, vrfOutputs)
 	for _, commitment := range commitments[:len(add)] {
 		if commitment != nil {
-			return nil, nil, errors.New("can not insert same vrf output twice")
+			return nil, nil, nil, errors.New("can not insert same vrf output twice")
+		}
+	}
+	for _, commitment := range commitments[len(add):] {
+		if commitment == nil {
+			return nil, nil, nil, errors.New("can not remove vrf output that does not exist")
 		}
 	}
 
-	return root, &proof, nil
+	return root, &proof, commitments[len(add):], nil
 }
 
 type indexedVrfOutput struct {
