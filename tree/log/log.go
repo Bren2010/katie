@@ -147,9 +147,10 @@ func (t *Tree) Append(n uint64, value []byte) ([][]byte, error) {
 	}
 
 	// Commit modifications to database.
-	data := set.marshal()
-	if err := t.tx.BatchPut(data); err != nil {
-		return nil, err
+	for key, value := range set.marshal() {
+		if err := t.tx.Put(key, value); err != nil {
+			return nil, err
+		}
 	}
 
 	// Get full subtree values and return.

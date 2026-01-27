@@ -42,13 +42,16 @@ func (m *memoryStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
 	return out, nil
 }
 
-func (m *memoryStore) BatchPut(data map[uint64][]byte) error {
+func (m *memoryStore) Put(key uint64, value []byte) error {
 	if m.Data == nil {
 		m.Data = make(map[uint64][]byte)
 	}
-	for key, d := range data {
-		m.Data[key] = dup(d)
-	}
+	m.Data[key] = dup(value)
+	return nil
+}
+
+func (m *memoryStore) Delete(key uint64) error {
+	delete(m.Data, key)
 	return nil
 }
 

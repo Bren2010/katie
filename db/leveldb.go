@@ -10,6 +10,9 @@ import (
 const leveldbTreeHeadKey = "tree-head"
 
 func dup(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
 	out := make([]byte, len(in))
 	copy(out, in)
 	return out
@@ -29,6 +32,9 @@ func newLDBConn(conn *leveldb.DB, readonly bool) *ldbConn {
 
 func (c *ldbConn) Get(key string) ([]byte, error) {
 	if value, ok := c.batch[key]; ok {
+		if value == nil {
+			return nil, leveldb.ErrNotFound
+		}
 		return dup(value), nil
 	}
 	return c.conn.Get([]byte(key), nil)
@@ -50,8 +56,11 @@ func (c *ldbConn) Commit() error {
 	for key, value := range c.batch {
 		if key == leveldbTreeHeadKey {
 			continue
+		} else if value == nil {
+			b.Delete([]byte(key))
+		} else {
+			b.Put([]byte(key), value)
 		}
-		b.Put([]byte(key), value)
 	}
 	if err := c.conn.Write(b, nil); err != nil {
 		return err
@@ -101,17 +110,17 @@ func (ldb *ldbTransparencyStore) GetTreeHead() ([]byte, []byte, error) {
 	return treeHead, auditor, nil
 }
 
-func (ldb *ldbTransparencyStore) SetTreeHead(raw []byte) error {
+func (ldb *ldbTransparencyStore) PutTreeHead(raw []byte) error {
 	ldb.conn.Put(leveldbTreeHeadKey, raw)
 	return nil
 }
 
-func (ldb *ldbTransparencyStore) SetAuditorTreeHead(raw []byte) error {
+func (ldb *ldbTransparencyStore) PutAuditorTreeHead(raw []byte) error {
 	ldb.conn.Put("auditor-tree-head", raw)
 	return nil
 }
 
-func (ldb *ldbTransparencyStore) BatchGetLabelIndex(labels [][]byte) ([][]byte, error) {
+func (ldb *ldbTransparencyStore) BatchGetIndex(labels [][]byte) ([][]byte, error) {
 	out := make([][]byte, len(labels))
 
 	for i, label := range labels {
@@ -127,12 +136,20 @@ func (ldb *ldbTransparencyStore) BatchGetLabelIndex(labels [][]byte) ([][]byte, 
 	return out, nil
 }
 
-func (ldb *ldbTransparencyStore) SetLabelIndex(label, index []byte) error {
+func (ldb *ldbTransparencyStore) PutIndex(label, index []byte) error {
+	if index == nil {
+		return errors.New("leveldb: can not store nil value")
+	}
 	ldb.conn.Put("i"+fmt.Sprintf("%x", label), index)
 	return nil
 }
 
-func (ldb *ldbTransparencyStore) GetLabelValue(label []byte, ver uint32) ([]byte, error) {
+func (ldb *ldbTransparencyStore) DeleteIndex(label []byte) error {
+	ldb.conn.Put("i"+fmt.Sprintf("%x", label), nil)
+	return nil
+}
+
+func (ldb *ldbTransparencyStore) GetVersion(label []byte, ver uint32) ([]byte, error) {
 	raw, err := ldb.conn.Get("v" + fmt.Sprintf("%x:%x", label, ver))
 	if err == leveldb.ErrNotFound {
 		return nil, nil
@@ -142,8 +159,16 @@ func (ldb *ldbTransparencyStore) GetLabelValue(label []byte, ver uint32) ([]byte
 	return raw, nil
 }
 
-func (ldb *ldbTransparencyStore) SetLabelValue(label []byte, ver uint32, data []byte) error {
+func (ldb *ldbTransparencyStore) PutVersion(label []byte, ver uint32, data []byte) error {
+	if data == nil {
+		return errors.New("leveldb: can not store nil value")
+	}
 	ldb.conn.Put("v"+fmt.Sprintf("%x:%x", label, ver), data)
+	return nil
+}
+
+func (ldb *ldbTransparencyStore) DeleteVersion(label []byte, ver uint32) error {
+	ldb.conn.Put("v"+fmt.Sprintf("%x:%x", label, ver), nil)
 	return nil
 }
 
@@ -164,7 +189,15 @@ func (ldb *ldbTransparencyStore) BatchGet(keys []uint64) (map[uint64][]byte, err
 }
 
 func (ldb *ldbTransparencyStore) Put(key uint64, data []byte) error {
+	if data == nil {
+		return errors.New("leveldb: can not store nil value")
+	}
 	ldb.conn.Put("t"+fmt.Sprint(key), data)
+	return nil
+}
+
+func (ldb *ldbTransparencyStore) Delete(key uint64) error {
+	ldb.conn.Put("t"+fmt.Sprint(key), nil)
 	return nil
 }
 
@@ -201,10 +234,16 @@ func (ls *ldbLogStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
 	return out, nil
 }
 
-func (ls *ldbLogStore) BatchPut(data map[uint64][]byte) error {
-	for key, value := range data {
-		ls.conn.Put("l"+fmt.Sprint(key), value)
+func (ls *ldbLogStore) Put(key uint64, value []byte) error {
+	if value == nil {
+		return errors.New("leveldb: can not store nil value")
 	}
+	ls.conn.Put("l"+fmt.Sprint(key), value)
+	return nil
+}
+
+func (ls *ldbLogStore) Delete(key uint64) error {
+	ls.conn.Put("l"+fmt.Sprint(key), nil)
 	return nil
 }
 
@@ -229,9 +268,15 @@ func (ps *ldbPrefixStore) BatchGet(keys []string) (map[string][]byte, error) {
 	return out, nil
 }
 
-func (ps *ldbPrefixStore) BatchPut(data map[string][]byte) error {
-	for key, value := range data {
-		ps.conn.Put("p"+key, value)
+func (ps *ldbPrefixStore) Put(key string, value []byte) error {
+	if value == nil {
+		return errors.New("leveldb: can not store nil value")
 	}
+	ps.conn.Put("p"+key, value)
+	return nil
+}
+
+func (ps *ldbPrefixStore) Delete(key string) error {
+	ps.conn.Put("p"+key, nil)
 	return nil
 }

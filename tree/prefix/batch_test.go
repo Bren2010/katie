@@ -35,10 +35,13 @@ func (m *memoryPrefixStore) BatchGet(keys []string) (map[string][]byte, error) {
 	return out, nil
 }
 
-func (m *memoryPrefixStore) BatchPut(data map[string][]byte) error {
-	for key, val := range data {
-		m.data[key] = dup(val)
-	}
+func (m *memoryPrefixStore) Put(key string, value []byte) error {
+	m.data[key] = dup(value)
+	return nil
+}
+
+func (m *memoryPrefixStore) Delete(key string) error {
+	delete(m.data, key)
 	return nil
 }
 
@@ -99,12 +102,10 @@ func batchTestSetup() (suites.CipherSuite, *memoryPrefixStore, node, node) {
 	}
 
 	store := newMemoryPrefixStore()
-	store.BatchPut(map[string][]byte{
-		tile0.id.String(): bytes0,
-		tile1.id.String(): bytes1,
-		tile2.id.String(): bytes2,
-		tile3.id.String(): bytes3,
-	})
+	store.Put(tile0.id.String(), bytes0)
+	store.Put(tile1.id.String(), bytes1)
+	store.Put(tile2.id.String(), bytes2)
+	store.Put(tile3.id.String(), bytes3)
 
 	return cs, store, tree1, tree2
 }

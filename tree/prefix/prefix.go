@@ -131,16 +131,13 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	tiles := splitIntoTiles(t.cs, ver+1, root)
 
 	// Write tiles to database.
-	data := make(map[string][]byte, len(tiles))
 	for _, tile := range tiles {
 		raw, err := tile.Marshal(t.cs)
 		if err != nil {
 			return nil, nil, nil, err
+		} else if err := t.tx.Put(tile.id.String(), raw); err != nil {
+			return nil, nil, nil, err
 		}
-		data[tile.id.String()] = raw
-	}
-	if err := t.tx.BatchPut(data); err != nil {
-		return nil, nil, nil, err
 	}
 
 	return rootHash, proof, commitments, nil

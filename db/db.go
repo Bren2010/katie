@@ -4,14 +4,16 @@ package db
 // LogStore is the interface a Log Tree uses to communicate with its database.
 type LogStore interface {
 	BatchGet(keys []uint64) (map[uint64][]byte, error)
-	BatchPut(data map[uint64][]byte) error
+	Put(key uint64, value []byte) error
+	Delete(key uint64) error
 }
 
 // PrefixStore is the interface a Prefix Tree uses to communicate with its
 // database.
 type PrefixStore interface {
 	BatchGet(keys []string) (map[string][]byte, error)
-	BatchPut(data map[string][]byte) error
+	Put(key string, value []byte) error
+	Delete(key string) error
 }
 
 // TransparencyStore is the interface a Transparency Log implementation uses to
@@ -22,17 +24,20 @@ type TransparencyStore interface {
 	Clone() TransparencyStore
 
 	GetTreeHead() (treeHead, auditor []byte, err error)
-	SetTreeHead(raw []byte) error
-	SetAuditorTreeHead(raw []byte) error
+	PutTreeHead(raw []byte) error
+	PutAuditorTreeHead(raw []byte) error
 
-	BatchGetLabelIndex(label [][]byte) ([][]byte, error)
-	SetLabelIndex(label, index []byte) error
+	BatchGetIndex(label [][]byte) ([][]byte, error)
+	PutIndex(label, index []byte) error
+	DeleteIndex(label []byte) error
 
-	GetLabelValue(label []byte, ver uint32) ([]byte, error)
-	SetLabelValue(label []byte, ver uint32, data []byte) error
+	GetVersion(label []byte, ver uint32) ([]byte, error)
+	PutVersion(label []byte, ver uint32, data []byte) error
+	DeleteVersion(label []byte, ver uint32) error
 
 	BatchGet(keys []uint64) (map[uint64][]byte, error)
 	Put(key uint64, data []byte) error
+	Delete(key uint64) error
 
 	LogStore() LogStore
 	PrefixStore() PrefixStore
