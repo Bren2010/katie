@@ -107,19 +107,6 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 		}
 	}
 
-	// Check for intersection between sortedAdd and sortedRemove
-	for i, j := 0, 0; i < len(sortedAdd) && j < len(sortedRemove); {
-		cmp := bytes.Compare(sortedAdd[i].VrfOutput, sortedRemove[j])
-		switch cmp {
-		case -1:
-			i++
-		case 1:
-			j++
-		default:
-			return nil, nil, nil, errors.New("can not add and remove the same vrf output")
-		}
-	}
-
 	// Load necessary tiles into memory. Add new entries. Create tiles.
 	root, proof, commitments, err := t.getMutationRoot(ver, add, remove)
 	if err != nil {
@@ -169,8 +156,20 @@ func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, 
 	root := res[ver].root
 
 	proof, commitments := runProofBuilder(t.cs, root, vrfOutputs)
-	for _, commitment := range commitments[:len(add)] {
+	for i, commitment := range commitments[:len(add)] {
 		if commitment != nil {
+			// This VRF output already exists in the prefix tree. Check if it's
+			// being removed in this same request, otherwise return an error.
+			found := false
+			for _, vrfOutput := range vrfOutputs[len(add):] {
+				if bytes.Equal(vrfOutputs[i], vrfOutput) {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
 			return nil, nil, nil, errors.New("can not insert same vrf output twice")
 		}
 	}

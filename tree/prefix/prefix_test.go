@@ -143,6 +143,45 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestReplace(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	store := newMemoryPrefixStore()
+
+	tree := NewTree(cs, store)
+	_, _, commitments, err := tree.Mutate(0, []Entry{
+		{makeBytes(0), makeBytes(0)},
+		{makeBytes(1), makeBytes(1)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(commitments) > 0 {
+		t.Fatal("unexpected number of commitments returned")
+	}
+	_, _, commitments, err = tree.Mutate(1, []Entry{
+		{makeBytes(0), makeBytes(2)},
+	}, [][]byte{makeBytes(0)})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(commitments) != 1 || !bytes.Equal(commitments[0], makeBytes(0)) {
+		t.Fatal("unexpected commitment returned")
+	}
+
+	res, err := tree.Search([]PrefixSearch{{2, [][]byte{makeBytes(0), makeBytes(1)}}})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res) != 1 {
+		t.Fatal("unexpected number of results returned")
+	}
+	verRes := res[0]
+	if len(verRes.Commitments) != 2 || len(verRes.Proof.Results) != 2 {
+		t.Fatal("unexpected number of results provided")
+	} else if !bytes.Equal(verRes.Commitments[0], makeBytes(2)) || !bytes.Equal(verRes.Commitments[1], makeBytes(1)) {
+		t.Fatal("unexpected commitments returned")
+	} else if !verRes.Proof.Results[0].Inclusion() || !verRes.Proof.Results[1].Inclusion() {
+		t.Fatal("unexpected search result")
+	}
+}
+
 func buildRandomTree(t *testing.T, cs suites.CipherSuite) (*Tree, [][]byte, [][]Entry) {
 	store := newMemoryPrefixStore()
 
