@@ -15,8 +15,12 @@ var (
 
 // rightmostDistinguished returns the position of the rightmost distinguished
 // log entry, or nil if there is none. The public config for the Transparency
-// Log is given in `config`, and the size of the tree is `n`.
+// Log is given in `config` and the size of the tree is `n`.
 func rightmostDistinguished(config *structs.PublicConfig, n uint64, provider *dataProvider) (*uint64, error) {
+	if n == 0 {
+		return nil, nil
+	}
+
 	// If the root node is not distinguished, then nothing is.
 	rightmost, err := provider.GetTimestamp(n - 1)
 	if err != nil {

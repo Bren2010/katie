@@ -3,24 +3,14 @@ package transparency
 import (
 	"bytes"
 	"errors"
-	"fmt"
-	"slices"
-	"time"
 
 	"github.com/Bren2010/katie/db"
-	"github.com/Bren2010/katie/tree/log"
-	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
 type LabelValue struct {
 	Label []byte
 	Value structs.UpdateValue
-}
-
-type LabelVersion struct {
-	Label   []byte
-	Version uint32
 }
 
 // Tree is an implementation of a Transparency Tree that handles all state
@@ -67,152 +57,6 @@ func NewTree(config structs.PrivateConfig, tx db.TransparencyStore) (*Tree, erro
 		treeHead:    treeHead,
 		auditorHead: auditorHead,
 	}, nil
-}
-
-// Mutate takes a set of new label-value pairs to insert. Version counters are
-// automatically assigned. The same label may be present multiple times, in
-// which case each subsequent instance is assigned to the subsequent version.
-//
-// It returns the AuditorUpdate structure for the Third-Party Auditor, if any.
-func (t *Tree) Mutate(add []LabelValue, remove []LabelVersion) (*structs.AuditorUpdate, error) {
-	n := uint64(0)
-	if t.treeHead != nil {
-		n = t.treeHead.TreeSize
-	}
-
-	// Organize the requested mutations into groups of the same label.
-	allLabels := make(map[string][]byte)
-
-	groupedAdds := make(map[string][]LabelValue)
-	for _, pair := range add {
-		labelStr := fmt.Sprintf("%x", pair.Label)
-		allLabels[labelStr] = pair.Label
-		groupedAdds[labelStr] = append(groupedAdds[labelStr], pair)
-	}
-
-	groupedRemoves := make(map[string][]LabelVersion)
-	for _, pair := range remove {
-		labelStr := fmt.Sprintf("%x", pair.Label)
-		allLabels[labelStr] = pair.Label
-		groupedRemoves[labelStr] = append(groupedRemoves[labelStr], pair)
-	}
-
-	// Batch look up each label's index.
-	labelStrs := make([]string, 0, len(allLabels))
-	labels := make([][]byte, 0, len(allLabels))
-	for labelStr, label := range allLabels {
-		labelStrs = append(labelStrs, labelStr)
-		labels = append(labels, label)
-	}
-
-	indices, err := t.getLabelIndices(labels)
-	if err != nil {
-		return nil, err
-	}
-
-	// Process the mutation for each label individually and collect the set of
-	// additions and removals that we want to do to the prefix tree.
-	var (
-		prefixAdd    []prefix.Entry
-		prefixRemove [][]byte
-	)
-	for i, labelStr := range labelStrs {
-		pa, pr, err := t.mutateLabel(indices[i], groupedAdds[labelStr], groupedRemoves[labelStr])
-		if err != nil {
-			return nil, err
-		}
-		prefixAdd = append(prefixAdd, pa...)
-		prefixRemove = append(prefixRemove, pr...)
-	}
-
-	// Sort the new additions and removals by VRF output to avoid
-	// unintentionally leaking information to the Third-Party Auditor, if there
-	// is one.
-	slices.SortFunc(prefixAdd, func(a, b prefix.Entry) int {
-		return bytes.Compare(a.VrfOutput, b.VrfOutput)
-	})
-	slices.SortFunc(prefixRemove, bytes.Compare)
-
-	// Make the required modifications to the prefix tree.
-	prefixTree := prefix.NewTree(t.config.Suite, t.tx.PrefixStore())
-	prefixRoot, prefixProof, err := prefixTree.Mutate(n, prefixAdd, prefixRemove)
-	if err != nil {
-		return nil, err
-	}
-
-	// Compute the new log entry leaf hash and append it to the log tree.
-	logEntry := structs.LogEntry{
-		Timestamp:  uint64(time.Now().UnixMilli()), // TODO: Check monotonic?
-		PrefixTree: prefixRoot,
-	}
-	leaf, err := logEntryHash(t.config.Suite, logEntry)
-	if err != nil {
-		return nil, err
-	}
-	fullSubtrees, err := log.NewTree(t.config.Suite, t.tx.LogStore()).Append(n, leaf)
-	if err != nil {
-		return nil, err
-	}
-	root, err := log.Root(t.config.Suite, n+1, fullSubtrees)
-	if err != nil {
-		return nil, err
-	}
-
-	// Sign and persist the new tree head.
-	tbs, err := structs.Marshal(&structs.TreeHeadTBS{
-		Config:   t.config.Public(),
-		TreeSize: n + 1,
-		Root:     root,
-	})
-	if err != nil {
-		return nil, err
-	}
-	signature, err := t.config.SignatureKey.Sign(tbs)
-	if err != nil {
-		return nil, err
-	}
-	treeHead, err := structs.Marshal(&structs.TreeHead{TreeSize: n + 1, Signature: signature})
-	if err != nil {
-		return nil, err
-	} else if err := t.tx.SetTreeHead(treeHead); err != nil {
-		return nil, err
-	} else if err := t.tx.Commit(); err != nil {
-		return nil, err
-	}
-
-	return &structs.AuditorUpdate{
-		Timestamp: logEntry.Timestamp,
-		Added:     prefixAdd,
-		Removed:   prefixRemove,
-		Proof:     *prefixProof,
-	}, nil
-}
-
-// addLabelValues adds a new set of label values to the Transparency Log. All
-// entries in `add` must be for the same label.
-func (t *Tree) addLabelValues(n uint64, prefixAdd *[]prefix.Entry, group []LabelValue) error {
-	index, err := t.getLabelIndex(group[0].Label)
-	if err != nil {
-		return err
-	}
-
-	for _, pair := range group {
-		ver := uint32(len(index))
-
-		vrfOutput, _, err := t.computeVrfOutput(pair.Label, ver)
-		if err != nil {
-			return err
-		}
-		commitment, err := t.setLabelValue(group[0].Label, ver, pair.Value)
-		if err != nil {
-			return err
-		}
-
-		*prefixAdd = append(*prefixAdd, prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment})
-		index = append(index, n)
-	}
-
-	return t.setLabelIndex(group[0].Label, index)
 }
 
 // func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, nP, m *uint64, err error) {

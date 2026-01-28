@@ -23,13 +23,13 @@ func logEntryHash(cs suites.CipherSuite, entry structs.LogEntry) ([]byte, error)
 	return hasher.Sum(nil), nil
 }
 
-// getLabelIndices returns the index (the list of log entries where each new
+// batchGetIndex returns the index (the list of log entries where each new
 // version was added) of each of the given labels.
 //
 // The index is stored as an encoded series of uvarints. For compression, only
 // the difference between each subsequent entry is stored.
-func (t *Tree) getLabelIndices(labels [][]byte) ([][]uint64, error) {
-	rawIndices, err := t.tx.BatchGetLabelIndex(labels)
+func (t *Tree) batchGetIndex(labels [][]byte) ([][]uint64, error) {
+	rawIndices, err := t.tx.BatchGetIndex(labels)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +58,8 @@ func (t *Tree) getLabelIndices(labels [][]byte) ([][]uint64, error) {
 	return out, nil
 }
 
-// setLabelIndex updates the stored index of the label.
-func (t *Tree) setLabelIndex(label []byte, index []uint64) error {
+// putIndex updates the stored index of the label.
+func (t *Tree) putIndex(label []byte, index []uint64) error {
 	compressed := make([]uint64, len(index))
 	copy(compressed, index)
 	for i := len(compressed) - 1; i > 0; i-- {
@@ -76,13 +76,13 @@ func (t *Tree) setLabelIndex(label []byte, index []uint64) error {
 		buf.Write(temp[:n])
 	}
 
-	return t.tx.SetLabelIndex(label, buf.Bytes())
+	return t.tx.PutIndex(label, buf.Bytes())
 }
 
-// getLabelValue returns the commitment opening and the value of the requested
+// getVersion returns the commitment opening and the value of the requested
 // label-version pair.
-func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, error) {
-	raw, err := t.tx.GetLabelValue(label, ver)
+func (t *Tree) getVersion(label []byte, ver uint32) (*structs.LabelValue, error) {
+	raw, err := t.tx.GetVersion(label, ver)
 	if err != nil {
 		return nil, err
 	} else if raw == nil {
@@ -102,16 +102,16 @@ func (t *Tree) getLabelValue(label []byte, ver uint32) (*structs.LabelValue, err
 	return labelValue, nil
 }
 
-// setLabelValue generates a new commitment opening and sets the given
+// putVersion generates a new commitment opening and sets the given
 // label-version pair to the given value. It returns the new commitment.
-func (t *Tree) setLabelValue(label []byte, ver uint32, value structs.UpdateValue) ([]byte, error) {
+func (t *Tree) putVersion(label []byte, ver uint32, value structs.UpdateValue) ([]byte, error) {
 	opening := commitments.GenerateOpening(t.config.Suite)
 
 	// Serialize opening and UpdateValue structure. Write to database.
 	labelValue, err := structs.Marshal(&structs.LabelValue{Opening: opening, Value: value})
 	if err != nil {
 		return nil, err
-	} else if err := t.tx.SetLabelValue(label, ver, labelValue); err != nil {
+	} else if err := t.tx.PutVersion(label, ver, labelValue); err != nil {
 		return nil, err
 	}
 
