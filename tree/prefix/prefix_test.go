@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
+	"github.com/Bren2010/katie/db/memory"
 )
 
 func randomBytes() [32]byte {
@@ -17,7 +18,7 @@ func randomBytes() [32]byte {
 
 func TestTree(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := newMemoryPrefixStore()
+	store := memory.NewPrefixStore()
 
 	tree := NewTree(cs, store)
 	roots := [][]byte{make([]byte, cs.HashSize())}
@@ -72,7 +73,7 @@ func TestTree(t *testing.T) {
 
 func TestUnableToInsertSameTwice(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := newMemoryPrefixStore()
+	store := memory.NewPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
@@ -91,7 +92,7 @@ func TestUnableToInsertSameTwice(t *testing.T) {
 
 func TestUnableToAddAndRemoveSame(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := newMemoryPrefixStore()
+	store := memory.NewPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, _, err := tree.Mutate(
@@ -106,7 +107,7 @@ func TestUnableToAddAndRemoveSame(t *testing.T) {
 
 func TestRemove(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := newMemoryPrefixStore()
+	store := memory.NewPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, commitments, err := tree.Mutate(0, []Entry{
@@ -145,7 +146,7 @@ func TestRemove(t *testing.T) {
 
 func TestReplace(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := newMemoryPrefixStore()
+	store := memory.NewPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, commitments, err := tree.Mutate(0, []Entry{
@@ -183,7 +184,7 @@ func TestReplace(t *testing.T) {
 }
 
 func buildRandomTree(t *testing.T, cs suites.CipherSuite) (*Tree, [][]byte, [][]Entry) {
-	store := newMemoryPrefixStore()
+	store := memory.NewPrefixStore()
 
 	tree := NewTree(cs, store)
 	roots := make([][]byte, 0)

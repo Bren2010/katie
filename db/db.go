@@ -27,7 +27,7 @@ type TransparencyStore interface {
 	PutTreeHead(raw []byte) error
 	PutAuditorTreeHead(raw []byte) error
 
-	BatchGetIndex(label [][]byte) ([][]byte, error)
+	BatchGetIndex(labels [][]byte) ([][]byte, error)
 	PutIndex(label, index []byte) error
 	DeleteIndex(label []byte) error
 

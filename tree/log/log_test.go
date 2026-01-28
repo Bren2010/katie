@@ -9,6 +9,7 @@ import (
 	mrand "math/rand"
 
 	"github.com/Bren2010/katie/crypto/suites"
+	"github.com/Bren2010/katie/db/memory"
 )
 
 func random() []byte {
@@ -25,39 +26,9 @@ func dup(in []byte) []byte {
 	return out
 }
 
-// memoryStore implements LogStore over an in-memory map.
-type memoryStore struct {
-	Data map[uint64][]byte
-}
-
-func (m *memoryStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
-	out := make(map[uint64][]byte)
-
-	for _, key := range keys {
-		if d, ok := m.Data[key]; ok {
-			out[key] = dup(d)
-		}
-	}
-
-	return out, nil
-}
-
-func (m *memoryStore) Put(key uint64, value []byte) error {
-	if m.Data == nil {
-		m.Data = make(map[uint64][]byte)
-	}
-	m.Data[key] = dup(value)
-	return nil
-}
-
-func (m *memoryStore) Delete(key uint64) error {
-	delete(m.Data, key)
-	return nil
-}
-
 func TestGetBatch(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	tree := NewTree(cs, new(memoryStore))
+	tree := NewTree(cs, memory.NewLogStore())
 
 	// Populate tree with random leaves. Retain leaf and full subtree values
 	// after each append.
@@ -132,7 +103,7 @@ func TestGetBatch(t *testing.T) {
 
 func TestAdditional(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	tree := NewTree(cs, new(memoryStore))
+	tree := NewTree(cs, memory.NewLogStore())
 
 	var (
 		n, m     uint64 = 2000, 1000

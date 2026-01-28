@@ -6,46 +6,10 @@ import (
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
+	"github.com/Bren2010/katie/db/memory"
 )
 
-func dup(b []byte) []byte {
-	out := make([]byte, len(b))
-	copy(out, b)
-	return out
-}
-
-type memoryPrefixStore struct {
-	data    map[string][]byte
-	lookups [][]string
-}
-
-func newMemoryPrefixStore() *memoryPrefixStore {
-	return &memoryPrefixStore{data: make(map[string][]byte)}
-}
-
-func (m *memoryPrefixStore) BatchGet(keys []string) (map[string][]byte, error) {
-	m.lookups = append(m.lookups, keys)
-
-	out := make(map[string][]byte)
-	for _, key := range keys {
-		if val, ok := m.data[key]; ok {
-			out[key] = dup(val)
-		}
-	}
-	return out, nil
-}
-
-func (m *memoryPrefixStore) Put(key string, value []byte) error {
-	m.data[key] = dup(value)
-	return nil
-}
-
-func (m *memoryPrefixStore) Delete(key string) error {
-	delete(m.data, key)
-	return nil
-}
-
-func batchTestSetup() (suites.CipherSuite, *memoryPrefixStore, node, node) {
+func batchTestSetup() (suites.CipherSuite, *memory.PrefixStore, node, node) {
 	cs := suites.KTSha256P256{}
 
 	// Build up two versions of the same tree.
@@ -101,7 +65,7 @@ func batchTestSetup() (suites.CipherSuite, *memoryPrefixStore, node, node) {
 		panic(err)
 	}
 
-	store := newMemoryPrefixStore()
+	store := memory.NewPrefixStore()
 	store.Put(tile0.id.String(), bytes0)
 	store.Put(tile1.id.String(), bytes1)
 	store.Put(tile2.id.String(), bytes2)
@@ -118,7 +82,7 @@ func TestSearchDepth0(t *testing.T) {
 	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b00000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[1:0]]" {
+	} else if fmt.Sprint(store.Lookups) != "[[1:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -140,7 +104,7 @@ func TestSearchDepth1(t *testing.T) {
 	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b01000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[1:0] [0:0]]" {
+	} else if fmt.Sprint(store.Lookups) != "[[1:0] [0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -163,7 +127,7 @@ func TestSearchDepth2(t *testing.T) {
 	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b01000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[2:0] [1:0] [0:0]]" {
+	} else if fmt.Sprint(store.Lookups) != "[[2:0] [1:0] [0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -186,7 +150,7 @@ func TestBrokenTile(t *testing.T) {
 	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b11000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.lookups) != "[[2:0] [2:1]]" {
+	} else if fmt.Sprint(store.Lookups) != "[[2:0] [2:1]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -212,7 +176,7 @@ func TestMultiVersionSearch(t *testing.T) {
 	})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if lookups := fmt.Sprint(store.lookups); lookups != "[[0:0 2:0]]" && lookups != "[[2:0 0:0]]" {
+	} else if lookups := fmt.Sprint(store.Lookups); lookups != "[[0:0 2:0]]" && lookups != "[[2:0 0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
