@@ -169,7 +169,7 @@ func (t *Tree) mutateLabel(n uint64, rightmostDLE *uint64, mut labelMutation) ([
 		}
 
 		// Delete the value and VRF output of each version.
-		for ver, _ := range index {
+		for ver := range index {
 			if err := t.tx.DeleteVersion(label, uint32(ver)); err != nil {
 				return nil, nil, err
 			}
