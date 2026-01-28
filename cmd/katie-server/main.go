@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Command katie-server is the main server process that answers all client
 // requests and sequences new changes to the log.
 package main
