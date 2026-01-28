@@ -73,7 +73,8 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 		} else if timestamp < rightmost {
 			return nil, errors.New("refusing to issue tree head: current timestamp is less than previous timestamp")
 		}
-	} else if err := t.issueTreeHead(n, timestamp, prefixRoot); err != nil {
+	}
+	if err := t.issueTreeHead(n, timestamp, prefixRoot); err != nil {
 		return nil, err
 	}
 
@@ -251,11 +252,17 @@ func (t *Tree) issueTreeHead(n, timestamp uint64, prefixRoot []byte) error {
 	if err != nil {
 		return err
 	}
-	treeHead, err := structs.Marshal(&structs.TreeHead{TreeSize: n + 1, Signature: signature})
+	treeHead := &structs.TreeHead{TreeSize: n + 1, Signature: signature}
+	rawTreeHead, err := structs.Marshal(treeHead)
 	if err != nil {
 		return err
-	} else if err := t.tx.PutTreeHead(treeHead); err != nil {
+	} else if err := t.tx.PutTreeHead(rawTreeHead); err != nil {
+		return err
+	} else if err := t.tx.Commit(); err != nil {
 		return err
 	}
-	return t.tx.Commit()
+
+	t.treeHead = treeHead
+
+	return nil
 }
