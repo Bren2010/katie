@@ -37,21 +37,26 @@ func rightmostDistinguished(config *structs.PublicConfig, n uint64, provider *da
 			return &x, nil
 		}
 
-		right := math.Right(x, n)
-		timestamp, err := provider.GetTimestamp(right)
+		timestamp, err := provider.GetTimestamp(x)
 		if err != nil {
 			return nil, err
 		} else if !config.IsDistinguished(timestamp, rightmost) {
 			return &x, nil
 		}
 
-		x = right
+		x = math.Right(x, n)
 	}
 }
 
 // updateView runs the algorithm from Section 4.2. The previous size of the tree
 // is `m`, the current size of the tree is `n`.
 func updateView(config *structs.PublicConfig, n uint64, m *uint64, provider *dataProvider) error {
+	if m != nil && *m >= n {
+		return errors.New("new tree size is not greater than previous tree size")
+	} else if n == 0 {
+		return nil
+	}
+
 	for _, x := range math.UpdateView(n, m) {
 		if _, err := provider.GetTimestamp(x); err != nil {
 			return err
@@ -71,7 +76,53 @@ func updateView(config *structs.PublicConfig, n uint64, m *uint64, provider *dat
 	return nil
 }
 
-// fixedVersionSearch runs the algorithm from Section 6.3. The public config for
+// greatestVersionSearch runs the algorithm from Section 6.3. The public config
+// for the Transparency Log is given in `config`, the claimed greatest version
+// of the label is `ver`, and the size of the tree is `n`.
+//
+// It returns the position of the terminal node of the search.
+func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *dataProvider) (uint64, error) {
+	if n == 0 {
+		return 0, errors.New("unable to search empty tree")
+	}
+
+	// Identify the starting position for the search. This is either the
+	// rightmost distinguished log entry, or the root if there are no
+	// distinguished log entries.
+	rightmostDLE, err := rightmostDistinguished(config, n, provider)
+	if err != nil {
+		return 0, nil
+	}
+	var x uint64
+	if rightmostDLE != nil {
+		x = *rightmostDLE
+	} else {
+		x = math.Root(n)
+	}
+
+	// From the starting position, move down the remainder of the frontier.
+	terminal, first := uint64(0), true
+	for {
+		res, err := provider.GetSearchBinaryLadder(x, ver, true)
+		if err != nil {
+			return 0, err
+		}
+		if res == 0 && first {
+			terminal = x
+			first = false
+		}
+		if x != n-1 {
+			x = math.Right(x, n)
+			continue
+		}
+		if res != 0 {
+			return 0, errors.New("rightmost log entry not consistent with claimed greatest version of label")
+		}
+		return terminal, nil
+	}
+}
+
+// fixedVersionSearch runs the algorithm from Section 7.2. The public config for
 // the Transparency Log is given in `config`, the target version of the search
 // is `ver`, and the size of the tree is `n`.
 //
@@ -165,47 +216,5 @@ func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, prov
 		}
 
 		panic("unreachable")
-	}
-}
-
-// greatestVersionSearch runs the algorithm from Section 7.2. The public config
-// for the Transparency Log is given in `config`, and the size of the tree is
-// `n`.
-//
-// It returns the position of the terminal node of the search.
-func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *dataProvider) (uint64, error) {
-	// Identify the starting position for the search. This is either the
-	// rightmost distinguished log entry, or the root if there are no
-	// distinguished log entries.
-	rightmostDLE, err := rightmostDistinguished(config, n, provider)
-	if err != nil {
-		return 0, nil
-	}
-	var x uint64
-	if rightmostDLE != nil {
-		x = *rightmostDLE
-	} else {
-		x = math.Root(n)
-	}
-
-	// From the starting position, move down the remainder of the frontier.
-	terminal, first := uint64(0), true
-	for {
-		res, err := provider.GetSearchBinaryLadder(x, ver, true)
-		if err != nil {
-			return 0, err
-		}
-		if res == 0 && first {
-			terminal = x
-			first = false
-		}
-		if x != n-1 {
-			x = math.Right(x, n)
-			continue
-		}
-		if res != 0 {
-			return 0, errors.New("rightmost log entry not consistent with claimed greatest version of label")
-		}
-		return terminal, nil
 	}
 }

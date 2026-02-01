@@ -120,6 +120,9 @@ func rightDirectPath(x, n uint64) []uint64 {
 
 // UpdateView returns the indices of the log entries whose timestamps need to be
 // provided for a verifier to update their view of the tree.
+//
+// TODO: This is here because it might be useful for preloading. If that doesn't
+// happen, move it into algorithms.go.
 func UpdateView(n uint64, m *uint64) []uint64 {
 	out := make([]uint64, 0)
 
