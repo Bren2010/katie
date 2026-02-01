@@ -23,8 +23,8 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 		n = t.treeHead.TreeSize
 	}
 
-	handler := newProducedProofHandler(t.config.Suite, t.tx, nil)
-	provider := newDataProvider(t.config.Suite, handler)
+	handle := newProducedProofHandle(t.config.Suite, t.tx, nil)
+	provider := newDataProvider(t.config.Suite, handle)
 	rightmostDLE, err := rightmostDistinguished(t.config.Public(), n, provider)
 	if err != nil {
 		return nil, err

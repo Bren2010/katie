@@ -9,10 +9,10 @@ import (
 
 func TestTimestampsMonotonic(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	handler := newReceivedProofHandler(cs, structs.CombinedTreeProof{
+	handle := newReceivedProofHandle(cs, structs.CombinedTreeProof{
 		Timestamps: []uint64{0, 1, 2},
 	})
-	provider := newDataProvider(cs, handler)
+	provider := newDataProvider(cs, handle)
 
 	if ts, err := provider.GetTimestamp(1000); ts != 0 || err != nil {
 		t.Fatalf("unexpected result: %v, %v", ts, err)
@@ -27,10 +27,10 @@ func TestTimestampsMonotonic(t *testing.T) {
 
 func TestTimestampsRetained(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	handler := newReceivedProofHandler(cs, structs.CombinedTreeProof{
+	handle := newReceivedProofHandle(cs, structs.CombinedTreeProof{
 		Timestamps: []uint64{0, 2},
 	})
-	provider := newDataProvider(cs, handler)
+	provider := newDataProvider(cs, handle)
 
 	provider.AddRetained(nil, map[uint64]structs.LogEntry{2000: {Timestamp: 1}})
 
