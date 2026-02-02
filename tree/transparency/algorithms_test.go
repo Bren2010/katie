@@ -1,11 +1,90 @@
 package transparency
 
 import (
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
+
+type testProofHandle struct {
+	proofHandle
+
+	timestamps        []uint64
+	searchLadders     []uint64
+	monitoringLadders []uint64
+	inclusionProofs   []uint64
+}
+
+func newTestProofHandle(cs suites.CipherSuite, inner structs.CombinedTreeProof) *testProofHandle {
+	return &testProofHandle{proofHandle: newReceivedProofHandle(cs, inner)}
+}
+
+func (tph *testProofHandle) GetTimestamp(x uint64) (uint64, error) {
+	tph.timestamps = append(tph.timestamps, x)
+	return tph.proofHandle.GetTimestamp(x)
+}
+
+func (tph *testProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
+	tph.searchLadders = append(tph.searchLadders, x)
+	return tph.proofHandle.GetSearchBinaryLadder(x, ver, omit)
+}
+
+func (tph *testProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
+	tph.monitoringLadders = append(tph.monitoringLadders, x)
+	return tph.proofHandle.GetMonitoringBinaryLadder(x, ver)
+}
+
+func (tph *testProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
+	tph.inclusionProofs = append(tph.inclusionProofs, x)
+	return tph.proofHandle.GetInclusionProof(x, ver)
+}
+
+func TestUpdateView(t *testing.T) {
+	config := testConfig(t)
+	now := uint64(time.Now().UnixMilli())
+
+	runTest := func(n uint64, m *uint64, timestamps, expected []uint64) error {
+		proof := structs.CombinedTreeProof{Timestamps: timestamps}
+		handle := newTestProofHandle(config.Suite, proof)
+		provider := newDataProvider(config.Suite, handle)
+
+		if err := updateView(config.Public(), n, m, provider); err != nil {
+			return err
+		} else if !slices.Equal(handle.timestamps, expected) {
+			t.Fatal("unexpected timestamps checked while updating view of tree")
+		}
+		return nil
+	}
+
+	// Previous tree size is greater than current tree size
+	prev := uint64(100)
+	if err := runTest(99, &prev, nil, nil); err == nil {
+		t.Fatal("expected error but none returned")
+	}
+
+	// Current tree size is zero
+	if err := runTest(0, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Current tree size is greater than zero, previous tree size is nil
+	if err := runTest(100, nil, []uint64{0, 1, now}, []uint64{63, 95, 99}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Previous tree size is equal to current tree size
+	if err := runTest(100, &prev, []uint64{now}, []uint64{99}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Standard case
+	if err := runTest(200, &prev, []uint64{0, 1, 2, 3, now}, []uint64{103, 111, 127, 191, 199}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRightmostDistinguished(t *testing.T) {
 	config := testConfig(t)
@@ -14,12 +93,11 @@ func TestRightmostDistinguished(t *testing.T) {
 	now := uint64(time.Now().UnixMilli())
 
 	runTest := func(n uint64, timestamps []uint64) (*uint64, error) {
-		handle := newReceivedProofHandle(config.Suite, structs.CombinedTreeProof{
-			Timestamps: timestamps,
-		})
+		public := config.Public()
+		proof := structs.CombinedTreeProof{Timestamps: timestamps}
+		handle := newReceivedProofHandle(config.Suite, proof)
 		provider := newDataProvider(config.Suite, handle)
 
-		public := config.Public()
 		if err := updateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}

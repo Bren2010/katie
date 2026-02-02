@@ -51,7 +51,7 @@ func rightmostDistinguished(config *structs.PublicConfig, n uint64, provider *da
 // updateView runs the algorithm from Section 4.2. The previous size of the tree
 // is `m`, the current size of the tree is `n`.
 func updateView(config *structs.PublicConfig, n uint64, m *uint64, provider *dataProvider) error {
-	if m != nil && *m >= n {
+	if m != nil && *m > n {
 		return errors.New("new tree size is not greater than previous tree size")
 	} else if n == 0 {
 		return nil

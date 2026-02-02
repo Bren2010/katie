@@ -126,7 +126,9 @@ func rightDirectPath(x, n uint64) []uint64 {
 func UpdateView(n uint64, m *uint64) []uint64 {
 	out := make([]uint64, 0)
 
-	if m == nil || *m == 0 {
+	if m != nil && *m == n {
+		return nil
+	} else if m == nil || *m == 0 {
 		out = append(out, Root(n))
 	} else {
 		out = append(out, rightDirectPath(*m-1, n)...)
