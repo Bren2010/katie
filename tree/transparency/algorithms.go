@@ -133,88 +133,96 @@ func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, prov
 		return 0, err
 	}
 
-	type terminalLogEntry struct {
-		position uint64
-		expired  bool
-	}
-	var terminal *terminalLogEntry
+	var (
+		terminalFound = false     // Whether a potential terminal log entry has been seen.
+		terminalPos   = uint64(0) // Position of the terminal log entry.
+
+		expired                = false        // Whether any expired log entries are in the search path.
+		left, right   uint64   = 0, rightmost // Bounds for determining distinguished status.
+		distinguished []uint64                // Distinguished unexpired log entries in search path.
+	)
 	finish := func() (uint64, error) {
-		if terminal == nil { // If there is no terminal log entry, return an error.
+		if !terminalFound { // If there is no terminal log entry, return an error.
 			return 0, ErrLabelNotFound
-		} else if terminal.expired { // If the log entry is expired, return an error.
-			return 0, ErrLabelExpired
-		} else if err := provider.GetInclusionProof(terminal.position, ver); err != nil {
+		} else if expired { // If any expired log entries were encountered,
+			// Determine if the terminal log entry is to the left of the
+			// leftmost unexpired distinguished log entry.
+			found := false
+			for _, y := range distinguished {
+				if y < terminalPos {
+					found = true
+					break
+				}
+			}
+			if !found { // If so, return an error.
+				return 0, ErrLabelExpired
+			}
+		} // Otherwise, look up the target version specifically.
+		if err := provider.GetInclusionProof(terminalPos, ver); err != nil {
 			return 0, err
 		}
-		return terminal.position, nil
+		return terminalPos, nil
 	}
 
-	x, frontier := math.Root(n), true
+	x := math.Root(n)
 	for {
 		timestamp, err := provider.GetTimestamp(x)
 		if err != nil {
 			return 0, err
 		}
 
-		// If the log entry is expired, is on the frontier, and its right child
-		// is also expired, recurse to the right child.
-		if config.IsExpired(timestamp, rightmost) && frontier {
-			right := math.Right(x, n)
-			ts, err := provider.GetTimestamp(right)
-			if err != nil {
-				return 0, err
-			} else if config.IsExpired(ts, rightmost) {
-				x = right
-				continue
+		// If the log entry is expired, recurse to its right child.
+		if config.IsExpired(timestamp, rightmost) {
+			expired = true
+			if math.IsLeaf(x) {
+				return finish()
 			}
+			x, left = math.Right(x, n), timestamp
+			continue
+		} else if config.IsDistinguished(left, right) {
+			distinguished = append(distinguished, x)
 		}
 
 		// Obtain a search binary ladder from the current log entry.
 		res, err := provider.GetSearchBinaryLadder(x, ver, true)
 		if err != nil {
 			return 0, err
-		}
-		if res >= 0 && (terminal == nil || x < terminal.position) {
-			terminal = &terminalLogEntry{
-				position: x,
-				expired:  config.IsExpired(timestamp, rightmost),
-			}
+		} else if res >= 0 && (!terminalFound || x < terminalPos) {
+			terminalFound, terminalPos = true, x
 		}
 
 		// If the binary ladder indicates a greatest version less than the
-		// target version, then:
+		// target version, then recurse to the right child.
 		if res == -1 {
-			if math.IsLeaf(x) || x == n-1 { // If no right child, go to step 6.
+			if math.IsLeaf(x) || x == n-1 {
 				return finish()
-			} // Otherwise, recurse to the right child.
-			x = math.Right(x, n)
+			}
+			x, left = math.Right(x, n), timestamp
+			continue
+		}
+
+		// If the binary ladder indicates a greatest version greater than the
+		// target, then recurse to the left child.
+		if res == 1 {
+			if math.IsLeaf(x) {
+				return finish()
+			}
+			x, right = math.Left(x), timestamp
 			continue
 		}
 
 		// If the binary ladder indicates a greatest version equal to the target
 		// version, then:
-		if res == 0 {
-			if !config.IsExpired(timestamp, rightmost) { // If not expired, terminate.
-				return x, nil
-			} else if math.IsLeaf(x) || x == n-1 { // If no right child, go to step 6.
-				return finish()
-			} // Otherwise, recurse to the right child.
-			x = math.Right(x, n)
-			continue
+		if !expired { // If there were no expired log entries, terminate successfully.
+			return terminalPos, nil
 		}
-
-		// If the binary ladder indicates a greatest version greater than the
-		// target, then:
-		if res == 1 {
-			if math.IsLeaf(x) { // If no left child, go to step 6.
-				return finish()
-			} else if config.IsExpired(timestamp, rightmost) { // If expired, return an error.
-				return 0, ErrLabelExpired
-			} // Otherwise, recurse to the left child.
-			x, frontier = math.Left(x), false
-			continue
-		}
-
-		panic("unreachable")
+		// Determine whether this log entry, or any unexpired log entries in
+		// its direct path and to its left, are distinguished.
+		for _, y := range distinguished {
+			if y <= x { // If so, terminate successfully.
+				return terminalPos, nil
+			}
+		} // Otherwise, return an error that the target version is expired.
+		return 0, ErrLabelExpired
 	}
 }
