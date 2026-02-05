@@ -5,83 +5,128 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
 type testProofHandle struct {
-	proofHandle
+	timestamps map[uint64]uint64
+	versions   map[uint64]uint32
 
-	timestamps        []uint64
+	requested         []uint64
 	searchLadders     []uint64
 	monitoringLadders []uint64
 	inclusionProofs   []uint64
 }
 
-func newTestProofHandle(cs suites.CipherSuite, inner structs.CombinedTreeProof) *testProofHandle {
-	return &testProofHandle{proofHandle: newReceivedProofHandle(cs, inner)}
+func newTestProofHandle(timestamps map[uint64]uint64, versions map[uint64]uint32) *testProofHandle {
+	return &testProofHandle{timestamps: timestamps, versions: versions}
+}
+
+func (tph *testProofHandle) verify(requested, searchLadders, monitoringLadders, inclusionProofs []uint64) bool {
+	return slices.Equal(tph.requested, requested) &&
+		slices.Equal(tph.searchLadders, searchLadders) &&
+		slices.Equal(tph.monitoringLadders, monitoringLadders) &&
+		slices.Equal(tph.inclusionProofs, inclusionProofs)
 }
 
 func (tph *testProofHandle) GetTimestamp(x uint64) (uint64, error) {
-	tph.timestamps = append(tph.timestamps, x)
-	return tph.proofHandle.GetTimestamp(x)
+	tph.requested = append(tph.requested, x)
+
+	ts, ok := tph.timestamps[x]
+	if !ok {
+		panic("timestamp not known for position")
+	}
+	return ts, nil
 }
 
 func (tph *testProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
 	tph.searchLadders = append(tph.searchLadders, x)
-	return tph.proofHandle.GetSearchBinaryLadder(x, ver, omit)
+
+	posVer, ok := tph.versions[x]
+	if !ok {
+		panic("version not known for position")
+	}
+
+	if ver < posVer {
+		return make([]byte, 32), -1, nil
+	} else if ver == posVer {
+		return make([]byte, 32), 0, nil
+	} else {
+		return make([]byte, 32), 1, nil
+	}
 }
 
 func (tph *testProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
 	tph.monitoringLadders = append(tph.monitoringLadders, x)
-	return tph.proofHandle.GetMonitoringBinaryLadder(x, ver)
+	return make([]byte, 32), nil
 }
 
 func (tph *testProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
 	tph.inclusionProofs = append(tph.inclusionProofs, x)
-	return tph.proofHandle.GetInclusionProof(x, ver)
+	return make([]byte, 32), nil
+}
+
+func (tph *testProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
+	panic("not implemented")
+}
+func (tph *testProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
+	panic("not implemented")
+}
+func (tph *testProofHandle) Finish() ([][]byte, error) {
+	panic("not implemented")
+}
+func (tph *testProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+	panic("not implemented")
 }
 
 func TestUpdateView(t *testing.T) {
 	config := testConfig(t)
 	now := uint64(time.Now().UnixMilli())
 
-	runTest := func(n uint64, m *uint64, timestamps, expected []uint64) error {
-		proof := structs.CombinedTreeProof{Timestamps: timestamps}
-		handle := newTestProofHandle(config.Suite, proof)
+	runTest := func(n uint64, m *uint64, requests, timestamps []uint64) error {
+		tsMap := make(map[uint64]uint64)
+		for i, pos := range requests {
+			tsMap[pos] = timestamps[i]
+		}
+		handle := newTestProofHandle(tsMap, nil)
 		provider := newDataProvider(config.Suite, handle)
 
 		if err := updateView(config.Public(), n, m, provider); err != nil {
 			return err
-		} else if !slices.Equal(handle.timestamps, expected) {
-			t.Fatal("unexpected timestamps checked while updating view of tree")
+		} else if !handle.verify(requests, nil, nil, nil) {
+			t.Fatal("unexpected lookups made by algorithm")
 		}
 		return nil
 	}
 
 	// Previous tree size is greater than current tree size
 	prev := uint64(100)
-	if err := runTest(99, &prev, nil, nil); err == nil {
+	err := runTest(99, &prev, nil, nil)
+	if err.Error() != "new tree size is not greater than previous tree size" {
 		t.Fatal("expected error but none returned")
 	}
 
 	// Current tree size is zero
-	if err := runTest(0, nil, nil, nil); err != nil {
+	err = runTest(0, nil, nil, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Current tree size is greater than zero, previous tree size is nil
-	if err := runTest(100, nil, []uint64{0, 1, now}, []uint64{63, 95, 99}); err != nil {
+	err = runTest(100, nil, []uint64{63, 95, 99}, []uint64{0, 1, now})
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Previous tree size is equal to current tree size
-	if err := runTest(100, &prev, []uint64{now}, []uint64{99}); err != nil {
+	err = runTest(100, &prev, []uint64{99}, []uint64{now})
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Standard case
-	if err := runTest(200, &prev, []uint64{0, 1, 2, 3, now}, []uint64{103, 111, 127, 191, 199}); err != nil {
+	err = runTest(200, &prev, []uint64{103, 111, 127, 191, 199}, []uint64{0, 1, 2, 3, now})
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -92,55 +137,92 @@ func TestRightmostDistinguished(t *testing.T) {
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 
-	runTest := func(n uint64, timestamps []uint64) (*uint64, error) {
+	runTest := func(n uint64, requests, timestamps []uint64) *uint64 {
 		public := config.Public()
-		proof := structs.CombinedTreeProof{Timestamps: timestamps}
-		handle := newReceivedProofHandle(config.Suite, proof)
+
+		tsMap := make(map[uint64]uint64)
+		for i, pos := range requests {
+			tsMap[pos] = timestamps[i]
+		}
+		handle := newTestProofHandle(tsMap, nil)
 		provider := newDataProvider(config.Suite, handle)
 
 		if err := updateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}
-		return rightmostDistinguished(public, n, provider)
+		out, err := rightmostDistinguished(public, n, provider)
+		if err != nil {
+			t.Fatal(err)
+		} else if !handle.verify(requests, nil, nil, nil) {
+			t.Fatal("unexpected lookups made by algorithm")
+		}
+		return out
 	}
 
 	// Tree size = 0
-	if res, err := runTest(0, []uint64{}); err != nil {
-		t.Fatal(err)
-	} else if res != nil {
+	res := runTest(0, nil, nil)
+	if res != nil {
 		t.Fatal("unexpected response")
 	}
 
 	// Tree size = 1 and rightmost not distinguished
 	config.ReasonableMonitoringWindow = now + 1
-	if res, err := runTest(1, []uint64{now}); err != nil {
-		t.Fatal(err)
-	} else if res != nil {
+	res = runTest(1, []uint64{0}, []uint64{now})
+	if res != nil {
 		t.Fatal("unexpected response")
 	}
 	config.ReasonableMonitoringWindow = rmw
 
 	// Tree size = 1 and rightmost is distinguished
-	if res, err := runTest(1, []uint64{now}); err != nil {
-		t.Fatal(err)
-	} else if res == nil || *res != 0 {
+	res = runTest(1, []uint64{0}, []uint64{now})
+	if res == nil || *res != 0 {
 		t.Fatal("unexpected response")
 	}
 
 	// Tree size = 100 and rightmost is not distinguished
-	if res, err := runTest(100, []uint64{now - 2*rmw, now - rmw + 1, now}); err != nil {
-		t.Fatal(err)
-	} else if res == nil || *res != 95 {
+	res = runTest(100, []uint64{63, 95, 99}, []uint64{now - 2*rmw, now - rmw + 1, now})
+	if res == nil || *res != 95 {
 		t.Fatal("unexpected response")
 	}
 
 	// Tree size = 100 and rightmost is distinguished
-	if res, err := runTest(100, []uint64{now - 2*rmw, now - rmw, now}); err != nil {
-		t.Fatal(err)
-	} else if res == nil || *res != 99 {
+	res = runTest(100, []uint64{63, 95, 99}, []uint64{now - 2*rmw, now - rmw, now})
+	if res == nil || *res != 99 {
 		t.Fatal("unexpected response")
 	}
 }
+
+// func TestGreatestVersionSearch(t *testing.T) {
+// 	config := testConfig(t)
+
+// 	runTest := func(ver uint32, n uint64, requests, timestamps []uint64, versions []uint32) (uint64, error) {
+// 		public := config.Public()
+
+// 		tsMap, verMap := make(map[uint64]uint64), make(map[uint64]uint32)
+// 		for i, pos := range requests {
+// 			tsMap[pos] = timestamps[i]
+// 			verMap[pos] = versions[i]
+// 		}
+// 		handle := newTestProofHandle(tsMap, verMap)
+// 		provider := newDataProvider(config.Suite, handle)
+
+// 		if err := updateView(public, n, nil, provider); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		return greatestVersionSearch(public, ver, n, provider) // TODO: handle.verify
+// 	}
+
+// 	// Search starts at root when there's no distinguished log entry.
+
+// 	// No rightmost distinguished log entry.
+// 	// Rightmost distinguished log entry is not the rightmost log entry.
+// 	// Terminal log entry is rightmost log entry
+// 	// Terminal log entry is rightmost distinguished log entry
+// 	// Terminal log entry is neither
+
+// 	// Final ladder is consistent with lesser greatest version.
+// 	// Final ladder is consistent with g
+// }
 
 // func TestFixedVersionSearch(t *testing.T) {
 // 	// ns := []uint64{1000, 1000000, 10000000}
