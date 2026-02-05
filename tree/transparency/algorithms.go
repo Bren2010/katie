@@ -106,6 +106,8 @@ func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 		res, err := provider.GetSearchBinaryLadder(x, ver, true)
 		if err != nil {
 			return 0, err
+		} else if res == 1 {
+			return 0, errors.New("log entry not consistent with claimed greatest version of label")
 		}
 		if res == 0 && first {
 			terminal = x
@@ -128,6 +130,9 @@ func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 //
 // It returns the position of the terminal node of the search.
 func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *dataProvider) (uint64, error) {
+	if n == 0 {
+		return 0, errors.New("unable to search empty tree")
+	}
 	rightmost, err := provider.GetTimestamp(n - 1)
 	if err != nil {
 		return 0, err
