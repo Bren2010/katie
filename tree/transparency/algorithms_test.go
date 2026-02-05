@@ -150,13 +150,13 @@ func TestRightmostDistinguished(t *testing.T) {
 		if err := updateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}
-		out, err := rightmostDistinguished(public, n, provider)
+		res, err := rightmostDistinguished(public, n, provider)
 		if err != nil {
 			t.Fatal(err)
 		} else if !handle.verify(requests, nil, nil, nil) {
 			t.Fatal("unexpected lookups made by algorithm")
 		}
-		return out
+		return res
 	}
 
 	// Tree size = 0
@@ -192,125 +192,105 @@ func TestRightmostDistinguished(t *testing.T) {
 	}
 }
 
-// func TestGreatestVersionSearch(t *testing.T) {
-// 	config := testConfig(t)
+func TestGreatestVersionSearch(t *testing.T) {
+	config := testConfig(t)
 
-// 	runTest := func(ver uint32, n uint64, requests, timestamps []uint64, versions []uint32) (uint64, error) {
-// 		public := config.Public()
+	rmw := config.ReasonableMonitoringWindow
+	now := uint64(time.Now().UnixMilli())
 
-// 		tsMap, verMap := make(map[uint64]uint64), make(map[uint64]uint32)
-// 		for i, pos := range requests {
-// 			tsMap[pos] = timestamps[i]
-// 			verMap[pos] = versions[i]
-// 		}
-// 		handle := newTestProofHandle(tsMap, verMap)
-// 		provider := newDataProvider(config.Suite, handle)
+	type testVector struct {
+		tsMap  map[uint64]uint64
+		verMap map[uint64]uint32
 
-// 		if err := updateView(public, n, nil, provider); err != nil {
-// 			t.Fatal(err)
-// 		}
-// 		return greatestVersionSearch(public, ver, n, provider) // TODO: handle.verify
-// 	}
+		requests      []uint64
+		searchLadders []uint64
+	}
+	runTest := func(vec testVector) (uint64, error) {
+		public := config.Public()
+		handle := newTestProofHandle(vec.tsMap, vec.verMap)
+		provider := newDataProvider(config.Suite, handle)
 
-// 	// Search starts at root when there's no distinguished log entry.
+		if err := updateView(public, 100, nil, provider); err != nil {
+			t.Fatal(err)
+		}
+		res, err := greatestVersionSearch(public, 1, 100, provider)
+		if !handle.verify(vec.requests, vec.searchLadders, nil, nil) {
+			t.Fatal("unexpected lookups made by algorithm")
+		}
+		return res, err
+	}
 
-// 	// No rightmost distinguished log entry.
-// 	// Rightmost distinguished log entry is not the rightmost log entry.
-// 	// Terminal log entry is rightmost log entry
-// 	// Terminal log entry is rightmost distinguished log entry
-// 	// Terminal log entry is neither
+	// Search starts at root when there's no distinguished log entry.
+	config.ReasonableMonitoringWindow = now + 1
+	res, err := runTest(testVector{
+		tsMap:  map[uint64]uint64{63: now - 2, 95: now - 1, 99: now},
+		verMap: map[uint64]uint32{63: 0, 95: 0, 99: 1},
 
-// 	// Final ladder is consistent with lesser greatest version.
-// 	// Final ladder is consistent with g
-// }
+		requests:      []uint64{63, 95, 99},
+		searchLadders: []uint64{63, 95, 99},
+	})
+	if res != 99 || err != nil {
+		t.Fatalf("unexpected result: res=%v err=%v", res, err)
+	}
+	config.ReasonableMonitoringWindow = rmw
 
-// func TestFixedVersionSearch(t *testing.T) {
-// 	// ns := []uint64{1000, 1000000, 10000000}
-// 	// ks := []uint32{1, 10, 100, 1000}
+	// Search starts at rightmost distinguished log entry when there is one.
+	res, err = runTest(testVector{
+		tsMap:  map[uint64]uint64{63: now - 2*rmw, 95: now - rmw + 1, 99: now},
+		verMap: map[uint64]uint32{95: 0, 99: 1},
 
-// 	// for _, n := range ns {
-// 	// 	for _, k := range ks {
-// 	// 		for i := 0; i < 5; i++ {
-// 	// 			ver := uint32(rand.Intn(int(k)))
-// 	// 			res := runExperiment(t, n, k, ver)
-// 	// 			fmt.Println(n, k, res)
-// 	// 		}
-// 	// 	}
-// 	// }
+		requests:      []uint64{63, 95, 99},
+		searchLadders: []uint64{95, 99},
+	})
+	if res != 99 || err != nil {
+		t.Fatalf("unexpected result: res=%v err=%v", res, err)
+	}
 
-// 	sum := 0
-// 	for i := 0; i < 50; i++ {
-// 		ver := uint32(rand.Intn(10))
-// 		sum += runExperiment(t, 1000000, 10, ver)
-// 	}
-// 	fmt.Println(sum)
-// }
+	// Search returns leftmost terminal log entry.
+	res, err = runTest(testVector{
+		tsMap:  map[uint64]uint64{63: now - 2*rmw, 95: now - rmw + 1, 99: now},
+		verMap: map[uint64]uint32{95: 1, 99: 1},
 
-// type testHandler struct {
-// 	sum     int
-// 	vers    []uint64
-// 	tracker versionTracker
-// }
+		requests:      []uint64{63, 95, 99},
+		searchLadders: []uint64{95, 99},
+	})
+	if res != 95 || err != nil {
+		t.Fatalf("unexpected result: res=%v err=%v", res, err)
+	}
 
-// func (th *testHandler) AddVersion(_ uint32, _, _ []byte) error { panic("not implemented") }
+	// Search returns leftmost terminal log entry.
+	res, err = runTest(testVector{
+		tsMap:  map[uint64]uint64{63: now - 2*rmw, 95: now - rmw, 99: now},
+		verMap: map[uint64]uint32{99: 1},
 
-// func (th *testHandler) GetTimestamp(x uint64) (uint64, error) { return x, nil }
+		requests:      []uint64{63, 95, 99},
+		searchLadders: []uint64{99},
+	})
+	if res != 99 || err != nil {
+		t.Fatalf("unexpected result: res=%v err=%v", res, err)
+	}
 
-// func (th *testHandler) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
-// 	greatest, found := slices.BinarySearch(th.vers, x)
-// 	if !found {
-// 		greatest--
-// 	}
+	// Returns an error when rightmost log entry indicates greater version.
+	res, err = runTest(testVector{
+		tsMap:  map[uint64]uint64{63: now - 2*rmw, 95: now - rmw + 1, 99: now},
+		verMap: map[uint64]uint32{95: 1, 99: 2},
 
-// 	leftInclusion, rightNonInclusion := th.tracker.SearchMaps(x, omit)
-// 	ladder := math.SearchBinaryLadder(ver, uint32(greatest), leftInclusion, rightNonInclusion)
-// 	th.sum += len(ladder)
-// 	th.tracker.AddLadder(x, omit, greatest, ladder)
+		requests:      []uint64{63, 95, 99},
+		searchLadders: []uint64{95, 99},
+	})
+	if err.Error() != "rightmost log entry not consistent with claimed greatest version of label" {
+		t.Fatalf("unexpected result: res=%v err=%v", res, err)
+	}
 
-// 	res := 0
-// 	if x < th.vers[ver] {
-// 		res = -1
-// 	} else if x > th.vers[ver] {
-// 		res = 1
-// 	}
-// 	// fmt.Printf("x=%v (%v) res=%v ladder=%v\n", x, th.vers[ver], res, ladder)
-// 	return make([]byte, 32), res, nil
-// }
+	// Returns an error when rightmost log entry indicates lesser version.
+	res, err = runTest(testVector{
+		tsMap:  map[uint64]uint64{63: now - 2*rmw, 95: now - rmw + 1, 99: now},
+		verMap: map[uint64]uint32{95: 0, 99: 0},
 
-// func (th *testHandler) GetMonitoringBinaryLadder(_ uint64, _ uint32) ([]byte, error) {
-// 	panic("not implemented")
-// }
-// func (th *testHandler) GetInclusionProof(_ uint64, _ uint32) ([]byte, error) {
-// 	panic("not implemented")
-// }
-// func (th *testHandler) GetPrefixTrees(_ []uint64) ([][]byte, error) { panic("not implemented") }
-// func (th *testHandler) Finish() ([][]byte, error)                   { panic("not implemented") }
-// func (th *testHandler) Output(_ []uint64, _ uint64, _, _ *uint64) (*structs.CombinedTreeProof, error) {
-// 	panic("not implemented")
-// }
-
-// func runExperiment(t *testing.T, n uint64, k, ver uint32) int {
-// 	versMap := make(map[uint64]struct{})
-// 	for len(versMap) < int(k) {
-// 		x := uint64(rand.Intn(int(n)))
-// 		versMap[x] = struct{}{}
-// 	}
-// 	vers := make([]uint64, 0, len(versMap))
-// 	for x := range versMap {
-// 		vers = append(vers, x)
-// 	}
-// 	slices.Sort(vers)
-
-// 	// fmt.Println(vers)
-
-// 	publicConfig := &structs.PublicConfig{}
-// 	suite := suites.KTSha256P256{}
-// 	th := &testHandler{vers: vers}
-// 	provider := newDataProvider(suite, th)
-
-// 	if _, err := fixedVersionSearch(publicConfig, ver, n, provider); err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	return th.sum
-// }
+		requests:      []uint64{63, 95, 99},
+		searchLadders: []uint64{95, 99},
+	})
+	if err.Error() != "rightmost log entry not consistent with claimed greatest version of label" {
+		t.Fatalf("unexpected result: res=%v err=%v", res, err)
+	}
+}
