@@ -248,3 +248,7 @@ func (dp *dataProvider) Output(n uint64, nP, m *uint64) (*structs.CombinedTreePr
 	}
 	return dp.handle.Output(positions, n, nP, m)
 }
+
+func (dp *dataProvider) StopCondition(x uint64, ver int) bool {
+	return dp.handle.StopCondition(x, ver)
+}

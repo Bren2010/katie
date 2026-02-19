@@ -78,6 +78,9 @@ func (tph *testProofHandle) Finish() ([][]byte, error) {
 func (tph *testProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
 	panic("not implemented")
 }
+func (tph *testProofHandle) StopCondition(x uint64, ver int) bool {
+	panic("not implemented")
+}
 
 func TestUpdateView(t *testing.T) {
 	config := testConfig(t)

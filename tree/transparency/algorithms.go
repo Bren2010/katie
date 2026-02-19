@@ -2,6 +2,7 @@ package transparency
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/Bren2010/katie/tree/transparency/math"
@@ -240,11 +241,24 @@ type ownerState struct {
 	// has been verified by owner monitoring.
 	starting uint64
 
-	// TODO
+	// verAtStarting is the version of the label that exists at `starting`, or
+	// -1 if the label didn't exist yet.
+	verAtStarting int
+	// upcomingVers is the position of each upcoming new version of the label.
+	upcomingVers []uint64
 }
 
-func (os *ownerState) greatestVersionAt(x uint64) uint32 {
-	panic("not implemented")
+func (os *ownerState) setStarting(x uint64) {
+	idx, _ := slices.BinarySearch(os.upcomingVers, x+1)
+
+	os.starting = x
+	os.verAtStarting = idx + os.verAtStarting
+	os.upcomingVers = os.upcomingVers[idx:]
+}
+
+func (os *ownerState) greatestVersionAt(x uint64) int {
+	idx, _ := slices.BinarySearch(os.upcomingVers, x+1)
+	return idx + os.verAtStarting
 }
 
 // monitoringReq contains the fixed portions of the state of a monitoring
@@ -337,7 +351,7 @@ func (req *monitoringReq) monitor(x, left, right uint64) error {
 	}
 
 	// If a stop condition has been reached, stop.
-	if req.stop() {
+	if req.provider.StopCondition(x, req.state.greatestVersionAt(x)) {
 		return nil
 	}
 
@@ -345,11 +359,20 @@ func (req *monitoringReq) monitor(x, left, right uint64) error {
 	// version is the greatest version of the label expected to exist at this
 	// point, based on the label owner's state.
 	ver := req.state.greatestVersionAt(x)
-	res, err := req.provider.GetSearchBinaryLadder(x, ver, false)
-	if err != nil {
-		return err
-	} else if res != 0 {
-		return errors.New("binary ladder inconsistent with expected greatest version of label")
+	if ver < 0 {
+		res, err := req.provider.GetSearchBinaryLadder(x, 0, false)
+		if err != nil {
+			return err
+		} else if res != -1 {
+			return errors.New("binary ladder inconsistent with expected greatest version of label")
+		}
+	} else {
+		res, err := req.provider.GetSearchBinaryLadder(x, uint32(ver), false)
+		if err != nil {
+			return err
+		} else if res != 0 {
+			return errors.New("binary ladder inconsistent with expected greatest version of label")
+		}
 	}
 
 	// If the current log entry has a right child, recurse to the right child.
@@ -361,15 +384,4 @@ func (req *monitoringReq) monitor(x, left, right uint64) error {
 		return err
 	}
 	return req.monitor(math.Right(x, req.n), timestamp, right)
-}
-
-func (req *monitoringReq) stop() bool {
-	// Stop conditions for user:
-	// - Out of search ladders.
-
-	// Stop conditions for server:
-	// - Output has reached maximum size.
-	// - Next binary ladder would be for version greater than user knows.
-
-	return false
 }

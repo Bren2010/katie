@@ -68,6 +68,10 @@ type proofHandle interface {
 	// of inspected log leaves `leaves` and the tree size parameters `n`, `nP`,
 	// and `m`.
 	Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error)
+
+	// StopCondition returns true if the proof is exhausted. This is only used
+	// for owner monitoring, since those proofs are "paginated".
+	StopCondition(x uint64, greatest int) bool
 }
 
 // receivedProofHandle implements the proofHandle interface over a
@@ -234,6 +238,12 @@ func (rph *receivedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64)
 	panic("unreachable")
 }
 
+func (rph *receivedProofHandle) StopCondition(_ uint64, _ int) bool {
+	// The only valid stop condition for a received proof is that all of the
+	// binary ladders have been consumed.
+	return len(rph.inner.PrefixProofs) == 0
+}
+
 type requiredProof struct {
 	pos  uint64
 	vers []uint32
@@ -268,6 +278,13 @@ func newProducedProofHandle(
 		logEntries: make(map[uint64]structs.LogEntry),
 		versions:   make(map[uint32]prefix.Entry),
 	}
+}
+
+// greatestAt returns the greatest version of the label that exists at log entry
+// `x`, or -1 if no version of the label should exist.
+func (pph *producedProofHandle) greatestAt(x uint64) int {
+	idx, _ := slices.BinarySearch(pph.index, x+1)
+	return idx - 1
 }
 
 func (pph *producedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error) {
@@ -310,9 +327,7 @@ func (pph *producedProofHandle) GetTimestamp(x uint64) (uint64, error) {
 }
 
 func (pph *producedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
-	// Determine the greatest version of the label that exists at this point.
-	greatest, _ := slices.BinarySearch(pph.index, x+1)
-	greatest--
+	greatest := pph.greatestAt(x)
 
 	// Compute the binary ladder steps to lookup.
 	var ladder []uint32
@@ -429,4 +444,8 @@ func (pph *producedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64)
 
 		Inclusion: structs.InclusionProof{Elements: inclusion},
 	}, nil
+}
+
+func (pph *producedProofHandle) StopCondition(x uint64, ver int) bool {
+	return len(pph.proofs) >= 25 || pph.greatestAt(x) > ver
 }
