@@ -72,9 +72,9 @@ func (ts *TransparencyStore) PutAuditorTreeHead(raw []byte) error {
 }
 
 func (ts *TransparencyStore) BatchGetIndex(labels [][]byte) ([][]byte, error) {
-	out := make([][]byte, 0, len(labels))
-	for _, label := range labels {
-		out = append(out, dup(ts.Indices[fmt.Sprintf("%x", label)]))
+	out := make([][]byte, len(labels))
+	for i, label := range labels {
+		out[i] = dup(ts.Indices[fmt.Sprintf("%x", label)])
 	}
 	return out, nil
 }

@@ -121,7 +121,9 @@ func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 			x = math.Right(x, n)
 			continue
 		}
-		if res != 0 {
+		if ver == 0 && res == -1 {
+			return 0, ErrLabelNotFound
+		} else if res != 0 {
 			return 0, errors.New("rightmost log entry not consistent with claimed greatest version of label")
 		}
 		return terminal, nil
