@@ -6,6 +6,7 @@ import (
 
 	"github.com/Bren2010/katie/db/memory"
 	"github.com/Bren2010/katie/tree/transparency/structs"
+	"github.com/Bren2010/katie/tree/transparency/test"
 )
 
 func TestAddLabel(t *testing.T) {
@@ -16,7 +17,7 @@ func TestAddLabel(t *testing.T) {
 		label2 = []byte("other")
 	)
 
-	tree, err := NewTree(testConfig(t), store)
+	tree, err := NewTree(test.Config(t), store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +85,7 @@ func TestRemoveLabel(t *testing.T) {
 
 	var label = []byte("label")
 
-	tree, err := NewTree(testConfig(t), store)
+	tree, err := NewTree(test.Config(t), store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestRemoveLabelTooSoon(t *testing.T) {
 
 	var label = []byte("label")
 
-	tree, err := NewTree(testConfig(t), store)
+	tree, err := NewTree(test.Config(t), store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ func TestAddRemoveSameLabel(t *testing.T) {
 
 	var label = []byte("label")
 
-	tree, err := NewTree(testConfig(t), store)
+	tree, err := NewTree(test.Config(t), store)
 	if err != nil {
 		t.Fatal(err)
 	}

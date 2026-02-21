@@ -1,4 +1,4 @@
-package transparency
+package algorithms
 
 import (
 	"bytes"
@@ -29,7 +29,7 @@ func addVersion(
 	return nil
 }
 
-type proofHandle interface {
+type ProofHandle interface {
 	// AddVersion adds the VRF output and commitment corresponding to a version
 	// of a label to the proofHandle.
 	AddVersion(ver uint32, vrfOutput, commitment []byte) error
@@ -74,9 +74,9 @@ type proofHandle interface {
 	StopCondition(x uint64, greatest int) bool
 }
 
-// receivedProofHandle implements the proofHandle interface over a
+// ReceivedProofHandle implements the proofHandle interface over a
 // CombinedTreeProof that was received and is being evaluated.
-type receivedProofHandle struct {
+type ReceivedProofHandle struct {
 	cs    suites.CipherSuite
 	inner structs.CombinedTreeProof
 
@@ -84,8 +84,8 @@ type receivedProofHandle struct {
 	tracker  versionTracker
 }
 
-func newReceivedProofHandle(cs suites.CipherSuite, inner structs.CombinedTreeProof) *receivedProofHandle {
-	return &receivedProofHandle{
+func NewReceivedProofHandle(cs suites.CipherSuite, inner structs.CombinedTreeProof) *ReceivedProofHandle {
+	return &ReceivedProofHandle{
 		cs:    cs,
 		inner: inner,
 
@@ -93,11 +93,11 @@ func newReceivedProofHandle(cs suites.CipherSuite, inner structs.CombinedTreePro
 	}
 }
 
-func (rph *receivedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
+func (rph *ReceivedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
 	return addVersion(rph.cs, rph.versions, ver, vrfOutput, commitment)
 }
 
-func (rph *receivedProofHandle) GetTimestamp(x uint64) (uint64, error) {
+func (rph *ReceivedProofHandle) GetTimestamp(x uint64) (uint64, error) {
 	if len(rph.inner.Timestamps) == 0 {
 		return 0, errors.New("unexpected number of timestamps consumed")
 	}
@@ -106,7 +106,7 @@ func (rph *receivedProofHandle) GetTimestamp(x uint64) (uint64, error) {
 	return ts, nil
 }
 
-func (rph *receivedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
+func (rph *ReceivedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
 	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, 0, errors.New("unexpected number of prefix proofs consumed")
@@ -145,7 +145,7 @@ func (rph *receivedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit
 	return root, res, nil
 }
 
-func (rph *receivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
+func (rph *ReceivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
 	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, errors.New("unexpected number of prefix proofs consumed")
@@ -184,7 +184,7 @@ func (rph *receivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 	return root, nil
 }
 
-func (rph *receivedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
+func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
 	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, errors.New("unexpected number of prefix proofs consumed")
@@ -214,7 +214,7 @@ func (rph *receivedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte,
 	return root, nil
 }
 
-func (rph *receivedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
+func (rph *ReceivedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
 	if len(xs) != len(rph.inner.PrefixRoots) {
 		return nil, errors.New("unexpected number of prefix tree roots requested")
 	}
@@ -223,7 +223,7 @@ func (rph *receivedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
 	return roots, nil
 }
 
-func (rph *receivedProofHandle) Finish() ([][]byte, error) {
+func (rph *ReceivedProofHandle) Finish() ([][]byte, error) {
 	if len(rph.inner.Timestamps) != 0 {
 		return nil, errors.New("unexpected additional timestamps found")
 	} else if len(rph.inner.PrefixProofs) != 0 {
@@ -234,11 +234,11 @@ func (rph *receivedProofHandle) Finish() ([][]byte, error) {
 	return rph.inner.Inclusion.Elements, nil
 }
 
-func (rph *receivedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+func (rph *ReceivedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
 	panic("unreachable")
 }
 
-func (rph *receivedProofHandle) StopCondition(_ uint64, _ int) bool {
+func (rph *ReceivedProofHandle) StopCondition(_ uint64, _ int) bool {
 	// The only valid stop condition for a received proof is that all of the
 	// binary ladders have been consumed.
 	return len(rph.inner.PrefixProofs) == 0
@@ -249,9 +249,9 @@ type requiredProof struct {
 	vers []uint32
 }
 
-// producedProofHandle implements the proofHandle interface such that it can
+// ProducedProofHandle implements the proofHandle interface such that it can
 // output the corresponding CombinedTreeProof.
-type producedProofHandle struct {
+type ProducedProofHandle struct {
 	cs    suites.CipherSuite
 	tx    db.TransparencyStore
 	index []uint64
@@ -265,12 +265,12 @@ type producedProofHandle struct {
 	roots      [][]byte
 }
 
-func newProducedProofHandle(
+func NewProducedProofHandle(
 	cs suites.CipherSuite,
 	tx db.TransparencyStore,
 	index []uint64,
-) *producedProofHandle {
-	return &producedProofHandle{
+) *ProducedProofHandle {
+	return &ProducedProofHandle{
 		cs:    cs,
 		tx:    tx,
 		index: index,
@@ -280,14 +280,18 @@ func newProducedProofHandle(
 	}
 }
 
+func (pph *ProducedProofHandle) GetCommitment(ver uint32) []byte {
+	return pph.versions[ver].Commitment
+}
+
 // greatestAt returns the greatest version of the label that exists at log entry
 // `x`, or -1 if no version of the label should exist.
-func (pph *producedProofHandle) greatestAt(x uint64) int {
+func (pph *ProducedProofHandle) greatestAt(x uint64) int {
 	idx, _ := slices.BinarySearch(pph.index, x+1)
 	return idx - 1
 }
 
-func (pph *producedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error) {
+func (pph *ProducedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error) {
 	if entry, ok := pph.logEntries[x]; ok {
 		return &entry, nil
 	}
@@ -313,11 +317,11 @@ func (pph *producedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error)
 	return entry, nil
 }
 
-func (pph *producedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
+func (pph *ProducedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
 	return addVersion(pph.cs, pph.versions, ver, vrfOutput, commitment)
 }
 
-func (pph *producedProofHandle) GetTimestamp(x uint64) (uint64, error) {
+func (pph *ProducedProofHandle) GetTimestamp(x uint64) (uint64, error) {
 	entry, err := pph.getLogEntry(x)
 	if err != nil {
 		return 0, err
@@ -326,7 +330,7 @@ func (pph *producedProofHandle) GetTimestamp(x uint64) (uint64, error) {
 	return entry.Timestamp, nil
 }
 
-func (pph *producedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
+func (pph *ProducedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
 	greatest := pph.greatestAt(x)
 
 	// Compute the binary ladder steps to lookup.
@@ -355,7 +359,7 @@ func (pph *producedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit
 	return entry.PrefixTree, res, nil
 }
 
-func (pph *producedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
+func (pph *ProducedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
 	entry, err := pph.getLogEntry(x)
 	if err != nil {
 		return nil, err
@@ -365,7 +369,7 @@ func (pph *producedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 	return entry.PrefixTree, nil
 }
 
-func (pph *producedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
+func (pph *ProducedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
 	entry, err := pph.getLogEntry(x)
 	if err != nil {
 		return nil, err
@@ -374,7 +378,7 @@ func (pph *producedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte,
 	return entry.PrefixTree, nil
 }
 
-func (pph *producedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
+func (pph *ProducedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
 	roots := make([][]byte, len(xs))
 	for i, x := range xs {
 		entry, err := pph.getLogEntry(x)
@@ -387,11 +391,11 @@ func (pph *producedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
 	return roots, nil
 }
 
-func (pph *producedProofHandle) Finish() ([][]byte, error) {
+func (pph *ProducedProofHandle) Finish() ([][]byte, error) {
 	panic("unreachable")
 }
 
-func (pph *producedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+func (pph *ProducedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
 	// Construct the list of prefix tree searches to execute.
 	searches := make([]prefix.PrefixSearch, len(pph.proofs))
 	for i, proof := range pph.proofs {
@@ -446,6 +450,6 @@ func (pph *producedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64)
 	}, nil
 }
 
-func (pph *producedProofHandle) StopCondition(x uint64, ver int) bool {
+func (pph *ProducedProofHandle) StopCondition(x uint64, ver int) bool {
 	return len(pph.proofs) >= 25 || pph.greatestAt(x) > ver
 }

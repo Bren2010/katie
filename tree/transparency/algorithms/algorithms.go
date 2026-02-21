@@ -1,4 +1,4 @@
-package transparency
+package algorithms
 
 import (
 	"errors"
@@ -19,10 +19,10 @@ func hasLeftChild(x uint64) bool     { return !noLeftChild(x) }
 func noRightChild(x, n uint64) bool  { return math.IsLeaf(x) || x == n-1 }
 func hasRightChild(x, n uint64) bool { return !noRightChild(x, n) }
 
-// rightmostDistinguished returns the position of the rightmost distinguished
+// RightmostDistinguished returns the position of the rightmost distinguished
 // log entry, or nil if there is none. The public config for the Transparency
 // Log is given in `config` and the size of the tree is `n`.
-func rightmostDistinguished(config *structs.PublicConfig, n uint64, provider *dataProvider) (*uint64, error) {
+func RightmostDistinguished(config *structs.PublicConfig, n uint64, provider *DataProvider) (*uint64, error) {
 	if n == 0 {
 		return nil, nil
 	}
@@ -54,15 +54,15 @@ func rightmostDistinguished(config *structs.PublicConfig, n uint64, provider *da
 	}
 }
 
-// previousRightmost returns the rightmost distinguished log entry that is to
+// PreviousRightmost returns the rightmost distinguished log entry that is to
 // the left of the rightmost log entry. This is used when the rightmost log
 // entry is being constructed and we need to know which distinguished log
 // entries exist to its left.
 //
 // The public config for the Transparency Log is given in `config`, and the size
 // of the tree is `n`.
-func previousRightmost(config *structs.PublicConfig, n uint64, provider *dataProvider) (*uint64, error) {
-	rightmost, err := rightmostDistinguished(config, n, provider)
+func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataProvider) (*uint64, error) {
+	rightmost, err := RightmostDistinguished(config, n, provider)
 	if err != nil {
 		return nil, err
 	} else if rightmost == nil || *rightmost != n-1 {
@@ -110,9 +110,9 @@ func previousRightmost(config *structs.PublicConfig, n uint64, provider *dataPro
 	return parent, nil
 }
 
-// updateView runs the algorithm from Section 4.2. The previous size of the tree
+// UpdateView runs the algorithm from Section 4.2. The previous size of the tree
 // is `m`, the current size of the tree is `n`.
-func updateView(config *structs.PublicConfig, n uint64, m *uint64, provider *dataProvider) error {
+func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, provider *DataProvider) error {
 	if m != nil && *m > n {
 		return errors.New("new tree size is not greater than previous tree size")
 	} else if n == 0 {
@@ -138,12 +138,12 @@ func updateView(config *structs.PublicConfig, n uint64, m *uint64, provider *dat
 	return nil
 }
 
-// greatestVersionSearch runs the algorithm from Section 6.3. The public config
+// GreatestVersionSearch runs the algorithm from Section 6.3. The public config
 // for the Transparency Log is given in `config`, the claimed greatest version
 // of the label is `ver`, and the size of the tree is `n`.
 //
 // It returns the position of the terminal node of the search.
-func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *dataProvider) (uint64, error) {
+func GreatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *DataProvider) (uint64, error) {
 	if n == 0 {
 		return 0, errors.New("unable to search empty tree")
 	}
@@ -151,7 +151,7 @@ func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 	// Identify the starting position for the search. This is either the
 	// rightmost distinguished log entry, or the root if there are no
 	// distinguished log entries.
-	rightmostDLE, err := rightmostDistinguished(config, n, provider)
+	rightmostDLE, err := RightmostDistinguished(config, n, provider)
 	if err != nil {
 		return 0, nil
 	}
@@ -188,12 +188,12 @@ func greatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 	}
 }
 
-// fixedVersionSearch runs the algorithm from Section 7.2. The public config for
+// FixedVersionSearch runs the algorithm from Section 7.2. The public config for
 // the Transparency Log is given in `config`, the target version of the search
 // is `ver`, and the size of the tree is `n`.
 //
 // It returns the position of the terminal node of the search.
-func fixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *dataProvider) (uint64, error) {
+func FixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, provider *DataProvider) (uint64, error) {
 	if n == 0 {
 		return 0, errors.New("unable to search empty tree")
 	}
@@ -329,7 +329,7 @@ type monitoringReq struct {
 	rightmost uint64
 	n         uint64
 
-	provider *dataProvider
+	provider *DataProvider
 }
 
 // init returns the list of log entries to verify if an owner is starting their

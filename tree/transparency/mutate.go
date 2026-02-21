@@ -9,6 +9,7 @@ import (
 
 	"github.com/Bren2010/katie/tree/log"
 	"github.com/Bren2010/katie/tree/prefix"
+	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
@@ -23,8 +24,8 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 		n = t.treeHead.TreeSize
 	}
 
-	handle := newProducedProofHandle(t.config.Suite, t.tx, nil)
-	provider := newDataProvider(t.config.Suite, handle)
+	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, nil)
+	provider := algorithms.NewDataProvider(t.config.Suite, handle)
 
 	// Decide on the timestamp for the new log entry. We do this so early
 	// because it affects which distinguished log entries exist, which affects
@@ -42,7 +43,7 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 	// Compute what the rightmost distinguished log entry will be after the new
 	// log entry is added.
 	provider.AddRetained(nil, map[uint64]structs.LogEntry{n: {Timestamp: timestamp}})
-	prevDLE, err := previousRightmost(t.config.Public(), n+1, provider)
+	prevDLE, err := algorithms.PreviousRightmost(t.config.Public(), n+1, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +235,7 @@ func (t *Tree) issueTreeHead(n, timestamp uint64, prefixRoot []byte) error {
 	}
 
 	// Compute the new log entry leaf hash and append it to the log tree.
-	leaf, err := logEntryHash(t.config.Suite, logEntry)
+	leaf, err := logEntry.Hash(t.config.Suite)
 	if err != nil {
 		return err
 	}

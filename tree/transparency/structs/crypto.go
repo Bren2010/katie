@@ -135,6 +135,16 @@ func (le *LogEntry) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
+func (le *LogEntry) Hash(cs suites.CipherSuite) ([]byte, error) {
+	raw, err := Marshal(le)
+	if err != nil {
+		return nil, err
+	}
+	hasher := cs.Hash()
+	hasher.Write(raw)
+	return hasher.Sum(nil), nil
+}
+
 type BinaryLadderStep struct {
 	Proof      []byte
 	Commitment []byte

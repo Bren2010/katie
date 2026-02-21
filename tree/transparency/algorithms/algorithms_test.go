@@ -1,89 +1,14 @@
-package transparency
+package algorithms
 
 import (
-	"slices"
 	"testing"
 	"time"
 
-	"github.com/Bren2010/katie/tree/transparency/structs"
+	"github.com/Bren2010/katie/tree/transparency/test"
 )
 
-type testProofHandle struct {
-	timestamps map[uint64]uint64
-	versions   map[uint64]uint32
-
-	requested         []uint64
-	searchLadders     []uint64
-	monitoringLadders []uint64
-	inclusionProofs   []uint64
-}
-
-func newTestProofHandle(timestamps map[uint64]uint64, versions map[uint64]uint32) *testProofHandle {
-	return &testProofHandle{timestamps: timestamps, versions: versions}
-}
-
-func (tph *testProofHandle) verify(requested, searchLadders, monitoringLadders, inclusionProofs []uint64) bool {
-	return slices.Equal(tph.requested, requested) &&
-		slices.Equal(tph.searchLadders, searchLadders) &&
-		slices.Equal(tph.monitoringLadders, monitoringLadders) &&
-		slices.Equal(tph.inclusionProofs, inclusionProofs)
-}
-
-func (tph *testProofHandle) GetTimestamp(x uint64) (uint64, error) {
-	tph.requested = append(tph.requested, x)
-
-	ts, ok := tph.timestamps[x]
-	if !ok {
-		panic("timestamp not known for position")
-	}
-	return ts, nil
-}
-
-func (tph *testProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
-	tph.searchLadders = append(tph.searchLadders, x)
-
-	posVer, ok := tph.versions[x]
-	if !ok {
-		panic("version not known for position")
-	}
-
-	if posVer < ver {
-		return make([]byte, 32), -1, nil
-	} else if posVer == ver {
-		return make([]byte, 32), 0, nil
-	} else {
-		return make([]byte, 32), 1, nil
-	}
-}
-
-func (tph *testProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
-	tph.monitoringLadders = append(tph.monitoringLadders, x)
-	return make([]byte, 32), nil
-}
-
-func (tph *testProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
-	tph.inclusionProofs = append(tph.inclusionProofs, x)
-	return make([]byte, 32), nil
-}
-
-func (tph *testProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
-	panic("not implemented")
-}
-func (tph *testProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
-	panic("not implemented")
-}
-func (tph *testProofHandle) Finish() ([][]byte, error) {
-	panic("not implemented")
-}
-func (tph *testProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
-	panic("not implemented")
-}
-func (tph *testProofHandle) StopCondition(x uint64, ver int) bool {
-	panic("not implemented")
-}
-
 func TestUpdateView(t *testing.T) {
-	config := testConfig(t)
+	config := test.Config(t)
 	now := uint64(time.Now().UnixMilli())
 
 	runTest := func(n uint64, m *uint64, requests, timestamps []uint64) error {
@@ -91,12 +16,12 @@ func TestUpdateView(t *testing.T) {
 		for i, pos := range requests {
 			tsMap[pos] = timestamps[i]
 		}
-		handle := newTestProofHandle(tsMap, nil)
-		provider := newDataProvider(config.Suite, handle)
+		handle := test.NewProofHandle(tsMap, nil)
+		provider := NewDataProvider(config.Suite, handle)
 
-		if err := updateView(config.Public(), n, m, provider); err != nil {
+		if err := UpdateView(config.Public(), n, m, provider); err != nil {
 			return err
-		} else if !handle.verify(requests, nil, nil, nil) {
+		} else if !handle.Verify(requests, nil, nil, nil) {
 			t.Fatal("unexpected lookups made by algorithm")
 		}
 		return nil
@@ -135,7 +60,7 @@ func TestUpdateView(t *testing.T) {
 }
 
 func TestRightmostDistinguished(t *testing.T) {
-	config := testConfig(t)
+	config := test.Config(t)
 
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
@@ -147,16 +72,16 @@ func TestRightmostDistinguished(t *testing.T) {
 		for i, pos := range requests {
 			tsMap[pos] = timestamps[i]
 		}
-		handle := newTestProofHandle(tsMap, nil)
-		provider := newDataProvider(config.Suite, handle)
+		handle := test.NewProofHandle(tsMap, nil)
+		provider := NewDataProvider(config.Suite, handle)
 
-		if err := updateView(public, n, nil, provider); err != nil {
+		if err := UpdateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}
-		res, err := rightmostDistinguished(public, n, provider)
+		res, err := RightmostDistinguished(public, n, provider)
 		if err != nil {
 			t.Fatal(err)
-		} else if !handle.verify(requests, nil, nil, nil) {
+		} else if !handle.Verify(requests, nil, nil, nil) {
 			t.Fatal("unexpected lookups made by algorithm")
 		}
 		return res
@@ -196,7 +121,7 @@ func TestRightmostDistinguished(t *testing.T) {
 }
 
 func TestPreviousDistinguished(t *testing.T) {
-	config := testConfig(t)
+	config := test.Config(t)
 
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
@@ -208,16 +133,16 @@ func TestPreviousDistinguished(t *testing.T) {
 		for i, pos := range requests {
 			tsMap[pos] = timestamps[i]
 		}
-		handle := newTestProofHandle(tsMap, nil)
-		provider := newDataProvider(config.Suite, handle)
+		handle := test.NewProofHandle(tsMap, nil)
+		provider := NewDataProvider(config.Suite, handle)
 
-		if err := updateView(public, n, nil, provider); err != nil {
+		if err := UpdateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}
-		res, err := previousRightmost(public, n, provider)
+		res, err := PreviousRightmost(public, n, provider)
 		if err != nil {
 			t.Fatal(err)
-		} else if !handle.verify(requests, nil, nil, nil) {
+		} else if !handle.Verify(requests, nil, nil, nil) {
 			t.Fatal("unexpected lookups made by algorithm")
 		}
 		return res
@@ -251,7 +176,7 @@ func TestPreviousDistinguished(t *testing.T) {
 }
 
 func TestGreatestVersionSearch(t *testing.T) {
-	config := testConfig(t)
+	config := test.Config(t)
 
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
@@ -265,14 +190,14 @@ func TestGreatestVersionSearch(t *testing.T) {
 	}
 	runTest := func(vec testVector) (uint64, error) {
 		public := config.Public()
-		handle := newTestProofHandle(vec.tsMap, vec.verMap)
-		provider := newDataProvider(config.Suite, handle)
+		handle := test.NewProofHandle(vec.tsMap, vec.verMap)
+		provider := NewDataProvider(config.Suite, handle)
 
-		if err := updateView(public, 100, nil, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
-		res, err := greatestVersionSearch(public, 1, 100, provider)
-		if !handle.verify(vec.requests, vec.searchLadders, nil, nil) {
+		res, err := GreatestVersionSearch(public, 1, 100, provider)
+		if !handle.Verify(vec.requests, vec.searchLadders, nil, nil) {
 			t.Fatal("unexpected lookups made by algorithm")
 		}
 		return res, err
@@ -366,7 +291,7 @@ func TestGreatestVersionSearch(t *testing.T) {
 }
 
 func TestFixedVersionSearch(t *testing.T) {
-	config := testConfig(t)
+	config := test.Config(t)
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
 
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
@@ -382,14 +307,14 @@ func TestFixedVersionSearch(t *testing.T) {
 	}
 	runTest := func(vec testVector) (uint64, error) {
 		public := config.Public()
-		handle := newTestProofHandle(vec.tsMap, vec.verMap)
-		provider := newDataProvider(config.Suite, handle)
+		handle := test.NewProofHandle(vec.tsMap, vec.verMap)
+		provider := NewDataProvider(config.Suite, handle)
 
-		if err := updateView(public, 100, nil, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
-		res, err := fixedVersionSearch(public, 1, 100, provider)
-		if !handle.verify(vec.requests, vec.searchLadders, nil, vec.inclusionProofs) {
+		res, err := FixedVersionSearch(public, 1, 100, provider)
+		if !handle.Verify(vec.requests, vec.searchLadders, nil, vec.inclusionProofs) {
 			t.Fatal("unexpected lookups made by algorithm")
 		}
 		return res, err

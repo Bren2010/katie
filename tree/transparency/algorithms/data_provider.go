@@ -1,4 +1,4 @@
-package transparency
+package algorithms
 
 import (
 	"bytes"
@@ -47,12 +47,12 @@ func addPrefixTree(collection map[uint64][]byte, pos uint64, root []byte) error 
 	return nil
 }
 
-// dataProvider is given as an input to the algorithm implementations. It wraps
-// a proofHandle and handles the deduplication aspect of extracting information
+// DataProvider is given as an input to the algorithm implementations. It wraps
+// a ProofHandle and handles the deduplication aspect of extracting information
 // from a CombinedTreeProof.
-type dataProvider struct {
+type DataProvider struct {
 	cs     suites.CipherSuite
-	handle proofHandle
+	handle ProofHandle
 
 	fullSubtrees [][]byte                    // Retained full subtrees of the log tree.
 	logEntries   map[uint64]structs.LogEntry // Retained log entries.
@@ -61,8 +61,8 @@ type dataProvider struct {
 	prefixTrees map[uint64][]byte // Map from log entry to prefix tree root value.
 }
 
-func newDataProvider(cs suites.CipherSuite, handle proofHandle) *dataProvider {
-	return &dataProvider{
+func NewDataProvider(cs suites.CipherSuite, handle ProofHandle) *DataProvider {
+	return &DataProvider{
 		cs:     cs,
 		handle: handle,
 
@@ -71,7 +71,7 @@ func newDataProvider(cs suites.CipherSuite, handle proofHandle) *dataProvider {
 	}
 }
 
-func (dp *dataProvider) AddRetained(fullSubtrees [][]byte, logEntries map[uint64]structs.LogEntry) error {
+func (dp *DataProvider) AddRetained(fullSubtrees [][]byte, logEntries map[uint64]structs.LogEntry) error {
 	dp.fullSubtrees = fullSubtrees
 	dp.logEntries = logEntries
 
@@ -86,7 +86,7 @@ func (dp *dataProvider) AddRetained(fullSubtrees [][]byte, logEntries map[uint64
 	return nil
 }
 
-func (dp *dataProvider) GetTimestamp(x uint64) (uint64, error) {
+func (dp *DataProvider) GetTimestamp(x uint64) (uint64, error) {
 	if ts, ok := dp.timestamps[x]; ok {
 		return ts, nil
 	}
@@ -99,7 +99,7 @@ func (dp *dataProvider) GetTimestamp(x uint64) (uint64, error) {
 	return ts, nil
 }
 
-func (dp *dataProvider) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) (int, error) {
+func (dp *DataProvider) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) (int, error) {
 	if _, err := dp.GetTimestamp(x); err != nil {
 		return 0, err
 	}
@@ -112,7 +112,7 @@ func (dp *dataProvider) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) (
 	return res, nil
 }
 
-func (dp *dataProvider) GetMonitoringBinaryLadder(x uint64, ver uint32) error {
+func (dp *DataProvider) GetMonitoringBinaryLadder(x uint64, ver uint32) error {
 	if _, err := dp.GetTimestamp(x); err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (dp *dataProvider) GetMonitoringBinaryLadder(x uint64, ver uint32) error {
 	return addPrefixTree(dp.prefixTrees, x, root)
 }
 
-func (dp *dataProvider) GetInclusionProof(x uint64, ver uint32) error {
+func (dp *DataProvider) GetInclusionProof(x uint64, ver uint32) error {
 	if _, err := dp.GetTimestamp(x); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (dp *dataProvider) GetInclusionProof(x uint64, ver uint32) error {
 	return addPrefixTree(dp.prefixTrees, x, root)
 }
 
-func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
+func (dp *DataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	leaves := make([]sortableLogLeaf, 0)
 
 	// Put together initial list of leaves that were inspected by our proof and
@@ -174,7 +174,7 @@ func (dp *dataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	return leaves, nil
 }
 
-type proofResult struct {
+type ProofResult struct {
 	fullSubtrees [][]byte                    // The full subtrees for the user to retain.
 	additional   [][]byte                    // The additional tree head, if requested.
 	logEntries   map[uint64]structs.LogEntry // Log entries for the user to retain.
@@ -183,7 +183,7 @@ type proofResult struct {
 // Finish takes as input the current tree size `n`, an optional additional tree
 // size `nP`, and the optional previous tree size `m`. It returns the result of
 // the proof evaluation that was done.
-func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
+func (dp *DataProvider) Finish(n uint64, nP, m *uint64) (*ProofResult, error) {
 	leaves, err := dp.inspectedLeaves()
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 	values := make([][]byte, len(leaves))
 	for i, leaf := range leaves {
 		positions[i] = leaf.position
-		values[i], err = logEntryHash(dp.cs, leaf.LogEntry)
+		values[i], err = leaf.LogEntry.Hash(dp.cs)
 		if err != nil {
 			return nil, err
 		}
@@ -231,13 +231,13 @@ func (dp *dataProvider) Finish(n uint64, nP, m *uint64) (*proofResult, error) {
 		logEntries[x] = structs.LogEntry{Timestamp: ts, PrefixTree: prefixTree}
 	}
 
-	return &proofResult{subtrees, additional, logEntries}, nil
+	return &ProofResult{subtrees, additional, logEntries}, nil
 }
 
 // Output takes as input the current tree size `n`, an optional additional tree
 // size `nP`, and the optional previous tree size `m`. It returns the produced
 // CombinedTreeProof structure.
-func (dp *dataProvider) Output(n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+func (dp *DataProvider) Output(n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
 	leaves, err := dp.inspectedLeaves()
 	if err != nil {
 		return nil, err
@@ -249,6 +249,6 @@ func (dp *dataProvider) Output(n uint64, nP, m *uint64) (*structs.CombinedTreePr
 	return dp.handle.Output(positions, n, nP, m)
 }
 
-func (dp *dataProvider) StopCondition(x uint64, ver int) bool {
+func (dp *DataProvider) StopCondition(x uint64, ver int) bool {
 	return dp.handle.StopCondition(x, ver)
 }

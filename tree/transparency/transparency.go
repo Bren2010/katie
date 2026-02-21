@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
@@ -82,7 +83,7 @@ func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, 
 	return
 }
 
-func (t *Tree) updateView(last *uint64, provider *dataProvider) error {
+func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error {
 	if last != nil { // Load frontier log entries.
 		frontier := math.Frontier(*last)
 
@@ -110,7 +111,7 @@ func (t *Tree) updateView(last *uint64, provider *dataProvider) error {
 		provider.AddRetained(nil, logEntries)
 	}
 
-	return updateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
+	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
 }
 
 func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, error) {
@@ -126,7 +127,7 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 	}
 	greatest := len(indices[0]) - 1
 
-	handle := newProducedProofHandle(t.config.Suite, t.tx, indices[0])
+	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, indices[0])
 
 	// Determine which versions we will need VRF outputs for, and also load the
 	// target version of the label.
@@ -163,20 +164,20 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 
 	// Execute the algorithm to update the user's view of the tree, and then
 	// either a greatest-version or fixed-version search.
-	provider := newDataProvider(t.config.Suite, handle)
+	provider := algorithms.NewDataProvider(t.config.Suite, handle)
 	if err := t.updateView(req.Last, provider); err != nil {
 		return nil, err
 	}
 	if req.Version == nil {
 		if greatest < 0 {
-			_, err = greatestVersionSearch(t.config.Public(), 0, t.treeHead.TreeSize, provider)
+			_, err = algorithms.GreatestVersionSearch(t.config.Public(), 0, t.treeHead.TreeSize, provider)
 		} else {
-			_, err = greatestVersionSearch(t.config.Public(), uint32(greatest), t.treeHead.TreeSize, provider)
+			_, err = algorithms.GreatestVersionSearch(t.config.Public(), uint32(greatest), t.treeHead.TreeSize, provider)
 		}
 	} else {
-		_, err = fixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
+		_, err = algorithms.FixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
 	}
-	if err != nil && err != ErrLabelNotFound {
+	if err != nil && err != algorithms.ErrLabelNotFound {
 		return nil, err
 	}
 	combinedProof, err := provider.Output(n, nP, m)
@@ -186,11 +187,10 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 
 	// Populate commitment field of appropriate BinaryLadderStep structures.
 	for i, ver := range ladder {
-		commitment := handle.versions[ver].Commitment
 		if req.Version == nil && int(ver) != greatest {
-			steps[i].Commitment = commitment
+			steps[i].Commitment = handle.GetCommitment(ver)
 		} else if req.Version != nil && ver != *req.Version {
-			steps[i].Commitment = commitment
+			steps[i].Commitment = handle.GetCommitment(ver)
 		}
 	}
 

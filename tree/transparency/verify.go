@@ -170,6 +170,7 @@ package transparency
 // 			ver = *req.Version
 // 		}
 // 		tbs, err := structs.Marshal(&structs.UpdateTBS{
+// 			Config: config,
 // 			Label:   req.Label,
 // 			Version: ver,
 // 			Value:   res.Value.Value,
