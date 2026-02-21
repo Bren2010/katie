@@ -14,8 +14,10 @@ var (
 	ErrLabelExpired  = errors.New("requested version of label has expired")
 )
 
-func noLeftChild(x uint64) bool     { return math.IsLeaf(x) }
-func noRightChild(x, n uint64) bool { return math.IsLeaf(x) || x == n-1 }
+func noLeftChild(x uint64) bool      { return math.IsLeaf(x) }
+func hasLeftChild(x uint64) bool     { return !noLeftChild(x) }
+func noRightChild(x, n uint64) bool  { return math.IsLeaf(x) || x == n-1 }
+func hasRightChild(x, n uint64) bool { return !noRightChild(x, n) }
 
 // rightmostDistinguished returns the position of the rightmost distinguished
 // log entry, or nil if there is none. The public config for the Transparency
@@ -50,6 +52,62 @@ func rightmostDistinguished(config *structs.PublicConfig, n uint64, provider *da
 
 		x = math.Right(x, n)
 	}
+}
+
+// previousRightmost returns the rightmost distinguished log entry that is to
+// the left of the rightmost log entry. This is used when the rightmost log
+// entry is being constructed and we need to know which distinguished log
+// entries exist to its left.
+//
+// The public config for the Transparency Log is given in `config`, and the size
+// of the tree is `n`.
+func previousRightmost(config *structs.PublicConfig, n uint64, provider *dataProvider) (*uint64, error) {
+	rightmost, err := rightmostDistinguished(config, n, provider)
+	if err != nil {
+		return nil, err
+	} else if rightmost == nil || *rightmost != n-1 {
+		return rightmost, nil
+	}
+	var parent *uint64
+	if *rightmost != math.Root(n) {
+		temp := math.Parent(*rightmost, n)
+		parent = &temp
+	}
+
+	left := uint64(0) // Bound used for determining distinguished status.
+	if parent != nil {
+		left, err = provider.GetTimestamp(*parent)
+		if err != nil {
+			return nil, err
+		}
+	}
+	right, err := provider.GetTimestamp(*rightmost)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the rightmost distinguished log entry has a left child and the left
+	// child is distinguished, then there's a subtree of distinguished log
+	// entries. Find it's rightmost edge.
+	if hasLeftChild(*rightmost) && config.IsDistinguished(left, right) {
+		out := math.Left(*rightmost)
+		for {
+			if noRightChild(out, n) {
+				return &out, nil
+			}
+			left, err = provider.GetTimestamp(out)
+			if err != nil {
+				return nil, err
+			} else if !config.IsDistinguished(left, right) {
+				return &out, nil
+			}
+			out = math.Right(out, n)
+		}
+	}
+
+	// Otherwise return the rightmost distinguished log entry's parent, which
+	// will be distinguished and to its left.
+	return parent, nil
 }
 
 // updateView runs the algorithm from Section 4.2. The previous size of the tree
@@ -342,7 +400,7 @@ func (req *monitoringReq) monitor(x, left, right uint64) error {
 	}
 
 	// If the current log entry has a left child, recurse to the left child.
-	if !noLeftChild(x) {
+	if hasLeftChild(x) {
 		timestamp, err := req.provider.GetTimestamp(x)
 		if err != nil {
 			return err

@@ -8,17 +8,12 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
-func TestFirstMutate(t *testing.T) {
+func TestAddLabel(t *testing.T) {
 	store := memory.NewTransparencyStore()
 
 	var (
 		label1 = []byte("label")
 		label2 = []byte("other")
-
-		val1 = []byte("version 0")
-		val2 = []byte("version 1")
-		val3 = []byte("version 2")
-		val4 = []byte("other 0")
 	)
 
 	tree, err := NewTree(testConfig(t), store)
@@ -28,9 +23,9 @@ func TestFirstMutate(t *testing.T) {
 
 	// Make the first mutation.
 	_, err = tree.Mutate([]LabelValue{
-		{Label: label1, Value: structs.UpdateValue{Value: val1}},
-		{Label: label2, Value: structs.UpdateValue{Value: val4}},
-		{Label: label1, Value: structs.UpdateValue{Value: val2}},
+		{Label: label1, Value: structs.UpdateValue{Value: []byte("version 0")}},
+		{Label: label2, Value: structs.UpdateValue{Value: []byte("other 0")}},
+		{Label: label1, Value: structs.UpdateValue{Value: []byte("version 1")}},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +53,7 @@ func TestFirstMutate(t *testing.T) {
 
 	// Make a second mutation.
 	_, err = tree.Mutate([]LabelValue{
-		{Label: label1, Value: structs.UpdateValue{Value: val3}},
+		{Label: label1, Value: structs.UpdateValue{Value: []byte("version 2")}},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -84,5 +79,109 @@ func TestFirstMutate(t *testing.T) {
 	}
 }
 
-// TODO: Test removing label.
-// TODO: Test adding and removing label in same request.
+func TestRemoveLabel(t *testing.T) {
+	store := memory.NewTransparencyStore()
+
+	var label = []byte("label")
+
+	tree, err := NewTree(testConfig(t), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add some versions of the label.
+	_, err = tree.Mutate([]LabelValue{
+		{Label: label, Value: structs.UpdateValue{Value: []byte("version 0")}},
+		{Label: label, Value: structs.UpdateValue{Value: []byte("version 1")}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the label.
+	_, err = tree.Mutate(nil, [][]byte{label})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that index and label versions were removed.
+	if len(store.Indices) != 0 {
+		t.Fatal("unexpected number of indices")
+	} else if len(store.Versions) != 0 {
+		t.Fatal("unexpected number of label versions")
+	} else if len(store.LogEntries) != 2 {
+		t.Fatal("unexpected number of log entries written")
+	}
+}
+
+func TestRemoveLabelTooSoon(t *testing.T) {
+	store := memory.NewTransparencyStore()
+
+	var label = []byte("label")
+
+	tree, err := NewTree(testConfig(t), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add some versions of the label.
+	for i := range 3 {
+		_, err = tree.Mutate([]LabelValue{
+			{Label: label, Value: structs.UpdateValue{Value: []byte{byte(i)}}},
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Delete the label.
+	_, err = tree.Mutate(nil, [][]byte{label})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestAddRemoveSameLabel(t *testing.T) {
+	store := memory.NewTransparencyStore()
+
+	var label = []byte("label")
+
+	tree, err := NewTree(testConfig(t), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add some versions of the label.
+	_, err = tree.Mutate([]LabelValue{
+		{Label: label, Value: structs.UpdateValue{Value: []byte("version 0")}},
+		{Label: label, Value: structs.UpdateValue{Value: []byte("version 1")}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the label and add a new version in the same operation.
+	_, err = tree.Mutate([]LabelValue{
+		{Label: label, Value: structs.UpdateValue{Value: []byte("version 2")}},
+	}, [][]byte{label})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that index and label versions were removed.
+	if len(store.Indices) != 1 {
+		t.Fatal("unexpected number of indices")
+	} else if len(store.Versions) != 1 {
+		t.Fatal("unexpected number of label versions")
+	} else if len(store.LogEntries) != 2 {
+		t.Fatal("unexpected number of log entries written")
+	}
+
+	// Check stored data.
+	stored, err := tree.getVersion(label, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(stored.Value.Value, []byte("version 2")) {
+		t.Fatal("unexpected data stored")
+	}
+}

@@ -25,7 +25,24 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 
 	handle := newProducedProofHandle(t.config.Suite, t.tx, nil)
 	provider := newDataProvider(t.config.Suite, handle)
-	rightmostDLE, err := rightmostDistinguished(t.config.Public(), n, provider)
+
+	// Decide on the timestamp for the new log entry. We do this so early
+	// because it affects which distinguished log entries exist, which affects
+	// which modifications are allowable.
+	timestamp := uint64(time.Now().UnixMilli())
+	if n > 0 {
+		rightmost, err := provider.GetTimestamp(n - 1)
+		if err != nil {
+			return nil, err
+		} else if timestamp < rightmost {
+			return nil, errors.New("refusing to issue tree head: current timestamp is less than previous timestamp")
+		}
+	}
+
+	// Compute what the rightmost distinguished log entry will be after the new
+	// log entry is added.
+	provider.AddRetained(nil, map[uint64]structs.LogEntry{n: {Timestamp: timestamp}})
+	prevDLE, err := previousRightmost(t.config.Public(), n+1, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +59,7 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 		prefixRemove [][]byte
 	)
 	for _, mutation := range mutations {
-		pa, pr, err := t.mutateLabel(n, rightmostDLE, mutation)
+		pa, pr, err := t.mutateLabel(n, prevDLE, mutation)
 		if err != nil {
 			return nil, err
 		}
@@ -65,15 +82,6 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 	}
 
 	// Issue new tree head.
-	timestamp := uint64(time.Now().UnixMilli())
-	if n > 0 {
-		rightmost, err := provider.GetTimestamp(n - 1)
-		if err != nil {
-			return nil, err
-		} else if timestamp < rightmost {
-			return nil, errors.New("refusing to issue tree head: current timestamp is less than previous timestamp")
-		}
-	}
 	if err := t.issueTreeHead(n, timestamp, prefixRoot); err != nil {
 		return nil, err
 	}
@@ -149,7 +157,7 @@ func (t *Tree) groupByLabel(add []LabelValue, remove [][]byte) ([]labelMutation,
 
 // mutateLabel performs the requested additions and removals for a single label.
 // Version counters are assigned sequentially.
-func (t *Tree) mutateLabel(n uint64, rightmostDLE *uint64, mut labelMutation) ([]prefix.Entry, [][]byte, error) {
+func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]prefix.Entry, [][]byte, error) {
 	var (
 		add    []prefix.Entry
 		remove [][]byte
@@ -157,10 +165,10 @@ func (t *Tree) mutateLabel(n uint64, rightmostDLE *uint64, mut labelMutation) ([
 		label, index = mut.label, mut.index
 	)
 
-	if mut.remove {
+	if mut.remove && len(index) > 0 {
 		// The label is not eligible for deletion if it has been modified since
 		// the last distinguished log entry was created.
-		if len(index) > 0 && rightmostDLE != nil && index[len(index)-1] >= *rightmostDLE {
+		if prevDLE == nil || index[len(index)-1] > *prevDLE {
 			return nil, nil, fmt.Errorf("unable to delete label that was modified recently: %s", label)
 		}
 
