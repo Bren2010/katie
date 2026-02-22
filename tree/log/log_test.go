@@ -153,3 +153,36 @@ func TestAdditional(t *testing.T) {
 		}
 	}
 }
+
+func TestAppend(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, memory.NewLogStore())
+
+	leaf := random()
+	fullSubtrees, err := tree.Append(0, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := uint64(1); i < 100; i++ {
+		leaf := random()
+
+		expected, err := tree.Append(i, leaf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fullSubtrees, err = Append(cs, i, fullSubtrees, leaf)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(expected) != len(fullSubtrees) {
+			t.Fatal("unexpected output length")
+		}
+		for i := range expected {
+			if !bytes.Equal(expected[i], fullSubtrees[i]) {
+				t.Fatal("unexpected output")
+			}
+		}
+	}
+}

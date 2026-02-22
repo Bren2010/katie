@@ -97,13 +97,10 @@ func fillInCopath(n *node, elements [][]byte) ([][]byte, error) {
 	}
 }
 
-// Evaluate returns the root hash that `proof` corresponds to.
-func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byte, error) {
+func evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) (node, error) {
 	sortedEntries := make([]Entry, len(entries))
 	copy(sortedEntries, entries)
-	slices.SortFunc(sortedEntries, func(a, b Entry) int {
-		return bytes.Compare(a.VrfOutput, b.VrfOutput)
-	})
+	slices.SortFunc(sortedEntries, compareEntries)
 	for i, entry := range sortedEntries {
 		if len(entry.VrfOutput) != cs.HashSize() {
 			return nil, errors.New("unexpected vrf output length")
@@ -130,6 +127,15 @@ func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byt
 		return nil, errors.New("wrong number of copath nodes provided")
 	}
 
+	return root, nil
+}
+
+// Evaluate returns the root hash that `proof` corresponds to.
+func Evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) ([]byte, error) {
+	root, err := evaluate(cs, entries, proof)
+	if err != nil {
+		return nil, err
+	}
 	return root.Hash(cs), nil
 }
 
@@ -142,4 +148,37 @@ func Verify(cs suites.CipherSuite, entries []Entry, proof *PrefixProof, root []b
 		return errors.New("root hash does not match expected value")
 	}
 	return nil
+}
+
+// EvaluateBeforeAfter evaluates `proof` before and after making the requested
+// additions and removals.
+func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove []Entry, proof *PrefixProof) ([]byte, []byte, error) {
+	// Combine the `add` and `remove` slices and compute the prefix tree root
+	// hash in the straightforward way.
+	allEntries := make([]Entry, len(add)+len(remove))
+	copy(allEntries, add)
+	copy(allEntries[len(add):], remove)
+
+	root, err := evaluate(cs, allEntries, proof)
+	if err != nil {
+		return nil, nil, err
+	}
+	before := root.Hash(cs)
+
+	// Perform the additions and removals and compute what the prefix tree root
+	// hash would be then.
+	sortedAdd := make([]Entry, len(add))
+	copy(sortedAdd, add)
+	slices.SortFunc(sortedAdd, compareEntries)
+
+	sortedRemove := make([][]byte, len(remove))
+	for i, entry := range remove {
+		sortedRemove[i] = entry.VrfOutput
+	}
+	slices.SortFunc(sortedRemove, bytes.Compare)
+
+	addRemoveEntries(cs, &root, sortedAdd, sortedRemove, 0)
+	after := root.Hash(cs)
+
+	return before, after, nil
 }

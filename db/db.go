@@ -46,3 +46,8 @@ type TransparencyStore interface {
 	// success. The TransparencyStore should no longer be used after calling.
 	Commit() error
 }
+
+type AuditorStore interface {
+	GetState() (raw []byte, err error)
+	PutState(raw []byte) error
+}

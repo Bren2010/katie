@@ -155,9 +155,9 @@ func (t *Tree) Append(n uint64, value []byte) ([][]byte, error) {
 
 	// Get full subtree values and return.
 	fullSubtrees := math.FullSubtrees(math.Root(n+1), n+1)
-	out := make([][]byte, 0, len(fullSubtrees))
-	for _, x := range fullSubtrees {
-		out = append(out, set.get(x).value)
+	out := make([][]byte, len(fullSubtrees))
+	for i, x := range fullSubtrees {
+		out[i] = set.get(x).value
 	}
 	return out, nil
 }
@@ -192,4 +192,33 @@ func Root(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte) ([]byte, error
 		)
 	}
 	return acc.value, nil
+}
+
+// Append returns the new `fullSubtrees` slice after a new leaf with value
+// `added` has been added as the rightmost log entry.
+func Append(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte, added []byte) ([][]byte, error) {
+	root := math.Root(n)
+
+	chain := make([][]byte, math.Level(root)+2)
+	for i, x := range math.FullSubtrees(root, n) {
+		chain[math.Level(x)] = fullSubtrees[i]
+	}
+
+	carry := &nodeData{leaf: true, value: added}
+	for i := range chain {
+		if chain[i] == nil {
+			chain[i] = carry.value
+			break
+		}
+		carry = treeHash(cs, &nodeData{leaf: i == 0, value: chain[i]}, carry)
+		chain[i] = nil
+	}
+
+	out := make([][]byte, 0)
+	for i := len(chain) - 1; i >= 0; i-- {
+		if chain[i] != nil {
+			out = append(out, chain[i])
+		}
+	}
+	return out, nil
 }

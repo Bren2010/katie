@@ -11,6 +11,10 @@ import (
 	"github.com/Bren2010/katie/db"
 )
 
+func compareEntries(a, b Entry) int {
+	return bytes.Compare(a.VrfOutput, b.VrfOutput)
+}
+
 type PrefixSearch struct {
 	Version    uint64
 	VrfOutputs [][]byte
@@ -82,9 +86,7 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	// Sort the list of new entries to add and verify that they're well formed.
 	sortedAdd := make([]Entry, len(add))
 	copy(sortedAdd, add)
-	slices.SortFunc(sortedAdd, func(a, b Entry) int {
-		return bytes.Compare(a.VrfOutput, b.VrfOutput)
-	})
+	slices.SortFunc(sortedAdd, compareEntries)
 	for i, entry := range sortedAdd {
 		if len(entry.VrfOutput) != t.cs.HashSize() {
 			return nil, nil, nil, errors.New("unexpected vrf output length")
