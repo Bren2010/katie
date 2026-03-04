@@ -26,9 +26,7 @@ func TestMarshalUnmarshal1(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	if err := n1.Marshal(cs, 0, buf); err != nil {
-		t.Fatal(err)
-	}
+	n1.Marshal(cs, 0, buf)
 	n2, err := unmarshalNode(cs, nil, 0, bytes.NewBuffer(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
@@ -50,9 +48,7 @@ func TestMarshalUnmarshal2(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	if err := n1.Marshal(cs, 0, buf); err != nil {
-		t.Fatal(err)
-	}
+	n1.Marshal(cs, 0, buf)
 	n2, err := unmarshalNode(cs, nil, 0, bytes.NewBuffer(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
@@ -75,9 +71,7 @@ func createLargeTree(depth int) node {
 
 func encodedSize(cs suites.CipherSuite, depth int, nd node) int {
 	buf := &bytes.Buffer{}
-	if err := nd.Marshal(cs, depth, buf); err != nil {
-		panic(err)
-	}
+	nd.Marshal(cs, depth, buf)
 	return buf.Len()
 }
 
