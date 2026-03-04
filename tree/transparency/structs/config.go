@@ -66,11 +66,10 @@ type PublicConfig struct {
 }
 
 func (pc *PublicConfig) Marshal(buf *bytes.Buffer) error {
-	if err := binary.Write(buf, binary.BigEndian, pc.Suite.Id()); err != nil {
-		return err
-	} else if err := buf.WriteByte(byte(pc.Mode)); err != nil {
-		return err
-	} else if err := writeU16Bytes(buf, pc.SignatureKey.Bytes(), "signature public key"); err != nil {
+	binary.Write(buf, binary.BigEndian, pc.Suite.Id())
+	buf.WriteByte(byte(pc.Mode))
+
+	if err := writeU16Bytes(buf, pc.SignatureKey.Bytes(), "signature public key"); err != nil {
 		return err
 	} else if err := writeU16Bytes(buf, pc.VrfKey.Bytes(), "vrf public key"); err != nil {
 		return err
@@ -83,28 +82,18 @@ func (pc *PublicConfig) Marshal(buf *bytes.Buffer) error {
 		}
 
 	case ThirdPartyAuditing:
-		if err := binary.Write(buf, binary.BigEndian, pc.MaxAuditorLag); err != nil {
-			return err
-		} else if err := binary.Write(buf, binary.BigEndian, pc.AuditorStartPos); err != nil {
-			return err
-		} else if err := writeU16Bytes(buf, pc.AuditorPublicKey.Bytes(), "auditor public key"); err != nil {
+		binary.Write(buf, binary.BigEndian, pc.MaxAuditorLag)
+		binary.Write(buf, binary.BigEndian, pc.AuditorStartPos)
+		if err := writeU16Bytes(buf, pc.AuditorPublicKey.Bytes(), "auditor public key"); err != nil {
 			return err
 		}
 	}
 
-	if err := binary.Write(buf, binary.BigEndian, pc.MaxAhead); err != nil {
-		return err
-	} else if err := binary.Write(buf, binary.BigEndian, pc.MaxBehind); err != nil {
-		return err
-	} else if err := binary.Write(buf, binary.BigEndian, pc.ReasonableMonitoringWindow); err != nil {
-		return err
-	}
-	if err := writeOptional(buf, pc.MaximumLifetime > 0); err != nil {
-		return err
-	} else if pc.MaximumLifetime > 0 {
-		if err := binary.Write(buf, binary.BigEndian, pc.MaximumLifetime); err != nil {
-			return err
-		}
+	binary.Write(buf, binary.BigEndian, pc.MaxAhead)
+	binary.Write(buf, binary.BigEndian, pc.MaxBehind)
+	binary.Write(buf, binary.BigEndian, pc.ReasonableMonitoringWindow)
+	if writeOptional(buf, pc.MaximumLifetime > 0) {
+		binary.Write(buf, binary.BigEndian, pc.MaximumLifetime)
 	}
 
 	return nil

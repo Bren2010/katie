@@ -24,9 +24,8 @@ func NewTreeHead(buf *bytes.Buffer) (*TreeHead, error) {
 }
 
 func (th *TreeHead) Marshal(buf *bytes.Buffer) error {
-	if err := binary.Write(buf, binary.BigEndian, th.TreeSize); err != nil {
-		return err
-	} else if err := writeU16Bytes(buf, th.Signature, "signature"); err != nil {
+	binary.Write(buf, binary.BigEndian, th.TreeSize)
+	if err := writeU16Bytes(buf, th.Signature, "signature"); err != nil {
 		return err
 	}
 	return nil
@@ -41,11 +40,9 @@ type TreeHeadTBS struct {
 func (tbs *TreeHeadTBS) Marshal(buf *bytes.Buffer) error {
 	if err := tbs.Config.Marshal(buf); err != nil {
 		return err
-	} else if err := binary.Write(buf, binary.BigEndian, tbs.TreeSize); err != nil {
-		return err
-	} else if _, err := buf.Write(tbs.Root); err != nil {
-		return err
 	}
+	binary.Write(buf, binary.BigEndian, tbs.TreeSize)
+	buf.Write(tbs.Root)
 	return nil
 }
 
@@ -72,11 +69,9 @@ func NewAuditorTreeHead(buf *bytes.Buffer) (*AuditorTreeHead, error) {
 }
 
 func (ath *AuditorTreeHead) Marshal(buf *bytes.Buffer) error {
-	if err := binary.Write(buf, binary.BigEndian, ath.Timestamp); err != nil {
-		return err
-	} else if err := binary.Write(buf, binary.BigEndian, ath.TreeSize); err != nil {
-		return err
-	} else if err := writeU16Bytes(buf, ath.Signature, "auditor signature"); err != nil {
+	binary.Write(buf, binary.BigEndian, ath.Timestamp)
+	binary.Write(buf, binary.BigEndian, ath.TreeSize)
+	if err := writeU16Bytes(buf, ath.Signature, "auditor signature"); err != nil {
 		return err
 	}
 	return nil
@@ -92,13 +87,10 @@ type AuditorTreeHeadTBS struct {
 func (tbs *AuditorTreeHeadTBS) Marshal(buf *bytes.Buffer) error {
 	if err := tbs.Config.Marshal(buf); err != nil {
 		return err
-	} else if err := binary.Write(buf, binary.BigEndian, tbs.Timestamp); err != nil {
-		return err
-	} else if err := binary.Write(buf, binary.BigEndian, tbs.TreeSize); err != nil {
-		return err
-	} else if _, err := buf.Write(tbs.Root); err != nil {
-		return err
 	}
+	binary.Write(buf, binary.BigEndian, tbs.Timestamp)
+	binary.Write(buf, binary.BigEndian, tbs.TreeSize)
+	buf.Write(tbs.Root)
 	return nil
 }
 
@@ -146,14 +138,15 @@ func NewFullTreeHead(config *PublicConfig, buf *bytes.Buffer) (*FullTreeHead, er
 
 func (fth *FullTreeHead) Marshal(buf *bytes.Buffer) error {
 	if fth.TreeHead == nil {
-		return buf.WriteByte(byte(SameHead))
+		buf.WriteByte(byte(SameHead))
+		return nil
 	}
 
-	if err := buf.WriteByte(byte(UpdatedHead)); err != nil {
+	buf.WriteByte(byte(UpdatedHead))
+	if err := fth.TreeHead.Marshal(buf); err != nil {
 		return err
-	} else if err := fth.TreeHead.Marshal(buf); err != nil {
-		return err
-	} else if fth.AuditorTreeHead != nil {
+	}
+	if fth.AuditorTreeHead != nil {
 		if err := fth.AuditorTreeHead.Marshal(buf); err != nil {
 			return err
 		}

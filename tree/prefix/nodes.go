@@ -40,7 +40,7 @@ type node interface {
 	// Hash returns the cryptographic hash of the node. It may rely on cache.
 	Hash(cs suites.CipherSuite) []byte
 	// Marshal serializes the node and writes the output to buf.
-	Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error
+	Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer)
 }
 
 // parentNode represents a parent node within a given tile.
@@ -78,21 +78,13 @@ func (pn *parentNode) Hash(cs suites.CipherSuite) []byte {
 	return out
 }
 
-func (pn *parentNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
-	if err := buf.WriteByte(parentNodeType); err != nil {
-		return err
-	}
+func (pn *parentNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) {
+	buf.WriteByte(parentNodeType)
 	if shouldStoreIntermediate(depth) {
-		if _, err := buf.Write(pn.Hash(cs)); err != nil {
-			return err
-		}
+		buf.Write(pn.Hash(cs))
 	}
-	if err := pn.left.Marshal(cs, depth+1, buf); err != nil {
-		return err
-	} else if err := pn.right.Marshal(cs, depth+1, buf); err != nil {
-		return err
-	}
-	return nil
+	pn.left.Marshal(cs, depth+1, buf)
+	pn.right.Marshal(cs, depth+1, buf)
 }
 
 // emptyNode represents a non-existent child of a parent node.
@@ -106,8 +98,8 @@ func (en emptyNode) Hash(cs suites.CipherSuite) []byte {
 	return make([]byte, cs.HashSize())
 }
 
-func (en emptyNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
-	return buf.WriteByte(emptyNodeType)
+func (en emptyNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) {
+	buf.WriteByte(emptyNodeType)
 }
 
 // leafNode contains the VRF output and commitment stored in a leaf node.
@@ -143,15 +135,10 @@ func (ln leafNode) Hash(cs suites.CipherSuite) []byte {
 	return h.Sum(nil)
 }
 
-func (ln leafNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
-	if err := buf.WriteByte(leafNodeType); err != nil {
-		return err
-	} else if _, err := buf.Write(ln.vrfOutput); err != nil {
-		return err
-	} else if _, err := buf.Write(ln.commitment); err != nil {
-		return err
-	}
-	return nil
+func (ln leafNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) {
+	buf.WriteByte(leafNodeType)
+	buf.Write(ln.vrfOutput)
+	buf.Write(ln.commitment)
 }
 
 // externalNode represents a parent node that's stored in another tile.
@@ -186,17 +173,11 @@ func (en externalNode) Weight(cs suites.CipherSuite) int {
 
 func (en externalNode) Hash(cs suites.CipherSuite) []byte { return en.hash }
 
-func (en externalNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) error {
-	if err := buf.WriteByte(externalNodeType); err != nil {
-		return err
-	} else if _, err := buf.Write(en.hash); err != nil {
-		return err
-	} else if _, err := buf.Write(encodeUvarint(en.id.ver)); err != nil {
-		return err
-	} else if _, err := buf.Write(encodeUvarint(en.id.ctr)); err != nil {
-		return err
-	}
-	return nil
+func (en externalNode) Marshal(cs suites.CipherSuite, depth int, buf *bytes.Buffer) {
+	buf.WriteByte(externalNodeType)
+	buf.Write(en.hash)
+	buf.Write(encodeUvarint(en.id.ver))
+	buf.Write(encodeUvarint(en.id.ctr))
 }
 
 func unmarshalNode(cs suites.CipherSuite, id *tileId, depth int, buf *bytes.Buffer) (node, error) {
@@ -258,11 +239,9 @@ func (t *tile) Marshal(cs suites.CipherSuite) ([]byte, error) {
 
 	if t.depth > 255 {
 		return nil, errors.New("depth is too large to marshal")
-	} else if err := buf.WriteByte(byte(t.depth)); err != nil {
-		return nil, err
-	} else if err := t.root.Marshal(cs, t.depth, buf); err != nil {
-		return nil, err
 	}
+	buf.WriteByte(byte(t.depth))
+	t.root.Marshal(cs, t.depth, buf)
 
 	return buf.Bytes(), nil
 }

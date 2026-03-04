@@ -22,13 +22,9 @@ func newPrefixEntry(cs suites.CipherSuite, buf *bytes.Buffer) (*prefix.Entry, er
 	return &prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment}, nil
 }
 
-func marshalPrefixEntry(entry prefix.Entry, buf *bytes.Buffer) error {
-	if _, err := buf.Write(entry.VrfOutput); err != nil {
-		return err
-	} else if _, err := buf.Write(entry.Commitment); err != nil {
-		return err
-	}
-	return nil
+func marshalPrefixEntry(entry prefix.Entry, buf *bytes.Buffer) {
+	buf.Write(entry.VrfOutput)
+	buf.Write(entry.Commitment)
 }
 
 type AuditorUpdate struct {
@@ -83,30 +79,22 @@ func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate,
 }
 
 func (au *AuditorUpdate) Marshal(buf *bytes.Buffer) error {
-	if err := binary.Write(buf, binary.BigEndian, au.Timestamp); err != nil {
-		return err
-	}
+	binary.Write(buf, binary.BigEndian, au.Timestamp)
 
 	if len(au.Added) > maxUint16 {
 		return errors.New("added prefix entries are too large to marshal")
-	} else if err := binary.Write(buf, binary.BigEndian, uint16(len(au.Added))); err != nil {
-		return err
 	}
+	binary.Write(buf, binary.BigEndian, uint16(len(au.Added)))
 	for _, entry := range au.Added {
-		if err := marshalPrefixEntry(entry, buf); err != nil {
-			return err
-		}
+		marshalPrefixEntry(entry, buf)
 	}
 
 	if len(au.Removed) > maxUint16 {
 		return errors.New("removed prefix entries are too large to marshal")
-	} else if err := binary.Write(buf, binary.BigEndian, uint16(len(au.Removed))); err != nil {
-		return err
 	}
+	binary.Write(buf, binary.BigEndian, uint16(len(au.Removed)))
 	for _, entry := range au.Removed {
-		if err := marshalPrefixEntry(entry, buf); err != nil {
-			return err
-		}
+		marshalPrefixEntry(entry, buf)
 	}
 
 	if err := au.Proof.Marshal(buf); err != nil {

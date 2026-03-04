@@ -46,26 +46,15 @@ func NewSearchRequest(buf *bytes.Buffer) (*SearchRequest, error) {
 }
 
 func (sr *SearchRequest) Marshal(buf *bytes.Buffer) error {
-	if err := writeOptional(buf, sr.Last != nil); err != nil {
-		return err
-	} else if sr.Last != nil {
-		if err := binary.Write(buf, binary.BigEndian, *sr.Last); err != nil {
-			return err
-		}
+	if writeOptional(buf, sr.Last != nil) {
+		binary.Write(buf, binary.BigEndian, *sr.Last)
 	}
-
 	if err := writeU8Bytes(buf, sr.Label, "label"); err != nil {
 		return err
 	}
-
-	if err := writeOptional(buf, sr.Version != nil); err != nil {
-		return err
-	} else if sr.Version != nil {
-		if err := binary.Write(buf, binary.BigEndian, *sr.Version); err != nil {
-			return err
-		}
+	if writeOptional(buf, sr.Version != nil) {
+		binary.Write(buf, binary.BigEndian, *sr.Version)
 	}
-
 	return nil
 }
 
@@ -136,21 +125,17 @@ func (sr *SearchResponse) Marshal(buf *bytes.Buffer) error {
 	}
 
 	if sr.Version != nil {
-		if err := binary.Write(buf, binary.BigEndian, *sr.Version); err != nil {
-			return err
-		}
+		binary.Write(buf, binary.BigEndian, *sr.Version)
 	}
-	if _, err := buf.Write(sr.Opening); err != nil {
-		return err
-	} else if err := sr.Value.Marshal(buf); err != nil {
+	buf.Write(sr.Opening)
+	if err := sr.Value.Marshal(buf); err != nil {
 		return err
 	}
 
 	if len(sr.BinaryLadder) > maxUint8 {
 		return errors.New("binary ladder is too long to marshal")
-	} else if err := buf.WriteByte(byte(len(sr.BinaryLadder))); err != nil {
-		return err
 	}
+	buf.WriteByte(byte(len(sr.BinaryLadder)))
 	for _, step := range sr.BinaryLadder {
 		if err := step.Marshal(buf); err != nil {
 			return err

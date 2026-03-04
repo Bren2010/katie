@@ -54,26 +54,18 @@ func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, err
 func (pp *PrefixProof) Marshal(buf *bytes.Buffer) error {
 	if len(pp.Results) > 255 {
 		return errors.New("results too long to marshal")
-	} else if err := buf.WriteByte(uint8(len(pp.Results))); err != nil {
-		return err
 	}
+	buf.WriteByte(byte(len(pp.Results)))
 	for _, res := range pp.Results {
-		if err := res.Marshal(buf); err != nil {
-			return err
-		}
+		res.Marshal(buf)
 	}
 
 	if len(pp.Elements) > 65535 {
 		return errors.New("elements too long to marshal")
 	}
-	err := binary.Write(buf, binary.BigEndian, uint16(len(pp.Elements)))
-	if err != nil {
-		return err
-	}
+	binary.Write(buf, binary.BigEndian, uint16(len(pp.Elements)))
 	for _, elem := range pp.Elements {
-		if _, err := buf.Write(elem); err != nil {
-			return err
-		}
+		buf.Write(elem)
 	}
 
 	return nil
@@ -83,7 +75,7 @@ func (pp *PrefixProof) Marshal(buf *bytes.Buffer) error {
 type PrefixSearchResult interface {
 	Inclusion() bool
 	Depth() int
-	Marshal(buf *bytes.Buffer) error
+	Marshal(buf *bytes.Buffer)
 }
 
 type inclusionProof struct {
@@ -93,13 +85,9 @@ type inclusionProof struct {
 func (p inclusionProof) Inclusion() bool { return true }
 func (p inclusionProof) Depth() int      { return p.depth }
 
-func (p inclusionProof) Marshal(buf *bytes.Buffer) error {
-	if err := buf.WriteByte(inclusionResultType); err != nil {
-		return err
-	} else if err := buf.WriteByte(byte(p.depth)); err != nil {
-		return err
-	}
-	return nil
+func (p inclusionProof) Marshal(buf *bytes.Buffer) {
+	buf.WriteByte(inclusionResultType)
+	buf.WriteByte(byte(p.depth))
 }
 
 type nonInclusionLeafProof struct {
@@ -110,17 +98,11 @@ type nonInclusionLeafProof struct {
 func (p nonInclusionLeafProof) Inclusion() bool { return false }
 func (p nonInclusionLeafProof) Depth() int      { return p.depth }
 
-func (p nonInclusionLeafProof) Marshal(buf *bytes.Buffer) error {
-	if err := buf.WriteByte(nonInclusionLeafResultType); err != nil {
-		return err
-	} else if _, err := buf.Write(p.leaf.vrfOutput); err != nil {
-		return err
-	} else if _, err := buf.Write(p.leaf.commitment); err != nil {
-		return err
-	} else if err := buf.WriteByte(byte(p.depth)); err != nil {
-		return err
-	}
-	return nil
+func (p nonInclusionLeafProof) Marshal(buf *bytes.Buffer) {
+	buf.WriteByte(nonInclusionLeafResultType)
+	buf.Write(p.leaf.vrfOutput)
+	buf.Write(p.leaf.commitment)
+	buf.WriteByte(byte(p.depth))
 }
 
 type nonInclusionParentProof struct {
@@ -130,13 +112,9 @@ type nonInclusionParentProof struct {
 func (p nonInclusionParentProof) Inclusion() bool { return false }
 func (p nonInclusionParentProof) Depth() int      { return p.depth }
 
-func (p nonInclusionParentProof) Marshal(buf *bytes.Buffer) error {
-	if err := buf.WriteByte(nonInclusionParentResultType); err != nil {
-		return err
-	} else if err := buf.WriteByte(byte(p.depth)); err != nil {
-		return err
-	}
-	return nil
+func (p nonInclusionParentProof) Marshal(buf *bytes.Buffer) {
+	buf.WriteByte(nonInclusionParentResultType)
+	buf.WriteByte(byte(p.depth))
 }
 
 func unmarshalSearchResult(cs suites.CipherSuite, buf *bytes.Buffer) (PrefixSearchResult, error) {

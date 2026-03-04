@@ -30,11 +30,9 @@ func readU8Bytes(buf *bytes.Buffer) ([]byte, error) {
 func writeU8Bytes(buf *bytes.Buffer, out []byte, name string) error {
 	if len(out) > maxUint8 {
 		return errors.New(name + " is too long to marshal")
-	} else if err := buf.WriteByte(byte(len(out))); err != nil {
-		return err
-	} else if _, err := buf.Write(out); err != nil {
-		return err
 	}
+	buf.WriteByte(byte(len(out)))
+	buf.Write(out)
 	return nil
 }
 
@@ -53,11 +51,9 @@ func readU16Bytes(buf *bytes.Buffer) ([]byte, error) {
 func writeU16Bytes(buf *bytes.Buffer, out []byte, name string) error {
 	if len(out) > maxUint16 {
 		return errors.New(name + " is too long to marshal")
-	} else if err := binary.Write(buf, binary.BigEndian, uint16(len(out))); err != nil {
-		return err
-	} else if _, err := buf.Write(out); err != nil {
-		return err
 	}
+	binary.Write(buf, binary.BigEndian, uint16(len(out)))
+	buf.Write(out)
 	return nil
 }
 
@@ -76,11 +72,9 @@ func readU32Bytes(buf *bytes.Buffer) ([]byte, error) {
 func writeU32Bytes(buf *bytes.Buffer, out []byte, name string) error {
 	if len(out) > maxUint32 {
 		return errors.New(name + " is too long to marshal")
-	} else if err := binary.Write(buf, binary.BigEndian, uint32(len(out))); err != nil {
-		return err
-	} else if _, err := buf.Write(out); err != nil {
-		return err
 	}
+	binary.Write(buf, binary.BigEndian, uint32(len(out)))
+	buf.Write(out)
 	return nil
 }
 
@@ -94,11 +88,13 @@ func readOptional(buf *bytes.Buffer) (bool, error) {
 	return present == 1, nil
 }
 
-func writeOptional(buf *bytes.Buffer, present bool) error {
+func writeOptional(buf *bytes.Buffer, present bool) bool {
 	if present {
-		return buf.WriteByte(1)
+		buf.WriteByte(1)
+	} else {
+		buf.WriteByte(0)
 	}
-	return buf.WriteByte(0)
+	return present
 }
 
 type Marshaller interface {

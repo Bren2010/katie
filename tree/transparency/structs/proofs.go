@@ -34,14 +34,9 @@ func (ip *InclusionProof) Marshal(buf *bytes.Buffer) error {
 	if len(ip.Elements) > maxUint16 {
 		return errors.New("inclusion proof is too long to marshal")
 	}
-	err := binary.Write(buf, binary.BigEndian, uint16(len(ip.Elements)))
-	if err != nil {
-		return err
-	}
+	binary.Write(buf, binary.BigEndian, uint16(len(ip.Elements)))
 	for _, element := range ip.Elements {
-		if _, err := buf.Write(element); err != nil {
-			return err
-		}
+		buf.Write(element)
 	}
 	return nil
 }
@@ -105,20 +100,16 @@ func NewCombinedTreeProof(cs suites.CipherSuite, buf *bytes.Buffer) (*CombinedTr
 func (ctp *CombinedTreeProof) Marshal(buf *bytes.Buffer) error {
 	if len(ctp.Timestamps) > maxUint8 {
 		return errors.New("timestamps are too long to marshal")
-	} else if err := buf.WriteByte(byte(len(ctp.Timestamps))); err != nil {
-		return err
 	}
+	buf.WriteByte(byte(len(ctp.Timestamps)))
 	for _, timestamp := range ctp.Timestamps {
-		if err := binary.Write(buf, binary.BigEndian, timestamp); err != nil {
-			return err
-		}
+		binary.Write(buf, binary.BigEndian, timestamp)
 	}
 
 	if len(ctp.PrefixProofs) > maxUint8 {
 		return errors.New("prefix proofs are too long to marshal")
-	} else if err := buf.WriteByte(byte(len(ctp.PrefixProofs))); err != nil {
-		return err
 	}
+	buf.WriteByte(byte(len(ctp.PrefixProofs)))
 	for _, proof := range ctp.PrefixProofs {
 		if err := proof.Marshal(buf); err != nil {
 			return err
@@ -127,13 +118,10 @@ func (ctp *CombinedTreeProof) Marshal(buf *bytes.Buffer) error {
 
 	if len(ctp.PrefixRoots) > maxUint8 {
 		return errors.New("prefix roots are too long to marshal")
-	} else if err := buf.WriteByte(byte(len(ctp.PrefixRoots))); err != nil {
-		return err
 	}
+	buf.WriteByte(byte(len(ctp.PrefixRoots)))
 	for _, root := range ctp.PrefixRoots {
-		if _, err := buf.Write(root); err != nil {
-			return err
-		}
+		buf.Write(root)
 	}
 
 	if err := ctp.Inclusion.Marshal(buf); err != nil {

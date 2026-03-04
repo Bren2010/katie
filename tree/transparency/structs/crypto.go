@@ -70,9 +70,9 @@ func (tbs *UpdateTBS) Marshal(buf *bytes.Buffer) error {
 		return err
 	} else if err := writeU8Bytes(buf, tbs.Label, "label"); err != nil {
 		return err
-	} else if err := binary.Write(buf, binary.BigEndian, tbs.Version); err != nil {
-		return err
-	} else if err := writeU32Bytes(buf, tbs.Value, "label value"); err != nil {
+	}
+	binary.Write(buf, binary.BigEndian, tbs.Version)
+	if err := writeU32Bytes(buf, tbs.Value, "label value"); err != nil {
 		return err
 	}
 	return nil
@@ -87,9 +87,9 @@ type CommitmentValue struct {
 func (cv *CommitmentValue) Marshal(buf *bytes.Buffer) error {
 	if err := writeU8Bytes(buf, cv.Label, "label"); err != nil {
 		return err
-	} else if err := binary.Write(buf, binary.BigEndian, cv.Version); err != nil {
-		return err
-	} else if err := cv.Update.Marshal(buf); err != nil {
+	}
+	binary.Write(buf, binary.BigEndian, cv.Version)
+	if err := cv.Update.Marshal(buf); err != nil {
 		return err
 	}
 	return nil
@@ -103,9 +103,8 @@ type VrfInput struct {
 func (vi *VrfInput) Marshal(buf *bytes.Buffer) error {
 	if err := writeU8Bytes(buf, vi.Label, "label"); err != nil {
 		return err
-	} else if err := binary.Write(buf, binary.BigEndian, vi.Version); err != nil {
-		return err
 	}
+	binary.Write(buf, binary.BigEndian, vi.Version)
 	return nil
 }
 
@@ -127,11 +126,8 @@ func NewLogEntry(cs suites.CipherSuite, buf *bytes.Buffer) (*LogEntry, error) {
 }
 
 func (le *LogEntry) Marshal(buf *bytes.Buffer) error {
-	if err := binary.Write(buf, binary.BigEndian, le.Timestamp); err != nil {
-		return err
-	} else if _, err := buf.Write(le.PrefixTree); err != nil {
-		return err
-	}
+	binary.Write(buf, binary.BigEndian, le.Timestamp)
+	buf.Write(le.PrefixTree)
 	return nil
 }
 
@@ -170,18 +166,10 @@ func NewBinaryLadderStep(cs suites.CipherSuite, buf *bytes.Buffer) (*BinaryLadde
 }
 
 func (bls *BinaryLadderStep) Marshal(buf *bytes.Buffer) error {
-	if _, err := buf.Write(bls.Proof); err != nil {
-		return err
+	buf.Write(bls.Proof)
+	if writeOptional(buf, bls.Commitment != nil) {
+		buf.Write(bls.Commitment)
 	}
-
-	if err := writeOptional(buf, bls.Commitment != nil); err != nil {
-		return err
-	} else if bls.Commitment != nil {
-		if _, err := buf.Write(bls.Commitment); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -203,9 +191,8 @@ func NewLabelValue(config *PublicConfig, buf *bytes.Buffer) (*LabelValue, error)
 }
 
 func (lv *LabelValue) Marshal(buf *bytes.Buffer) error {
-	if _, err := buf.Write(lv.Opening); err != nil {
-		return err
-	} else if err := lv.Value.Marshal(buf); err != nil {
+	buf.Write(lv.Opening)
+	if err := lv.Value.Marshal(buf); err != nil {
 		return err
 	}
 	return nil
