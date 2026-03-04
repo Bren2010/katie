@@ -5,6 +5,7 @@ package auditor
 import (
 	"bytes"
 	"errors"
+	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
@@ -15,7 +16,7 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
-// Auditor wraps the state of a third-party auditor.
+// Auditor represents a third-party auditor of a transparency log.
 type Auditor struct {
 	config     *structs.PublicConfig
 	auditorKey suites.SigningPrivateKey
@@ -25,8 +26,8 @@ type Auditor struct {
 }
 
 // NewAuditor returns a new Auditor. `config` is the transparency log's public
-// configuration, `auditorKey` is the auditor's private key, and `tx` is a
-// connection to the auditor's storage.
+// configuration, `auditorKey` is the auditor's private signing key, and `tx` is
+// the auditor's persistent storage.
 func NewAuditor(
 	config *structs.PublicConfig,
 	auditorKey suites.SigningPrivateKey,
@@ -45,11 +46,11 @@ func NewAuditor(
 	var state *AuditorState
 	if raw != nil {
 		buf := bytes.NewBuffer(raw)
-		state, err = NewAuditorState(buf)
+		state, err = NewAuditorState(config.Suite, buf)
 		if err != nil {
 			return nil, err
 		} else if buf.Len() != 0 {
-			return nil, errors.New("unexpected data appended to auditor tree head")
+			return nil, errors.New("unexpected data appended to auditor state")
 		}
 	}
 
@@ -94,9 +95,16 @@ func (a *Auditor) previousRightmost(added uint64) (*uint64, *algorithms.DataProv
 	return prevDLE, provider, nil
 }
 
-func (a *Auditor) updateState(provider *algorithms.DataProvider, entry structs.LogEntry) error {
-	n := uint64(0)
-	var fullSubtrees [][]byte
+func (a *Auditor) updateState(
+	provider *algorithms.DataProvider,
+	added []prefix.Entry,
+	entry structs.LogEntry,
+) error {
+	var (
+		n            uint64 = 0
+		fullSubtrees [][]byte
+		inserted     []InsertedVrfOutput
+	)
 	if a.state != nil {
 		n = a.state.TreeHead.TreeSize
 		fullSubtrees = a.state.FullSubtrees
@@ -122,6 +130,17 @@ func (a *Auditor) updateState(provider *algorithms.DataProvider, entry structs.L
 		timestamps = append(timestamps, timestamp)
 	}
 
+	// Compute the new set of recently-inserted VRF outputs to retain.
+	rightmost, err := algorithms.RightmostDistinguished(a.config, n+1, provider)
+	if err != nil {
+		return err
+	}
+	insertedNow := make([]InsertedVrfOutput, len(added))
+	for i, entry := range added {
+		insertedNow[i] = InsertedVrfOutput{Pos: n, VrfOutput: entry.VrfOutput}
+	}
+	inserted = mergeInserted(inserted, insertedNow, rightmost)
+
 	a.state = &AuditorState{
 		TreeHead: structs.AuditorTreeHead{
 			Timestamp: entry.Timestamp,
@@ -131,19 +150,38 @@ func (a *Auditor) updateState(provider *algorithms.DataProvider, entry structs.L
 		FullSubtrees: fullSubtrees,
 		Timestamps:   timestamps,
 		PrefixTree:   entry.PrefixTree,
+
+		Inserted: inserted,
 	}
 	return nil
 }
 
 // Process takes an AuditorUpdate as input and updates the auditor's internal
-// state, returning an error if any issues are detected. If the update fails to
-// process, no auditor state is changed. Successfully processed AuditorUpdate
-// structures are not persisted to the database until `Commit` is called.
+// state, returning an error if any issues with the update were detected. If the
+// update fails to process, no auditor state is changed. Successfully processed
+// updates are not persisted until `Commit` is called.
 func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 	// Verify that `timestamp` is greater than or equal to the rightmost log
 	// entry's timestamp.
 	if a.state != nil && update.Timestamp < a.state.TreeHead.Timestamp {
 		return errors.New("update timestamp is less than rightmost timestamp")
+	}
+
+	// Verify that `added` and `removed` are sorted and contain no duplicates.
+	if !slices.IsSortedFunc(update.Added, compareEntry) {
+		return errors.New("added prefix tree entries are not sorted correctly")
+	} else if !slices.IsSortedFunc(update.Removed, compareEntry) {
+		return errors.New("removed prefix entries are not sorted correctly")
+	}
+	for i := 1; i < len(update.Added); i++ {
+		if compareEntry(update.Added[i-1], update.Added[i]) == 0 {
+			return errors.New("found duplicate prefix tree entry added")
+		}
+	}
+	for i := 1; i < len(update.Removed); i++ {
+		if compareEntry(update.Removed[i-1], update.Removed[i]) == 0 {
+			return errors.New("found duplicate prefix tree entry removed")
+		}
 	}
 
 	// Verify that the result provided in `proof` for each element of `added`
@@ -187,7 +225,7 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 		return errors.New("prefix tree leaf is not eligible for removal")
 	}
 	for _, entry := range update.Removed {
-		if a.state.AddedSince(*prevDLE, entry.VrfOutput) {
+		if a.state.addedSince(*prevDLE, entry.VrfOutput) {
 			return errors.New("prefix tree leaf is not eligible for removal")
 		}
 	}
@@ -204,7 +242,7 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 
 	// Update the auditor's state with the new log entry.
 	logEntry := structs.LogEntry{Timestamp: update.Timestamp, PrefixTree: after}
-	return a.updateState(provider, logEntry)
+	return a.updateState(provider, update.Added, logEntry)
 }
 
 // Commit signs the auditor's tree head, commits it to the database, and returns
