@@ -203,3 +203,16 @@ func (ps *PrefixStore) Delete(key string) error {
 	delete(ps.Data, key)
 	return nil
 }
+
+type AuditorStore struct {
+	Data []byte
+}
+
+func NewAuditorStore() *AuditorStore { return &AuditorStore{} }
+
+func (as *AuditorStore) GetState() ([]byte, error) { return dup(as.Data), nil }
+
+func (as *AuditorStore) PutState(raw []byte) error {
+	as.Data = dup(raw)
+	return nil
+}

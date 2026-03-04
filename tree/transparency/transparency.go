@@ -61,6 +61,8 @@ func NewTree(config structs.PrivateConfig, tx db.TransparencyStore) (*Tree, erro
 	}, nil
 }
 
+func (t *Tree) TreeHead() *structs.TreeHead { return t.treeHead }
+
 func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, nP, m *uint64, err error) {
 	if t.treeHead == nil {
 		return nil, 0, nil, nil, errors.New("can not operate on an empty tree")

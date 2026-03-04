@@ -197,6 +197,9 @@ func Root(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte) ([]byte, error
 // Append returns the new `fullSubtrees` slice after a new leaf with value
 // `added` has been added as the rightmost log entry.
 func Append(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte, added []byte) ([][]byte, error) {
+	if n == 0 {
+		return [][]byte{added}, nil
+	}
 	root := math.Root(n)
 
 	chain := make([][]byte, math.Level(root)+2)

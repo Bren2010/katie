@@ -45,6 +45,26 @@ func Config(t *testing.T) structs.PrivateConfig {
 	}
 }
 
+func ConfigWithAuditor(t *testing.T) (structs.PrivateConfig, suites.SigningPrivateKey) {
+	config := Config(t)
+
+	rawAuditorKey, err := hex.DecodeString("ad8dc7973a514fbd609916b6b4a529387f33a586856e9ff6f4adcb12072ab8b2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auditorKey, err := config.Suite.ParseSigningPrivateKey(rawAuditorKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config.Mode = structs.ThirdPartyAuditing
+	config.MaxAuditorLag = 1
+	config.AuditorStartPos = 0
+	config.AuditorPublicKey = auditorKey.Public()
+
+	return config, auditorKey
+}
+
 type ProofHandle struct {
 	timestamps map[uint64]uint64
 	versions   map[uint64]uint32
