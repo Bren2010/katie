@@ -54,62 +54,6 @@ func RightmostDistinguished(config *structs.PublicConfig, n uint64, provider *Da
 	}
 }
 
-// PreviousRightmost returns the rightmost distinguished log entry that is to
-// the left of the rightmost log entry. This is used when the rightmost log
-// entry is being constructed and we need to know which distinguished log
-// entries exist to its left.
-//
-// The public config for the Transparency Log is given in `config`, and the size
-// of the tree is `n`.
-func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataProvider) (*uint64, error) {
-	rightmost, err := RightmostDistinguished(config, n, provider)
-	if err != nil {
-		return nil, err
-	} else if rightmost == nil || *rightmost != n-1 {
-		return rightmost, nil
-	}
-	var parent *uint64
-	if *rightmost != math.Root(n) {
-		temp := math.Parent(*rightmost, n)
-		parent = &temp
-	}
-
-	left := uint64(0) // Bound used for determining distinguished status.
-	if parent != nil {
-		left, err = provider.GetTimestamp(*parent)
-		if err != nil {
-			return nil, err
-		}
-	}
-	right, err := provider.GetTimestamp(*rightmost)
-	if err != nil {
-		return nil, err
-	}
-
-	// If the rightmost distinguished log entry has a left child and the left
-	// child is distinguished, then there's a subtree of distinguished log
-	// entries. Find it's rightmost edge.
-	if hasLeftChild(*rightmost) && config.IsDistinguished(left, right) {
-		out := math.Left(*rightmost)
-		for {
-			if noRightChild(out, n) {
-				return &out, nil
-			}
-			left, err = provider.GetTimestamp(out)
-			if err != nil {
-				return nil, err
-			} else if !config.IsDistinguished(left, right) {
-				return &out, nil
-			}
-			out = math.Right(out, n)
-		}
-	}
-
-	// Otherwise return the rightmost distinguished log entry's parent, which
-	// will be distinguished and to its left.
-	return parent, nil
-}
-
 // UpdateView runs the algorithm from Section 4.2. The previous size of the tree
 // is `m`, the current size of the tree is `n`.
 func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, provider *DataProvider) error {
@@ -296,70 +240,93 @@ func FixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, prov
 	}
 }
 
-type ownerState struct {
-	// starting is the position of the rightmost distinguished log entry that
+// OwnerState wraps the state maintained by the owner of a single label.
+type OwnerState struct {
+	// Starting is the position of the rightmost distinguished log entry that
 	// has been verified by owner monitoring.
-	starting uint64
+	Starting uint64
 
-	// verAtStarting is the version of the label that exists at `starting`, or
+	// VerAtStarting is the version of the label that exists at `starting`, or
 	// -1 if the label didn't exist yet.
-	verAtStarting int
-	// upcomingVers is the position of each upcoming new version of the label.
-	upcomingVers []uint64
+	VerAtStarting int
+	// UpcomingVers is the position of each upcoming new version of the label.
+	UpcomingVers []uint64
 }
 
-func (os *ownerState) setStarting(x uint64) {
-	idx, _ := slices.BinarySearch(os.upcomingVers, x+1)
+func (os *OwnerState) setStarting(x uint64) {
+	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 
-	os.starting = x
-	os.verAtStarting = idx + os.verAtStarting
-	os.upcomingVers = os.upcomingVers[idx:]
+	os.Starting = x
+	os.VerAtStarting = idx + os.VerAtStarting
+	os.UpcomingVers = os.UpcomingVers[idx:]
 }
 
-func (os *ownerState) greatestVersionAt(x uint64) int {
-	idx, _ := slices.BinarySearch(os.upcomingVers, x+1)
-	return idx + os.verAtStarting
+func (os *OwnerState) greatestVersionAt(x uint64) int {
+	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
+	return idx + os.VerAtStarting
 }
 
-// monitoringReq contains the fixed portions of the state of a monitoring
-// request so that it is easier to pass into recursive functions.
-type monitoringReq struct {
+// Owner represents the owner of a single label and provides methods for
+// monitoring that label.
+type Owner struct {
 	config    *structs.PublicConfig
-	state     *ownerState
-	rightmost uint64
-	n         uint64
+	state     *OwnerState
+	rightmost uint64 // Timestamp of rightmost log entry.
+	n         uint64 // Number of log entries.
 
 	provider *DataProvider
 }
 
-// init returns the list of log entries to verify if an owner is starting their
-// monitoring at `req.state.starting`. `x` is the current log entry, and `left`
-// and `right` are the bounds used to determine distinguished status.
-//
-// Algorithm from the first portion of Section 8.3.
-func (req *monitoringReq) init(x, left, right uint64) ([]uint64, error) {
-	if !req.config.IsDistinguished(left, right) {
-		return nil, errors.New("requested starting position is not distinguished")
+// NewOwner returns a new Owner. The public config for the Transparency Log is
+// `config`, the owner's state (or nil, if the owner has not been initialized
+// yet) is `state`, and the size of the tree is `n`.
+func NewOwner(config *structs.PublicConfig, state *OwnerState, n uint64, provider *DataProvider) (*Owner, error) {
+	if n == 0 {
+		return nil, errors.New("unable to monitor empty tree")
 	}
-	timestamp, err := req.provider.GetTimestamp(x)
+	rightmost, err := provider.GetTimestamp(n - 1)
 	if err != nil {
 		return nil, err
 	}
-	isExpired := req.config.IsExpired(timestamp, req.rightmost)
 
-	if x < req.state.starting {
+	return &Owner{
+		config:    config,
+		state:     state,
+		rightmost: rightmost,
+		n:         n,
+
+		provider: provider,
+	}, nil
+}
+
+func (owner *Owner) State() *OwnerState { return owner.state }
+
+// init returns the list of log entries to verify if an owner is starting their
+// monitoring at `starting`. `x` is the current log entry, and `left` and
+// `right` are the bounds used to determine distinguished status.
+func (owner *Owner) init(starting, x, left, right uint64) ([]uint64, error) {
+	if !owner.config.IsDistinguished(left, right) {
+		return nil, errors.New("requested starting position is not distinguished")
+	}
+	timestamp, err := owner.provider.GetTimestamp(x)
+	if err != nil {
+		return nil, err
+	}
+	isExpired := owner.config.IsExpired(timestamp, owner.rightmost)
+
+	if x < starting {
 		// Starting position is to our right, so recurse right.
-		if noRightChild(x, req.n) {
+		if noRightChild(x, owner.n) {
 			return nil, errors.New("requested starting position is right of the rightmost log entry")
 		}
-		children, err := req.init(math.Right(x, req.n), timestamp, right)
+		children, err := owner.init(starting, math.Right(x, owner.n), timestamp, right)
 		if err != nil {
 			return nil, err
 		} else if isExpired {
 			return children, nil
 		}
 		return append(children, x), nil
-	} else if x == req.state.starting {
+	} else if x == starting {
 		// We've reached the requested starting position. We already know it's
 		// distinguished and just need to verify that it's unexpired.
 		if isExpired {
@@ -371,77 +338,137 @@ func (req *monitoringReq) init(x, left, right uint64) ([]uint64, error) {
 	if noLeftChild(x) || isExpired {
 		return nil, errors.New("requested starting position is invalid")
 	}
-	return req.init(math.Left(x), left, timestamp)
+	return owner.init(starting, math.Left(x), left, timestamp)
 }
 
-// monitor performs a depth-first walk of every unexpired distinguished log
-// entry that is to the right of `req.state.starting`, and requests a search
-// binary ladder from each of them for the expected greatest version of the
-// label.
-//
-// Algorithm from the second portion of Section 8.3.
-func (req *monitoringReq) monitor(x, left, right uint64) error {
-	// If the current log entry is not distinguished, stop.
-	if !req.config.IsDistinguished(left, right) {
-		return nil
-	}
+// InitEntries returns the log entries that will be inspected while initializing
+// the owner's state with a starting position of `starting` (done in Init).
+func (owner *Owner) InitEntries(starting uint64) ([]uint64, error) {
+	return owner.init(starting, math.Root(owner.n), 0, owner.rightmost)
+}
 
-	// If the current log entry's index is less than or equal to that of the log
-	// entry advertised by the user, recurse to its right child.
-	if x <= req.state.starting {
-		if noRightChild(x, req.n) {
-			return nil
-		}
-		timestamp, err := req.provider.GetTimestamp(x)
-		if err != nil {
-			return err
-		}
-		return req.monitor(math.Right(x, req.n), timestamp, right)
+// Init initializes the label owner's state. `starting` contains the log entry
+// where the label owner wants their ownership to start, and `vers` contains the
+// version of the label that exists at each log entry returned by `InitEntries`.
+func (owner *Owner) Init(starting uint64, vers []uint32) error {
+	if owner.state != nil {
+		return errors.New("label owner state is already initialized")
 	}
-
-	// If the current log entry has a left child, recurse to the left child.
-	if hasLeftChild(x) {
-		timestamp, err := req.provider.GetTimestamp(x)
-		if err != nil {
-			return err
-		}
-		if err := req.monitor(math.Left(x), left, timestamp); err != nil {
-			return err
-		}
-	}
-
-	// If a stop condition has been reached, stop.
-	if req.provider.StopCondition(x, req.state.greatestVersionAt(x)) {
-		return nil
-	}
-
-	// Obtain a search binary ladder from the current log entry where the target
-	// version is the greatest version of the label expected to exist at this
-	// point, based on the label owner's state.
-	ver := req.state.greatestVersionAt(x)
-	if ver < 0 {
-		res, err := req.provider.GetSearchBinaryLadder(x, 0, false)
-		if err != nil {
-			return err
-		} else if res != -1 {
-			return errors.New("binary ladder inconsistent with expected greatest version of label")
-		}
-	} else {
-		res, err := req.provider.GetSearchBinaryLadder(x, uint32(ver), false)
-		if err != nil {
-			return err
-		} else if res != 0 {
-			return errors.New("binary ladder inconsistent with expected greatest version of label")
-		}
-	}
-
-	// If the current log entry has a right child, recurse to the right child.
-	if noRightChild(x, req.n) {
-		return nil
-	}
-	timestamp, err := req.provider.GetTimestamp(x)
+	xs, err := owner.InitEntries(starting)
 	if err != nil {
 		return err
 	}
-	return req.monitor(math.Right(x, req.n), timestamp, right)
+
+	// Verify that the expected number of versions was provided and that each
+	// version is less than or equal to the one prior.
+	if len(vers) > len(xs) {
+		return errors.New("unexpected number of versions provided to owner initialization algorithm")
+	}
+	for i := 1; i < len(vers); i++ {
+		if vers[i] > vers[i-1] {
+			return errors.New("unexpected increase in label version")
+		}
+	}
+
+	// Obtain a search binary ladder from each log entry in `xs`. Verify that
+	// the ladder terminates in a way that is consistent with the version
+	// provided in `vers`.
+	for i, x := range xs {
+		if i < len(vers) {
+			res, err := owner.provider.GetSearchBinaryLadder(x, vers[i], false)
+			if err != nil {
+				return err
+			} else if res != 0 {
+				return errors.New("unexpected result from binary ladder")
+			}
+		} else {
+			res, err := owner.provider.GetSearchBinaryLadder(x, 0, false)
+			if err != nil {
+				return err
+			} else if res != -1 {
+				return errors.New("unexpected result from binary ladder")
+			}
+		}
+	}
+
+	// Setup OwnerState object.
+	verAtStarting := -1
+	if len(vers) > 0 {
+		verAtStarting = int(vers[0])
+	}
+	owner.state = &OwnerState{starting, verAtStarting, nil}
+
+	return nil
 }
+
+// // monitor performs a depth-first walk of every unexpired distinguished log
+// // entry that is to the right of `req.state.Starting`, and requests a search
+// // binary ladder from each of them for the expected greatest version of the
+// // label.
+// //
+// // Algorithm from the second portion of Section 8.3.
+// func (req *monitoringReq) monitor(x, left, right uint64) error {
+// 	// If the current log entry is not distinguished, stop.
+// 	if !req.config.IsDistinguished(left, right) {
+// 		return nil
+// 	}
+
+// 	// If the current log entry's index is less than or equal to that of the log
+// 	// entry advertised by the user, recurse to its right child.
+// 	if x <= req.state.Starting {
+// 		if noRightChild(x, req.n) {
+// 			return nil
+// 		}
+// 		timestamp, err := req.provider.GetTimestamp(x)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		return req.monitor(math.Right(x, req.n), timestamp, right)
+// 	}
+
+// 	// If the current log entry has a left child, recurse to the left child.
+// 	if hasLeftChild(x) {
+// 		timestamp, err := req.provider.GetTimestamp(x)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		if err := req.monitor(math.Left(x), left, timestamp); err != nil {
+// 			return err
+// 		}
+// 	}
+
+// 	// If a stop condition has been reached, stop.
+// 	if req.provider.StopCondition(x, req.state.greatestVersionAt(x)) {
+// 		return nil
+// 	}
+
+// 	// Obtain a search binary ladder from the current log entry where the target
+// 	// version is the greatest version of the label expected to exist at this
+// 	// point, based on the label owner's state.
+// 	ver := req.state.greatestVersionAt(x)
+// 	if ver < 0 {
+// 		res, err := req.provider.GetSearchBinaryLadder(x, 0, false)
+// 		if err != nil {
+// 			return err
+// 		} else if res != -1 {
+// 			return errors.New("binary ladder inconsistent with expected greatest version of label")
+// 		}
+// 	} else {
+// 		res, err := req.provider.GetSearchBinaryLadder(x, uint32(ver), false)
+// 		if err != nil {
+// 			return err
+// 		} else if res != 0 {
+// 			return errors.New("binary ladder inconsistent with expected greatest version of label")
+// 		}
+// 	}
+
+// 	// If the current log entry has a right child, recurse to the right child.
+// 	if noRightChild(x, req.n) {
+// 		return nil
+// 	}
+// 	timestamp, err := req.provider.GetTimestamp(x)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return req.monitor(math.Right(x, req.n), timestamp, right)
+// }

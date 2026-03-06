@@ -5,7 +5,6 @@ package auditor
 import (
 	"bytes"
 	"errors"
-	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
@@ -87,7 +86,7 @@ func (a *Auditor) previousRightmost(added uint64) (*uint64, *algorithms.DataProv
 	// the previous rightmost distinguished log entry.
 	provider := algorithms.NewDataProvider(a.config.Suite, nil)
 	provider.AddRetained(nil, logEntries)
-	prevDLE, err := algorithms.PreviousRightmost(a.config, n+1, provider)
+	prevDLE, err := algorithms.RightmostDistinguished(a.config, n, provider)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -168,19 +167,14 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 	}
 
 	// Verify that `added` and `removed` are sorted and contain no duplicates.
-	if !slices.IsSortedFunc(update.Added, compareEntry) {
-		return errors.New("added prefix tree entries are not sorted correctly")
-	} else if !slices.IsSortedFunc(update.Removed, compareEntry) {
-		return errors.New("removed prefix entries are not sorted correctly")
-	}
 	for i := 1; i < len(update.Added); i++ {
-		if compareEntry(update.Added[i-1], update.Added[i]) == 0 {
-			return errors.New("found duplicate prefix tree entry added")
+		if compareEntry(update.Added[i-1], update.Added[i]) != -1 {
+			return errors.New("list of added prefix tree entries is invalid")
 		}
 	}
 	for i := 1; i < len(update.Removed); i++ {
-		if compareEntry(update.Removed[i-1], update.Removed[i]) == 0 {
-			return errors.New("found duplicate prefix tree entry removed")
+		if compareEntry(update.Removed[i-1], update.Removed[i]) != -1 {
+			return errors.New("list of removed prefix tree entries is invalid")
 		}
 	}
 
