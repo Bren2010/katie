@@ -350,6 +350,8 @@ func (owner *Owner) InitEntries(starting uint64) ([]uint64, error) {
 // Init initializes the label owner's state. `starting` contains the log entry
 // where the label owner wants their ownership to start, and `vers` contains the
 // version of the label that exists at each log entry returned by `InitEntries`.
+//
+// Algorithm from the first portion of Section 8.3.
 func (owner *Owner) Init(starting uint64, vers []uint32) error {
 	if owner.state != nil {
 		return errors.New("label owner state is already initialized")
@@ -379,14 +381,14 @@ func (owner *Owner) Init(starting uint64, vers []uint32) error {
 			if err != nil {
 				return err
 			} else if res != 0 {
-				return errors.New("unexpected result from binary ladder")
+				return errors.New("binary ladder inconsistent with expected greatest version of label")
 			}
 		} else {
 			res, err := owner.provider.GetSearchBinaryLadder(x, 0, false)
 			if err != nil {
 				return err
 			} else if res != -1 {
-				return errors.New("unexpected result from binary ladder")
+				return errors.New("binary ladder inconsistent with expected greatest version of label")
 			}
 		}
 	}
@@ -401,74 +403,84 @@ func (owner *Owner) Init(starting uint64, vers []uint32) error {
 	return nil
 }
 
-// // monitor performs a depth-first walk of every unexpired distinguished log
-// // entry that is to the right of `req.state.Starting`, and requests a search
-// // binary ladder from each of them for the expected greatest version of the
-// // label.
-// //
-// // Algorithm from the second portion of Section 8.3.
-// func (req *monitoringReq) monitor(x, left, right uint64) error {
-// 	// If the current log entry is not distinguished, stop.
-// 	if !req.config.IsDistinguished(left, right) {
-// 		return nil
-// 	}
+// monitor performs a depth-first walk of every unexpired distinguished log
+// entry that is to the right of `owner.state.Starting`, and requests a search
+// binary ladder from each of them for the expected greatest version of the
+// label. `x` is the current log entry, `left` and `right` are the bounds used
+// for determining distinguished status.
+func (owner *Owner) monitor(x, left, right uint64) error {
+	// If the current log entry is not distinguished, stop.
+	if !owner.config.IsDistinguished(left, right) {
+		return nil
+	}
 
-// 	// If the current log entry's index is less than or equal to that of the log
-// 	// entry advertised by the user, recurse to its right child.
-// 	if x <= req.state.Starting {
-// 		if noRightChild(x, req.n) {
-// 			return nil
-// 		}
-// 		timestamp, err := req.provider.GetTimestamp(x)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		return req.monitor(math.Right(x, req.n), timestamp, right)
-// 	}
+	// If the current log entry's index is less than or equal to that of the log
+	// entry advertised by the user, recurse to its right child.
+	if x <= owner.state.Starting {
+		if noRightChild(x, owner.n) {
+			return nil
+		}
+		timestamp, err := owner.provider.GetTimestamp(x)
+		if err != nil {
+			return err
+		}
+		return owner.monitor(math.Right(x, owner.n), timestamp, right)
+	}
 
-// 	// If the current log entry has a left child, recurse to the left child.
-// 	if hasLeftChild(x) {
-// 		timestamp, err := req.provider.GetTimestamp(x)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		if err := req.monitor(math.Left(x), left, timestamp); err != nil {
-// 			return err
-// 		}
-// 	}
+	// If the current log entry has a left child, recurse to the left child.
+	if hasLeftChild(x) {
+		timestamp, err := owner.provider.GetTimestamp(x)
+		if err != nil {
+			return err
+		} else if err := owner.monitor(math.Left(x), left, timestamp); err != nil {
+			return err
+		}
+	}
 
-// 	// If a stop condition has been reached, stop.
-// 	if req.provider.StopCondition(x, req.state.greatestVersionAt(x)) {
-// 		return nil
-// 	}
+	// If a stop condition has been reached, stop.
+	ver := owner.state.greatestVersionAt(x)
+	if owner.provider.StopCondition(x, ver) {
+		return nil
+	}
 
-// 	// Obtain a search binary ladder from the current log entry where the target
-// 	// version is the greatest version of the label expected to exist at this
-// 	// point, based on the label owner's state.
-// 	ver := req.state.greatestVersionAt(x)
-// 	if ver < 0 {
-// 		res, err := req.provider.GetSearchBinaryLadder(x, 0, false)
-// 		if err != nil {
-// 			return err
-// 		} else if res != -1 {
-// 			return errors.New("binary ladder inconsistent with expected greatest version of label")
-// 		}
-// 	} else {
-// 		res, err := req.provider.GetSearchBinaryLadder(x, uint32(ver), false)
-// 		if err != nil {
-// 			return err
-// 		} else if res != 0 {
-// 			return errors.New("binary ladder inconsistent with expected greatest version of label")
-// 		}
-// 	}
+	// Obtain a search binary ladder from the current log entry where the target
+	// version is the greatest version of the label expected to exist at this
+	// point, based on the label owner's state.
+	if ver < 0 {
+		res, err := owner.provider.GetSearchBinaryLadder(x, 0, false)
+		if err != nil {
+			return err
+		} else if res != -1 {
+			return errors.New("binary ladder inconsistent with expected greatest version of label")
+		}
+	} else {
+		res, err := owner.provider.GetSearchBinaryLadder(x, uint32(ver), false)
+		if err != nil {
+			return err
+		} else if res != 0 {
+			return errors.New("binary ladder inconsistent with expected greatest version of label")
+		}
+	}
+	owner.state.setStarting(x)
 
-// 	// If the current log entry has a right child, recurse to the right child.
-// 	if noRightChild(x, req.n) {
-// 		return nil
-// 	}
-// 	timestamp, err := req.provider.GetTimestamp(x)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return req.monitor(math.Right(x, req.n), timestamp, right)
-// }
+	// If the current log entry has a right child, recurse to the right child.
+	if noRightChild(x, owner.n) {
+		return nil
+	}
+	timestamp, err := owner.provider.GetTimestamp(x)
+	if err != nil {
+		return err
+	}
+	return owner.monitor(math.Right(x, owner.n), timestamp, right)
+}
+
+// Monitor performs owner monitoring, ensuring that the label has not been
+// modified without the label owner's permission.
+//
+// Algorithm from the second portion of Section 8.3.
+func (owner *Owner) Monitor() error {
+	if owner.state == nil {
+		return errors.New("label owner state has not been initialized")
+	}
+	return owner.monitor(math.Root(owner.n), 0, owner.rightmost)
+}
