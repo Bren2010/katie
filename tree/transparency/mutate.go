@@ -43,7 +43,7 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 	// Compute what the rightmost distinguished log entry will be after the new
 	// log entry is added.
 	provider.AddRetained(nil, map[uint64]structs.LogEntry{n: {Timestamp: timestamp}})
-	prevDLE, err := algorithms.RightmostDistinguished(t.config.Public(), n, provider)
+	prevDLE, err := algorithms.PreviousRightmost(t.config.Public(), n+1, provider)
 	if err != nil {
 		return nil, err
 	}

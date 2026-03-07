@@ -86,7 +86,7 @@ func (a *Auditor) previousRightmost(added uint64) (*uint64, *algorithms.DataProv
 	// the previous rightmost distinguished log entry.
 	provider := algorithms.NewDataProvider(a.config.Suite, nil)
 	provider.AddRetained(nil, logEntries)
-	prevDLE, err := algorithms.RightmostDistinguished(a.config, n, provider)
+	prevDLE, err := algorithms.PreviousRightmost(a.config, n+1, provider)
 	if err != nil {
 		return nil, nil, err
 	}

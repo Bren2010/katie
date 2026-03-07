@@ -120,6 +120,61 @@ func TestRightmostDistinguished(t *testing.T) {
 	}
 }
 
+func TestPreviousDistinguished(t *testing.T) {
+	config := test.Config(t)
+
+	rmw := config.ReasonableMonitoringWindow
+	now := uint64(time.Now().UnixMilli())
+
+	runTest := func(n uint64, requests, timestamps []uint64) *uint64 {
+		public := config.Public()
+
+		tsMap := make(map[uint64]uint64)
+		for i, pos := range requests {
+			tsMap[pos] = timestamps[i]
+		}
+		handle := test.NewProofHandle(tsMap, nil)
+		provider := NewDataProvider(config.Suite, handle)
+
+		if err := UpdateView(public, n, nil, provider); err != nil {
+			t.Fatal(err)
+		}
+		res, err := PreviousRightmost(public, n, provider)
+		if err != nil {
+			t.Fatal(err)
+		} else if !handle.Verify(requests, nil, nil, nil) {
+			t.Fatal("unexpected lookups made by algorithm")
+		}
+		return res
+	}
+
+	// No distinguished log entry
+	config.ReasonableMonitoringWindow = now + 1
+	res := runTest(1, []uint64{0}, []uint64{now})
+	if res != nil {
+		t.Fatal("unexpected response")
+	}
+	config.ReasonableMonitoringWindow = rmw
+
+	// Rightmost distinguished log entry is not rightmost log entry
+	res = runTest(3, []uint64{1, 2}, []uint64{now - 1, now})
+	if res == nil || *res != 1 {
+		t.Fatal("unexpected response")
+	}
+
+	// Rightmost log entry is distinguished and has no left child.
+	res = runTest(3, []uint64{1, 2}, []uint64{now - rmw, now})
+	if res == nil || *res != 1 {
+		t.Fatal("unexpected response")
+	}
+
+	// Rightmost log entry is distinguished and has distinguished left child.
+	res = runTest(32, []uint64{31, 15, 23}, []uint64{now, now - rmw, now - 1})
+	if res == nil || *res != 23 {
+		t.Fatal("unexpected response", *res)
+	}
+}
+
 func TestGreatestVersionSearch(t *testing.T) {
 	config := test.Config(t)
 
