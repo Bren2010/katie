@@ -79,7 +79,8 @@ func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataPro
 		parent = &temp
 	}
 
-	left := uint64(0) // Bound used for determining distinguished status.
+	// Compute bounds to use for determining distinguished status.
+	left := uint64(0)
 	if parent != nil {
 		left, err = provider.GetTimestamp(*parent)
 		if err != nil {
@@ -301,6 +302,14 @@ func FixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, prov
 	}
 }
 
+// ContactState wraps the state maintained by a user that has looked up
+// (potentially multiple versions of) a single label.
+type ContactState struct {
+	// Ptrs is a map from log entry to the greatest version of the label that's
+	// been proven to exist at that point.
+	Ptrs map[uint64]uint32
+}
+
 // OwnerState wraps the state maintained by the owner of a single label.
 type OwnerState struct {
 	// Starting is the position of the rightmost distinguished log entry that
@@ -327,60 +336,54 @@ func (os *OwnerState) greatestVersionAt(x uint64) int {
 	return idx + os.VerAtStarting
 }
 
-// Owner represents the owner of a single label and provides methods for
-// monitoring that label.
-type Owner struct {
+type Monitor struct {
 	config    *structs.PublicConfig
-	state     *OwnerState
+	provider  *DataProvider
 	rightmost uint64 // Timestamp of rightmost log entry.
-	n         uint64 // Number of log entries.
+	treeSize  uint64 // Number of log entries.
 
-	provider *DataProvider
+	Contact *ContactState
+	Owner   *OwnerState
 }
 
-// NewOwner returns a new Owner. The public config for the Transparency Log is
-// `config`, the owner's state (or nil, if the owner has not been initialized
-// yet) is `state`, and the size of the tree is `n`.
-func NewOwner(config *structs.PublicConfig, state *OwnerState, n uint64, provider *DataProvider) (*Owner, error) {
-	if n == 0 {
+// NewMonitor returns a new Monitor structure. The public config for the
+// Transparency Log is `config` and the size of the tree is `treeSize`.
+func NewMonitor(config *structs.PublicConfig, treeSize uint64, provider *DataProvider) (*Monitor, error) {
+	if treeSize == 0 {
 		return nil, errors.New("unable to monitor empty tree")
 	}
-	rightmost, err := provider.GetTimestamp(n - 1)
+	rightmost, err := provider.GetTimestamp(treeSize - 1)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Owner{
+	return &Monitor{
 		config:    config,
-		state:     state,
+		provider:  provider,
 		rightmost: rightmost,
-		n:         n,
-
-		provider: provider,
+		treeSize:  treeSize,
 	}, nil
 }
-
-func (owner *Owner) State() *OwnerState { return owner.state }
 
 // init returns the list of log entries to verify if an owner is starting their
 // monitoring at `starting`. `x` is the current log entry, and `left` and
 // `right` are the bounds used to determine distinguished status.
-func (owner *Owner) init(starting, x, left, right uint64) ([]uint64, error) {
-	if !owner.config.IsDistinguished(left, right) {
+func (m *Monitor) init(starting, x, left, right uint64) ([]uint64, error) {
+	if !m.config.IsDistinguished(left, right) {
 		return nil, errors.New("requested starting position is not distinguished")
 	}
-	timestamp, err := owner.provider.GetTimestamp(x)
+	timestamp, err := m.provider.GetTimestamp(x)
 	if err != nil {
 		return nil, err
 	}
-	isExpired := owner.config.IsExpired(timestamp, owner.rightmost)
+	isExpired := m.config.IsExpired(timestamp, m.rightmost)
 
 	if x < starting {
 		// Starting position is to our right, so recurse right.
-		if noRightChild(x, owner.n) {
+		if noRightChild(x, m.treeSize) {
 			return nil, errors.New("requested starting position is right of the rightmost log entry")
 		}
-		children, err := owner.init(starting, math.Right(x, owner.n), timestamp, right)
+		children, err := m.init(starting, math.Right(x, m.treeSize), timestamp, right)
 		if err != nil {
 			return nil, err
 		} else if isExpired {
@@ -399,13 +402,13 @@ func (owner *Owner) init(starting, x, left, right uint64) ([]uint64, error) {
 	if noLeftChild(x) || isExpired {
 		return nil, errors.New("requested starting position is invalid")
 	}
-	return owner.init(starting, math.Left(x), left, timestamp)
+	return m.init(starting, math.Left(x), left, timestamp)
 }
 
 // InitEntries returns the log entries that will be inspected while initializing
 // the owner's state with a starting position of `starting` (done in Init).
-func (owner *Owner) InitEntries(starting uint64) ([]uint64, error) {
-	return owner.init(starting, math.Root(owner.n), 0, owner.rightmost)
+func (m *Monitor) InitEntries(starting uint64) ([]uint64, error) {
+	return m.init(starting, math.Root(m.treeSize), 0, m.rightmost)
 }
 
 // Init initializes the label owner's state. `starting` contains the log entry
@@ -413,11 +416,11 @@ func (owner *Owner) InitEntries(starting uint64) ([]uint64, error) {
 // version of the label that exists at each log entry returned by `InitEntries`.
 //
 // Algorithm from the first portion of Section 8.3.
-func (owner *Owner) Init(starting uint64, vers []uint32) error {
-	if owner.state != nil {
+func (m *Monitor) Init(starting uint64, vers []uint32) error {
+	if m.Owner != nil {
 		return errors.New("label owner state is already initialized")
 	}
-	xs, err := owner.InitEntries(starting)
+	xs, err := m.InitEntries(starting)
 	if err != nil {
 		return err
 	}
@@ -438,14 +441,14 @@ func (owner *Owner) Init(starting uint64, vers []uint32) error {
 	// provided in `vers`.
 	for i, x := range xs {
 		if i < len(vers) {
-			res, err := owner.provider.GetSearchBinaryLadder(x, vers[i], false)
+			res, err := m.provider.GetSearchBinaryLadder(x, vers[i], false)
 			if err != nil {
 				return err
 			} else if res != 0 {
 				return errors.New("binary ladder inconsistent with expected greatest version of label")
 			}
 		} else {
-			res, err := owner.provider.GetSearchBinaryLadder(x, 0, false)
+			res, err := m.provider.GetSearchBinaryLadder(x, 0, false)
 			if err != nil {
 				return err
 			} else if res != -1 {
@@ -459,48 +462,48 @@ func (owner *Owner) Init(starting uint64, vers []uint32) error {
 	if len(vers) > 0 {
 		verAtStarting = int(vers[0])
 	}
-	owner.state = &OwnerState{starting, verAtStarting, nil}
+	m.Owner = &OwnerState{starting, verAtStarting, nil}
 
 	return nil
 }
 
-// monitor performs a depth-first walk of every unexpired distinguished log
+// ownerMonitor performs a depth-first walk of every unexpired distinguished log
 // entry that is to the right of `owner.state.Starting`, and requests a search
 // binary ladder from each of them for the expected greatest version of the
 // label. `x` is the current log entry, `left` and `right` are the bounds used
 // for determining distinguished status.
-func (owner *Owner) monitor(x, left, right uint64) error {
+func (m *Monitor) ownerMonitor(x, left, right uint64) error {
 	// If the current log entry is not distinguished, stop.
-	if !owner.config.IsDistinguished(left, right) {
+	if !m.config.IsDistinguished(left, right) {
 		return nil
 	}
 
 	// If the current log entry's index is less than or equal to that of the log
 	// entry advertised by the user, recurse to its right child.
-	if x <= owner.state.Starting {
-		if noRightChild(x, owner.n) {
+	if x <= m.Owner.Starting {
+		if noRightChild(x, m.treeSize) {
 			return nil
 		}
-		timestamp, err := owner.provider.GetTimestamp(x)
+		timestamp, err := m.provider.GetTimestamp(x)
 		if err != nil {
 			return err
 		}
-		return owner.monitor(math.Right(x, owner.n), timestamp, right)
+		return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right)
 	}
 
 	// If the current log entry has a left child, recurse to the left child.
 	if hasLeftChild(x) {
-		timestamp, err := owner.provider.GetTimestamp(x)
+		timestamp, err := m.provider.GetTimestamp(x)
 		if err != nil {
 			return err
-		} else if err := owner.monitor(math.Left(x), left, timestamp); err != nil {
+		} else if err := m.ownerMonitor(math.Left(x), left, timestamp); err != nil {
 			return err
 		}
 	}
 
 	// If a stop condition has been reached, stop.
-	ver := owner.state.greatestVersionAt(x)
-	if owner.provider.StopCondition(x, ver) {
+	ver := m.Owner.greatestVersionAt(x)
+	if m.provider.StopCondition(x, ver) {
 		return nil
 	}
 
@@ -508,40 +511,40 @@ func (owner *Owner) monitor(x, left, right uint64) error {
 	// version is the greatest version of the label expected to exist at this
 	// point, based on the label owner's state.
 	if ver < 0 {
-		res, err := owner.provider.GetSearchBinaryLadder(x, 0, false)
+		res, err := m.provider.GetSearchBinaryLadder(x, 0, false)
 		if err != nil {
 			return err
 		} else if res != -1 {
 			return errors.New("binary ladder inconsistent with expected greatest version of label")
 		}
 	} else {
-		res, err := owner.provider.GetSearchBinaryLadder(x, uint32(ver), false)
+		res, err := m.provider.GetSearchBinaryLadder(x, uint32(ver), false)
 		if err != nil {
 			return err
 		} else if res != 0 {
 			return errors.New("binary ladder inconsistent with expected greatest version of label")
 		}
 	}
-	owner.state.setStarting(x)
+	m.Owner.setStarting(x)
 
 	// If the current log entry has a right child, recurse to the right child.
-	if noRightChild(x, owner.n) {
+	if noRightChild(x, m.treeSize) {
 		return nil
 	}
-	timestamp, err := owner.provider.GetTimestamp(x)
+	timestamp, err := m.provider.GetTimestamp(x)
 	if err != nil {
 		return err
 	}
-	return owner.monitor(math.Right(x, owner.n), timestamp, right)
+	return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right)
 }
 
-// Monitor performs owner monitoring, ensuring that the label has not been
+// OwnerMonitor performs owner monitoring, ensuring that the label has not been
 // modified without the label owner's permission.
 //
 // Algorithm from the second portion of Section 8.3.
-func (owner *Owner) Monitor() error {
-	if owner.state == nil {
+func (m *Monitor) OwnerMonitor() error {
+	if m.Owner == nil {
 		return errors.New("label owner state has not been initialized")
 	}
-	return owner.monitor(math.Root(owner.n), 0, owner.rightmost)
+	return m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost)
 }
