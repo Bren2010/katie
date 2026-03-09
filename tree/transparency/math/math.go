@@ -103,9 +103,9 @@ func LeftDirectPath(x uint64) []uint64 {
 	return d
 }
 
-// rightDirectPath returns the nodes which are in the direct path of a node and
+// RightDirectPath returns the nodes which are in the direct path of a node and
 // to its right, ordered from leaf to root.
-func rightDirectPath(x, n uint64) []uint64 {
+func RightDirectPath(x, n uint64) []uint64 {
 	d := make([]uint64, 0)
 	r := Root(n)
 	y := x
@@ -131,7 +131,7 @@ func UpdateView(n uint64, m *uint64) []uint64 {
 	} else if m == nil || *m == 0 {
 		out = append(out, Root(n))
 	} else {
-		out = append(out, rightDirectPath(*m-1, n)...)
+		out = append(out, RightDirectPath(*m-1, n)...)
 	}
 
 	for out[len(out)-1] != n-1 {

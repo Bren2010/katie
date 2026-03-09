@@ -365,6 +365,130 @@ func NewMonitor(config *structs.PublicConfig, treeSize uint64, provider *DataPro
 	}, nil
 }
 
+// distinguishedAncestor returns the first distinguished log entry that is on
+// the direct path of `target` and to its right.
+func (m *Monitor) distinguishedAncestor(target uint64) (*uint64, error) {
+	// List all distinguished log entries in the direct path of `target`.
+	var (
+		distinguished []uint64
+
+		curr  uint64 = math.Root(m.treeSize)
+		left  uint64 = 0
+		right uint64 = m.rightmost
+	)
+	for m.config.IsDistinguished(left, right) {
+		distinguished = append(distinguished, curr)
+
+		if curr == target {
+			break
+		}
+		timestamp, err := m.provider.GetTimestamp(curr)
+		if err != nil {
+			return nil, err
+		}
+		if curr > target {
+			curr = math.Left(curr)
+			right = timestamp
+		} else {
+			curr = math.Right(curr, m.treeSize)
+			left = timestamp
+		}
+	}
+
+	// Filter out entries from `distinguished` that are to the left of `target`.
+	var eligible []uint64
+	for _, x := range distinguished {
+		if x >= target {
+			eligible = append(eligible, x)
+		}
+	}
+	// Return the lowest one.
+	if len(eligible) == 0 {
+		return nil, nil
+	}
+	return &eligible[len(eligible)-1], nil
+}
+
+func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint32) (*uint64, error) {
+	// Determine whether this log entry is distinguished, or what the first
+	// distinguished log entry on its direct path and to its right is.
+	stop, err := m.distinguishedAncestor(x)
+	if err != nil {
+		return nil, err
+	} else if stop != nil && *stop == x { // If distinguished, we're done.
+		return nil, nil
+	}
+
+	// Compute the list of log entries to inspect: those on the direct path of
+	// `x` and to its right, stopping just after the first distinguished one.
+	var inspect []uint64
+	for _, parent := range math.RightDirectPath(x, m.treeSize) {
+		inspect = append(inspect, parent)
+		if stop != nil && *stop == parent {
+			break
+		}
+	}
+
+	// For each log entry in the computed list:
+	for _, y := range inspect {
+		// If a binary ladder was already provided from this log entry, verify
+		// that it was for a greater version.
+		if previousVer, ok := previous[y]; ok {
+			if previousVer <= ver {
+				return nil, errors.New("monitoring detected versions that are not monotonic")
+			}
+		}
+		// Obtain and verify a monitoring binary ladder.
+		if err := m.provider.GetMonitoringBinaryLadder(y, ver); err != nil {
+			return nil, err
+		}
+		previous[y] = ver
+	}
+
+	if stop != nil { // We reached a distinguished log entry.
+		return nil, nil
+	} else if len(inspect) > 0 { // We moved forward without reaching a DLE.
+		return &inspect[len(inspect)-1], nil
+	}
+	return &x, nil
+}
+
+func (m *Monitor) ContactMonitor() error {
+	if m.Contact == nil {
+		return errors.New("no contact monitoring state found")
+	}
+
+	// Extract the list of monitored log entries and sort it from right to left.
+	logEntries := make([]uint64, 0, len(m.Contact.Ptrs))
+	for x := range m.Contact.Ptrs {
+		logEntries = append(logEntries, x)
+	}
+	slices.Sort(logEntries)
+	slices.Reverse(logEntries)
+
+	// For each log entry in `logEntries`, monitor that version of the label.
+	previous := make(map[uint64]uint32)
+	ptrs := make(map[uint64]uint32)
+	for _, x := range logEntries {
+		ver := m.Contact.Ptrs[x]
+
+		updated, err := m.contactMonitor(x, ver, previous)
+		if err != nil {
+			return err
+		} else if updated != nil {
+			ptrs[*updated] = ver
+		}
+	}
+
+	// Update retained state.
+	if len(ptrs) == 0 {
+		m.Contact = nil
+	} else {
+		m.Contact = &ContactState{Ptrs: ptrs}
+	}
+	return nil
+}
+
 // init returns the list of log entries to verify if an owner is starting their
 // monitoring at `starting`. `x` is the current log entry, and `left` and
 // `right` are the bounds used to determine distinguished status.
@@ -406,17 +530,18 @@ func (m *Monitor) init(starting, x, left, right uint64) ([]uint64, error) {
 }
 
 // InitEntries returns the log entries that will be inspected while initializing
-// the owner's state with a starting position of `starting` (done in Init).
+// the owner's state with a starting position of `starting` (done in OwnerInit).
 func (m *Monitor) InitEntries(starting uint64) ([]uint64, error) {
 	return m.init(starting, math.Root(m.treeSize), 0, m.rightmost)
 }
 
-// Init initializes the label owner's state. `starting` contains the log entry
-// where the label owner wants their ownership to start, and `vers` contains the
-// version of the label that exists at each log entry returned by `InitEntries`.
+// OwnerInit initializes the label owner's state. `starting` contains the log
+// entry where the label owner wants their ownership to start, and `vers`
+// contains the version of the label that exists at each log entry returned by
+// `InitEntries`.
 //
 // Algorithm from the first portion of Section 8.3.
-func (m *Monitor) Init(starting uint64, vers []uint32) error {
+func (m *Monitor) OwnerInit(starting uint64, vers []uint32) error {
 	if m.Owner != nil {
 		return errors.New("label owner state is already initialized")
 	}
