@@ -437,6 +437,7 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint3
 			if previousVer <= ver {
 				return nil, errors.New("monitoring detected versions that are not monotonic")
 			}
+			return nil, nil
 		}
 		// Obtain and verify a monitoring binary ladder.
 		if err := m.provider.GetMonitoringBinaryLadder(y, ver); err != nil {

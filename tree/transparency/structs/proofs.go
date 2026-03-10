@@ -56,11 +56,9 @@ func NewCombinedTreeProof(cs suites.CipherSuite, buf *bytes.Buffer) (*CombinedTr
 	}
 	timestamps := make([]uint64, numTimestamps)
 	for i := range int(numTimestamps) {
-		var timestamp uint64
-		if err := binary.Read(buf, binary.BigEndian, &timestamp); err != nil {
+		if err := binary.Read(buf, binary.BigEndian, &timestamps[i]); err != nil {
 			return nil, err
 		}
-		timestamps[i] = timestamp
 	}
 
 	numProofs, err := buf.ReadByte()

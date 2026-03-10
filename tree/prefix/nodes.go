@@ -69,7 +69,7 @@ func (pn *parentNode) Hash(cs suites.CipherSuite) []byte {
 	}
 
 	h := cs.Hash()
-	h.Write([]byte{0x02})
+	h.Write([]byte{0x03})
 	h.Write(pn.left.Hash(cs))
 	h.Write(pn.right.Hash(cs))
 	out := h.Sum(nil)
@@ -129,7 +129,7 @@ func (ln leafNode) Weight(cs suites.CipherSuite) int {
 
 func (ln leafNode) Hash(cs suites.CipherSuite) []byte {
 	h := cs.Hash()
-	h.Write([]byte{0x01})
+	h.Write([]byte{0x02})
 	h.Write(ln.vrfOutput)
 	h.Write(ln.commitment)
 	return h.Sum(nil)
