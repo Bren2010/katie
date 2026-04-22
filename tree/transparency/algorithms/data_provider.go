@@ -162,6 +162,8 @@ func (dp *DataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	prefixTrees, err := dp.handle.GetPrefixTrees(empty)
 	if err != nil {
 		return nil, err
+	} else if len(prefixTrees) != len(empty) {
+		return nil, errors.New("unexpected number of prefix tree root hashes returned")
 	}
 	for i := range leaves {
 		if leaves[i].PrefixTree == nil {

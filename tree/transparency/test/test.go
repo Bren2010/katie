@@ -2,6 +2,7 @@ package test
 
 import (
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -79,11 +80,17 @@ func NewProofHandle(timestamps map[uint64]uint64, versions map[uint64]uint32) *P
 	return &ProofHandle{timestamps: timestamps, versions: versions}
 }
 
-func (ph *ProofHandle) Verify(requested, searchLadders, monitoringLadders, inclusionProofs []uint64) bool {
-	return slices.Equal(ph.requested, requested) &&
-		slices.Equal(ph.searchLadders, searchLadders) &&
-		slices.Equal(ph.monitoringLadders, monitoringLadders) &&
-		slices.Equal(ph.inclusionProofs, inclusionProofs)
+func (ph *ProofHandle) Verify(requested, searchLadders, monitoringLadders, inclusionProofs []uint64) error {
+	if !slices.Equal(ph.requested, requested) {
+		return fmt.Errorf("unexpected log entries requested: %v", ph.requested)
+	} else if !slices.Equal(ph.searchLadders, searchLadders) {
+		return fmt.Errorf("unexpected search ladders requested: %v", ph.searchLadders)
+	} else if !slices.Equal(ph.monitoringLadders, monitoringLadders) {
+		return fmt.Errorf("unexpected monitoring ladders requested: %v", ph.monitoringLadders)
+	} else if !slices.Equal(ph.inclusionProofs, inclusionProofs) {
+		return fmt.Errorf("unexpected inclusion proofs requested: %v", ph.inclusionProofs)
+	}
+	return nil
 }
 
 func (ph *ProofHandle) GetTimestamp(x uint64) (uint64, error) {

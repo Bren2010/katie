@@ -21,8 +21,8 @@ func TestUpdateView(t *testing.T) {
 
 		if err := UpdateView(config.Public(), n, m, provider); err != nil {
 			return err
-		} else if !handle.Verify(requests, nil, nil, nil) {
-			t.Fatal("unexpected lookups made by algorithm")
+		} else if err := handle.Verify(requests, nil, nil, nil); err != nil {
+			t.Fatal(err)
 		}
 		return nil
 	}
@@ -81,8 +81,8 @@ func TestRightmostDistinguished(t *testing.T) {
 		res, err := RightmostDistinguished(public, n, provider)
 		if err != nil {
 			t.Fatal(err)
-		} else if !handle.Verify(requests, nil, nil, nil) {
-			t.Fatal("unexpected lookups made by algorithm")
+		} else if err := handle.Verify(requests, nil, nil, nil); err != nil {
+			t.Fatal(err)
 		}
 		return res
 	}
@@ -142,8 +142,8 @@ func TestPreviousDistinguished(t *testing.T) {
 		res, err := PreviousRightmost(public, n, provider)
 		if err != nil {
 			t.Fatal(err)
-		} else if !handle.Verify(requests, nil, nil, nil) {
-			t.Fatal("unexpected lookups made by algorithm")
+		} else if err := handle.Verify(requests, nil, nil, nil); err != nil {
+			t.Fatal(err)
 		}
 		return res
 	}
@@ -197,8 +197,8 @@ func TestGreatestVersionSearch(t *testing.T) {
 			t.Fatal(err)
 		}
 		res, err := GreatestVersionSearch(public, 1, 100, provider)
-		if !handle.Verify(vec.requests, vec.searchLadders, nil, nil) {
-			t.Fatal("unexpected lookups made by algorithm")
+		if err := handle.Verify(vec.requests, vec.searchLadders, nil, nil); err != nil {
+			t.Fatal(err)
 		}
 		return res, err
 	}
@@ -314,8 +314,8 @@ func TestFixedVersionSearch(t *testing.T) {
 			t.Fatal(err)
 		}
 		res, err := FixedVersionSearch(public, 1, 100, provider)
-		if !handle.Verify(vec.requests, vec.searchLadders, nil, vec.inclusionProofs) {
-			t.Fatal("unexpected lookups made by algorithm")
+		if err := handle.Verify(vec.requests, vec.searchLadders, nil, vec.inclusionProofs); err != nil {
+			t.Fatal(err)
 		}
 		return res, err
 	}
@@ -443,5 +443,111 @@ func TestFixedVersionSearch(t *testing.T) {
 	})
 	if res != 99 || err != nil {
 		t.Fatalf("unexpected result: res=%v err=%v", res, err)
+	}
+}
+
+func TestContactMonitoring(t *testing.T) {
+	config := test.Config(t)
+	rmw := config.ReasonableMonitoringWindow
+	now := uint64(time.Now().UnixMilli())
+	tsMap := map[uint64]uint64{
+		63: now - 5,
+		71: now - 4,
+		77: now - 3,
+		79: now - 2,
+		95: now - 1,
+		99: now,
+	}
+
+	type testVector struct {
+		state *ContactState
+		tsMap map[uint64]uint64
+
+		requests       []uint64
+		monitorLadders []uint64
+	}
+	runTest := func(vec testVector) (*ContactState, error) {
+		public := config.Public()
+		handle := test.NewProofHandle(vec.tsMap, nil)
+		provider := NewDataProvider(config.Suite, handle)
+
+		if err := UpdateView(public, 100, nil, provider); err != nil {
+			t.Fatal(err)
+		}
+		monitor, err := NewMonitor(public, 100, provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		monitor.Contact = vec.state
+		err = monitor.ContactMonitor()
+
+		if err := handle.Verify(vec.requests, nil, vec.monitorLadders, nil); err != nil {
+			t.Fatal(err)
+		}
+		return monitor.Contact, err
+	}
+
+	// TEST BLOCK 1: If a monitoring path ends in a non-distinguished log entry,
+	// that log entry is left in the monitoring state.
+	res, err := runTest(testVector{
+		state: &ContactState{Ptrs: map[uint64]uint32{70: 1}},
+		tsMap: tsMap,
+
+		requests:       []uint64{63, 95, 99, 71, 79},
+		monitorLadders: []uint64{71, 79, 95},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Ptrs) != 1 || res.Ptrs[95] != 1 {
+		t.Fatal("unexpected monitoring state output")
+	}
+
+	// TEST BLOCK 2: If a monitoring path ends in a distinguished log entry,
+	// that log entry is excluded from the monitoring state.
+	res, err = runTest(testVector{
+		state: &ContactState{Ptrs: map[uint64]uint32{70: 1}},
+		tsMap: map[uint64]uint64{
+			63: now - rmw - 3,
+			71: now - rmw - 2,
+			79: now - rmw - 1,
+			95: now - rmw,
+			99: now,
+		},
+
+		requests:       []uint64{63, 95, 99, 71, 79},
+		monitorLadders: []uint64{71, 79, 95},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if res != nil {
+		t.Fatal("unexpected monitoring state output")
+	}
+
+	// TEST BLOCK 3: When multiple monitoring paths intersect, the intersection
+	// is only monitored once.
+	res, err = runTest(testVector{
+		state: &ContactState{Ptrs: map[uint64]uint32{70: 1, 76: 2}},
+		tsMap: tsMap,
+
+		requests:       []uint64{63, 95, 99, 77, 79, 71},
+		monitorLadders: []uint64{77, 79, 95, 71},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Ptrs) != 1 || res.Ptrs[95] != 2 {
+		t.Fatal("unexpected monitoring state output")
+	}
+
+	// TEST BLOCK 4: When multiple monitoring paths intersect, monotonicity is
+	// verified.
+	res, err = runTest(testVector{
+		state: &ContactState{Ptrs: map[uint64]uint32{70: 2, 76: 1}},
+		tsMap: tsMap,
+
+		requests:       []uint64{63, 95, 99, 77, 79, 71},
+		monitorLadders: []uint64{77, 79, 95, 71},
+	})
+	if err.Error() != "monitoring detected versions that are not monotonic" {
+		t.Fatal(err)
 	}
 }

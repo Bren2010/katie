@@ -19,6 +19,8 @@ func (t *Tree) batchGetIndex(labels [][]byte) ([][]uint64, error) {
 	rawIndices, err := t.tx.BatchGetIndex(labels)
 	if err != nil {
 		return nil, err
+	} else if len(rawIndices) != len(labels) {
+		return nil, errors.New("unexpected number of indices returned")
 	}
 
 	out := make([][]uint64, len(rawIndices))

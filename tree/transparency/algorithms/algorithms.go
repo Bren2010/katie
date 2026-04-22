@@ -289,13 +289,13 @@ func FixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, prov
 		// If the binary ladder indicates a greatest version equal to the target
 		// version, then:
 		if !expired { // If there were no expired log entries, terminate successfully.
-			return terminalPos, nil
+			return x, nil
 		}
 		// Determine whether this log entry, or any unexpired log entries in
 		// its direct path and to its left, are distinguished.
 		for _, y := range distinguished {
 			if y <= x { // If so, terminate successfully.
-				return terminalPos, nil
+				return x, nil
 			}
 		} // Otherwise, return an error that the target version is expired.
 		return 0, ErrLabelExpired
@@ -336,6 +336,7 @@ func (os *OwnerState) greatestVersionAt(x uint64) int {
 	return idx + os.VerAtStarting
 }
 
+// Monitor wraps the state that needs to be passed in to a monitoring operation.
 type Monitor struct {
 	config    *structs.PublicConfig
 	provider  *DataProvider
@@ -368,7 +369,8 @@ func NewMonitor(config *structs.PublicConfig, treeSize uint64, provider *DataPro
 // distinguishedAncestor returns the first distinguished log entry that is on
 // the direct path of `target` and to its right.
 func (m *Monitor) distinguishedAncestor(target uint64) (*uint64, error) {
-	// List all distinguished log entries in the direct path of `target`.
+	// List all distinguished log entries in the direct path of `target` and to
+	// its right.
 	var (
 		distinguished []uint64
 
@@ -377,11 +379,14 @@ func (m *Monitor) distinguishedAncestor(target uint64) (*uint64, error) {
 		right uint64 = m.rightmost
 	)
 	for m.config.IsDistinguished(left, right) {
-		distinguished = append(distinguished, curr)
+		if curr >= target {
+			distinguished = append(distinguished, curr)
+		}
 
 		if curr == target {
 			break
 		}
+
 		timestamp, err := m.provider.GetTimestamp(curr)
 		if err != nil {
 			return nil, err
@@ -395,18 +400,11 @@ func (m *Monitor) distinguishedAncestor(target uint64) (*uint64, error) {
 		}
 	}
 
-	// Filter out entries from `distinguished` that are to the left of `target`.
-	var eligible []uint64
-	for _, x := range distinguished {
-		if x >= target {
-			eligible = append(eligible, x)
-		}
-	}
 	// Return the lowest one.
-	if len(eligible) == 0 {
+	if len(distinguished) == 0 {
 		return nil, nil
 	}
-	return &eligible[len(eligible)-1], nil
+	return &distinguished[len(distinguished)-1], nil
 }
 
 func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint32) (*uint64, error) {
@@ -454,6 +452,10 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint3
 	return &x, nil
 }
 
+// ContactMonitor executes the algorithm from Section 8.2 using the contact
+// monitoring state in m.Contact. If no future monitoring is required, m.Contact
+// is set to be nil. Otherwise, m.Contact is updated with the state for the next
+// monitoring request.
 func (m *Monitor) ContactMonitor() error {
 	if m.Contact == nil {
 		return errors.New("no contact monitoring state found")

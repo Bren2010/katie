@@ -24,12 +24,12 @@ type InsertedVrfOutput struct {
 
 // AuditorState is the state of an Auditor that's persisted to a database.
 type AuditorState struct {
-	TreeHead     structs.AuditorTreeHead
-	FullSubtrees [][]byte
-	Timestamps   []uint64
-	PrefixTree   []byte
+	TreeHead     structs.AuditorTreeHead // Last tree head issued by auditor.
+	FullSubtrees [][]byte                // Full subtrees of the log tree.
+	Timestamps   []uint64                // Timestamps of the log entries along the frontier.
+	PrefixTree   []byte                  // Prefix tree root hash of the rightmost log entry.
 
-	Inserted []InsertedVrfOutput
+	Inserted []InsertedVrfOutput // List of recently-inserted VRF outputs.
 }
 
 func NewAuditorState(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorState, error) {
@@ -114,7 +114,7 @@ func (as *AuditorState) Marshal() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// AddedSince returns true if `vrfOutput` was added to the prefix tree after the
+// addedSince returns true if `vrfOutput` was added to the prefix tree after the
 // log entry `x` was published.
 func (as *AuditorState) addedSince(x uint64, vrfOutput []byte) bool {
 	if as == nil {

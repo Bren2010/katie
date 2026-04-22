@@ -189,9 +189,10 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 
 	// Populate commitment field of appropriate BinaryLadderStep structures.
 	for i, ver := range ladder {
-		if req.Version == nil && int(ver) != greatest {
-			steps[i].Commitment = handle.GetCommitment(ver)
-		} else if req.Version != nil && ver != *req.Version {
+		populate := req.Version == nil && int(ver) != greatest ||
+			req.Version != nil && ver != *req.Version
+
+		if populate {
 			steps[i].Commitment = handle.GetCommitment(ver)
 		}
 	}
@@ -199,8 +200,10 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 	// Put together final SearchResponse structure.
 	var outputVer *uint32
 	if req.Version == nil {
-		ver := uint32(0)
-		if greatest > 0 {
+		var ver uint32
+		if greatest < 0 {
+			ver = 0
+		} else {
 			ver = uint32(greatest)
 		}
 		outputVer = &ver

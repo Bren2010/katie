@@ -24,9 +24,9 @@ type Auditor struct {
 	state *AuditorState
 }
 
-// NewAuditor returns a new Auditor. `config` is the transparency log's public
-// configuration, `auditorKey` is the auditor's private signing key, and `tx` is
-// the auditor's persistent storage.
+// NewAuditor returns a new Third-Party Auditor for a Transparency Log. `config`
+// is the transparency log's public configuration, `auditorKey` is the auditor's
+// private signing key, and `tx` is the auditor's persistent storage.
 func NewAuditor(
 	config *structs.PublicConfig,
 	auditorKey suites.SigningPrivateKey,
