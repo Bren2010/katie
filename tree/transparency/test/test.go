@@ -74,6 +74,8 @@ type ProofHandle struct {
 	searchLadders     []uint64
 	monitoringLadders []uint64
 	inclusionProofs   []uint64
+
+	stopPos uint64
 }
 
 func NewProofHandle(timestamps map[uint64]uint64, versions map[uint64]uint32) *ProofHandle {
@@ -93,6 +95,8 @@ func (ph *ProofHandle) Verify(requested, searchLadders, monitoringLadders, inclu
 	return nil
 }
 
+func (ph *ProofHandle) SetStopPos(x uint64) { ph.stopPos = x }
+
 func (ph *ProofHandle) GetTimestamp(x uint64) (uint64, error) {
 	ph.requested = append(ph.requested, x)
 
@@ -108,6 +112,9 @@ func (ph *ProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([
 
 	posVer, ok := ph.versions[x]
 	if !ok {
+		if ver == 0 && omit == false {
+			return make([]byte, 32), -1, nil
+		}
 		panic("version not known for position")
 	}
 
@@ -130,6 +137,10 @@ func (ph *ProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
 	return make([]byte, 32), nil
 }
 
+func (ph *ProofHandle) StopCondition(x uint64, ver int) bool {
+	return ph.stopPos == x
+}
+
 func (ph *ProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
 	panic("not implemented")
 }
@@ -140,8 +151,5 @@ func (ph *ProofHandle) Finish() ([][]byte, error) {
 	panic("not implemented")
 }
 func (ph *ProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
-	panic("not implemented")
-}
-func (ph *ProofHandle) StopCondition(x uint64, ver int) bool {
 	panic("not implemented")
 }

@@ -1,6 +1,7 @@
 package algorithms
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -548,6 +549,140 @@ func TestContactMonitoring(t *testing.T) {
 		monitorLadders: []uint64{77, 79, 95, 71},
 	})
 	if err.Error() != "monitoring detected versions that are not monotonic" {
+		t.Fatal(err)
+	}
+}
+
+func TestInitEntries(t *testing.T) {
+	config := test.Config(t)
+	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
+
+	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
+	now := uint64(time.Now().UnixMilli())
+	tsMap := map[uint64]uint64{
+		63: now - ml,           // bounds = [0, 99] expired
+		79: now - ml + 1,       // bounds = [63, 95] distinguished to left
+		83: now - ml + 2,       // bounds = [79, 87] not distinguished
+		87: now - ml + 3,       // bounds = [79, 95] distinguished start point
+		95: now - ml + rmw + 1, // bounds = [63, 99] distinguished to right
+		99: now,
+	} // DirectPath(83) = [87, 79, 95, 63]
+
+	handle := test.NewProofHandle(tsMap, nil)
+	provider := NewDataProvider(config.Suite, handle)
+	monitor, err := NewMonitor(config.Public(), 100, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Owner initialization rejects non-distinguished log entries.
+	_, err = monitor.InitEntries(83)
+	if err.Error() != "requested starting position is not distinguished" {
+		t.Fatal("unexpected error from owner initialization")
+	}
+
+	// Owner initialization accepts distinguished log entries; doesn't return
+	// expired log entries or those to the right.
+	entries, err := monitor.InitEntries(87)
+	if err != nil {
+		t.Fatal(err)
+	} else if !slices.Equal(entries, []uint64{87, 79}) {
+		t.Fatal("unexpected result from owner initialization")
+	}
+}
+
+func TestOwnerInit(t *testing.T) {
+	config := test.Config(t)
+	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
+
+	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
+	now := uint64(time.Now().UnixMilli())
+	tsMap := map[uint64]uint64{ // Same map as TestInitEntries
+		63: now - ml,
+		79: now - ml + 1,
+		83: now - ml + 2,
+		87: now - ml + 3,
+		95: now - ml + rmw + 1,
+		99: now,
+	}
+
+	type testVector struct {
+		verMap map[uint64]uint32
+		vers   []uint32
+
+		requests      []uint64
+		searchLadders []uint64
+	}
+	runTest := func(vec testVector) (*OwnerState, error) {
+		public := config.Public()
+		handle := test.NewProofHandle(tsMap, vec.verMap)
+		provider := NewDataProvider(config.Suite, handle)
+
+		if err := UpdateView(public, 100, nil, provider); err != nil {
+			t.Fatal(err)
+		}
+		monitor, err := NewMonitor(public, 100, provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = monitor.OwnerInit(87, vec.vers)
+
+		if err := handle.Verify(vec.requests, vec.searchLadders, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		return monitor.Owner, err
+	}
+
+	// Search ladder returns expected results.
+	state, err := runTest(testVector{
+		verMap: map[uint64]uint32{87: 1},
+		vers:   []uint32{1},
+
+		requests:      []uint64{63, 95, 99, 79, 87},
+		searchLadders: []uint64{87, 79},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := state != nil && state.Starting == 87 &&
+		state.VerAtStarting == 1 && len(state.UpcomingVers) == 0
+	if !ok {
+		t.Fatal("owner state not populated as expected")
+	}
+
+	// Search ladder returns version too great.
+	_, err = runTest(testVector{
+		verMap: map[uint64]uint32{87: 1},
+		vers:   []uint32{0},
+
+		requests:      []uint64{63, 95, 99, 79, 87},
+		searchLadders: []uint64{87},
+	})
+	if err.Error() != "binary ladder inconsistent with expected greatest version of label" {
+		t.Fatal(err)
+	}
+
+	// Search ladder returns version too small.
+	_, err = runTest(testVector{
+		verMap: map[uint64]uint32{87: 31},
+		vers:   []uint32{32},
+
+		requests:      []uint64{63, 95, 99, 79, 87},
+		searchLadders: []uint64{87},
+	})
+	if err.Error() != "binary ladder inconsistent with expected greatest version of label" {
+		t.Fatal(err)
+	}
+
+	// Search ladder returns version exists when it shouldn't.
+	_, err = runTest(testVector{
+		verMap: map[uint64]uint32{87: 0, 79: 0},
+		vers:   []uint32{0},
+
+		requests:      []uint64{63, 95, 99, 79, 87},
+		searchLadders: []uint64{87, 79},
+	})
+	if err.Error() != "binary ladder inconsistent with expected greatest version of label" {
 		t.Fatal(err)
 	}
 }
