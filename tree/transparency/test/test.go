@@ -138,7 +138,7 @@ func (ph *ProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
 }
 
 func (ph *ProofHandle) StopCondition(x uint64, ver int) bool {
-	return ph.stopPos == x
+	return ph.stopPos > 0 && ph.stopPos <= x
 }
 
 func (ph *ProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {

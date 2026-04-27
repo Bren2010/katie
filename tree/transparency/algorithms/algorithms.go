@@ -336,6 +336,15 @@ func (os *OwnerState) greatestVersionAt(x uint64) int {
 	return idx + os.VerAtStarting
 }
 
+func (os *OwnerState) Clone() *OwnerState {
+	return &OwnerState{
+		Starting: os.Starting,
+
+		VerAtStarting: os.VerAtStarting,
+		UpcomingVers:  slices.Clone(os.UpcomingVers),
+	}
+}
+
 // Monitor wraps the state that needs to be passed in to a monitoring operation.
 type Monitor struct {
 	config    *structs.PublicConfig
@@ -674,5 +683,17 @@ func (m *Monitor) OwnerMonitor() error {
 	if m.Owner == nil {
 		return errors.New("label owner state has not been initialized")
 	}
-	return m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost)
+	// Set m.Owner to be a clone of its current value. If the operation as a
+	// whole succeeds, adopt the modifications to the clone. If it fails, keep
+	// the original state.
+	original := m.Owner
+	m.Owner = original.Clone()
+
+	err := m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost)
+	if err == nil {
+		*original = *m.Owner
+	}
+
+	m.Owner = original
+	return err
 }
