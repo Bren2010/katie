@@ -3,6 +3,7 @@ package transparency
 import (
 	"bytes"
 	"errors"
+	"slices"
 
 	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
@@ -217,5 +218,68 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 
 		BinaryLadder: steps,
 		Search:       *combinedProof,
+	}, nil
+}
+
+func (t *Tree) ContactMonitor(req *structs.ContactMonitorRequest) (*structs.ContactMonitorResponse, error) {
+	fth, n, nP, m, err := t.fullTreeHead(req.Last)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: Omit redundant binary ladder lookups.
+
+	// Verify that Entries is sorted in ascending order by `position` and that
+	// no `position` or `version` is duplicate.
+	for i := 1; i < len(req.Entries); i++ {
+		if req.Entries[i-1].Position >= req.Entries[i].Position {
+			return nil, errors.New("monitoring map is not sorted by position")
+		} else if req.Entries[i-1].Version >= req.Entries[i].Version {
+			return nil, errors.New("monitoring map is not sorted by version")
+		}
+	}
+
+	// Verify that each `position` is on the direct path of the first log entry
+	// to contain the associated `version` of the label.
+	indices, err := t.batchGetIndex([][]byte{req.Label})
+	if err != nil {
+		return nil, err
+	}
+	index := indices[0]
+
+	ptrs := make(map[uint64]uint32)
+	for _, entry := range req.Entries {
+		if int(entry.Version) >= len(index) {
+			return nil, errors.New("unexpected version found in monitoring map")
+		}
+		path := math.RightDirectPath(index[entry.Version], n)
+		if !slices.Contains(path, entry.Position) {
+			return nil, errors.New("unexpected position found in monitoring map")
+		}
+		ptrs[entry.Position] = entry.Version
+	}
+
+	// Execute the algorithm to update the user's view of the tree, followed by
+	// the contact monitoring algorithm.
+	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, index)
+	provider := algorithms.NewDataProvider(t.config.Suite, handle)
+	if err := t.updateView(req.Last, provider); err != nil {
+		return nil, err
+	}
+	monitor, err := algorithms.NewMonitor(t.config.Public(), n, provider)
+	if err != nil {
+		return nil, err
+	}
+	monitor.Contact = &algorithms.ContactState{Ptrs: ptrs}
+	if err := monitor.ContactMonitor(); err != nil {
+		return nil, err
+	}
+	combinedProof, err := provider.Output(n, nP, m)
+	if err != nil {
+		return nil, err
+	}
+
+	return &structs.ContactMonitorResponse{
+		FullTreeHead: *fth,
+		Monitor:      *combinedProof,
 	}, nil
 }
