@@ -2,7 +2,6 @@ package structs
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 )
 
@@ -12,11 +11,11 @@ type TreeHead struct {
 }
 
 func NewTreeHead(buf *bytes.Buffer) (*TreeHead, error) {
-	var treeSize uint64
-	if err := binary.Read(buf, binary.BigEndian, &treeSize); err != nil {
+	treeSize, err := readNumeric[uint64](buf)
+	if err != nil {
 		return nil, err
 	}
-	signature, err := readU16Bytes(buf)
+	signature, err := readBytes[uint16](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -24,11 +23,8 @@ func NewTreeHead(buf *bytes.Buffer) (*TreeHead, error) {
 }
 
 func (th *TreeHead) Marshal(buf *bytes.Buffer) error {
-	binary.Write(buf, binary.BigEndian, th.TreeSize)
-	if err := writeU16Bytes(buf, th.Signature, "signature"); err != nil {
-		return err
-	}
-	return nil
+	writeNumeric(buf, th.TreeSize)
+	return writeBytes[uint16](buf, th.Signature, "signature")
 }
 
 type TreeHeadTBS struct {
@@ -41,7 +37,7 @@ func (tbs *TreeHeadTBS) Marshal(buf *bytes.Buffer) error {
 	if err := tbs.Config.Marshal(buf); err != nil {
 		return err
 	}
-	binary.Write(buf, binary.BigEndian, tbs.TreeSize)
+	writeNumeric(buf, tbs.TreeSize)
 	buf.Write(tbs.Root)
 	return nil
 }
@@ -53,15 +49,15 @@ type AuditorTreeHead struct {
 }
 
 func NewAuditorTreeHead(buf *bytes.Buffer) (*AuditorTreeHead, error) {
-	var timestamp uint64
-	if err := binary.Read(buf, binary.BigEndian, &timestamp); err != nil {
+	timestamp, err := readNumeric[uint64](buf)
+	if err != nil {
 		return nil, err
 	}
-	var treeSize uint64
-	if err := binary.Read(buf, binary.BigEndian, &treeSize); err != nil {
+	treeSize, err := readNumeric[uint64](buf)
+	if err != nil {
 		return nil, err
 	}
-	signature, err := readU16Bytes(buf)
+	signature, err := readBytes[uint16](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -69,12 +65,9 @@ func NewAuditorTreeHead(buf *bytes.Buffer) (*AuditorTreeHead, error) {
 }
 
 func (ath *AuditorTreeHead) Marshal(buf *bytes.Buffer) error {
-	binary.Write(buf, binary.BigEndian, ath.Timestamp)
-	binary.Write(buf, binary.BigEndian, ath.TreeSize)
-	if err := writeU16Bytes(buf, ath.Signature, "auditor signature"); err != nil {
-		return err
-	}
-	return nil
+	writeNumeric(buf, ath.Timestamp)
+	writeNumeric(buf, ath.TreeSize)
+	return writeBytes[uint16](buf, ath.Signature, "auditor signature")
 }
 
 type AuditorTreeHeadTBS struct {
@@ -88,8 +81,8 @@ func (tbs *AuditorTreeHeadTBS) Marshal(buf *bytes.Buffer) error {
 	if err := tbs.Config.Marshal(buf); err != nil {
 		return err
 	}
-	binary.Write(buf, binary.BigEndian, tbs.Timestamp)
-	binary.Write(buf, binary.BigEndian, tbs.TreeSize)
+	writeNumeric(buf, tbs.Timestamp)
+	writeNumeric(buf, tbs.TreeSize)
 	buf.Write(tbs.Root)
 	return nil
 }

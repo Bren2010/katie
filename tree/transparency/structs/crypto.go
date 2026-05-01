@@ -2,7 +2,6 @@ package structs
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -16,7 +15,7 @@ func NewUpdateSuffix(config *PublicConfig, buf *bytes.Buffer) (*UpdateSuffix, er
 	if config.Mode != ThirdPartyManagement {
 		return &UpdateSuffix{}, nil
 	}
-	signature, err := readU16Bytes(buf)
+	signature, err := readBytes[uint16](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -26,10 +25,8 @@ func NewUpdateSuffix(config *PublicConfig, buf *bytes.Buffer) (*UpdateSuffix, er
 func (us *UpdateSuffix) Marshal(buf *bytes.Buffer) error {
 	if us.Signature == nil {
 		return nil
-	} else if err := writeU16Bytes(buf, us.Signature, "service operator signature"); err != nil {
-		return err
 	}
-	return nil
+	return writeBytes[uint16](buf, us.Signature, "service operator signature")
 }
 
 type UpdateValue struct {
@@ -38,7 +35,7 @@ type UpdateValue struct {
 }
 
 func NewUpdateValue(config *PublicConfig, buf *bytes.Buffer) (*UpdateValue, error) {
-	value, err := readU32Bytes(buf)
+	value, err := readBytes[uint32](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -50,12 +47,10 @@ func NewUpdateValue(config *PublicConfig, buf *bytes.Buffer) (*UpdateValue, erro
 }
 
 func (uv *UpdateValue) Marshal(buf *bytes.Buffer) error {
-	if err := writeU32Bytes(buf, uv.Value, "label value"); err != nil {
-		return err
-	} else if err := uv.UpdateSuffix.Marshal(buf); err != nil {
+	if err := writeBytes[uint32](buf, uv.Value, "label value"); err != nil {
 		return err
 	}
-	return nil
+	return uv.UpdateSuffix.Marshal(buf)
 }
 
 type UpdateTBS struct {
@@ -68,14 +63,11 @@ type UpdateTBS struct {
 func (tbs *UpdateTBS) Marshal(buf *bytes.Buffer) error {
 	if err := tbs.Config.Marshal(buf); err != nil {
 		return err
-	} else if err := writeU8Bytes(buf, tbs.Label, "label"); err != nil {
+	} else if err := writeBytes[uint8](buf, tbs.Label, "label"); err != nil {
 		return err
 	}
-	binary.Write(buf, binary.BigEndian, tbs.Version)
-	if err := writeU32Bytes(buf, tbs.Value, "label value"); err != nil {
-		return err
-	}
-	return nil
+	writeNumeric(buf, tbs.Version)
+	return writeBytes[uint32](buf, tbs.Value, "label value")
 }
 
 type CommitmentValue struct {
@@ -85,14 +77,11 @@ type CommitmentValue struct {
 }
 
 func (cv *CommitmentValue) Marshal(buf *bytes.Buffer) error {
-	if err := writeU8Bytes(buf, cv.Label, "label"); err != nil {
+	if err := writeBytes[uint8](buf, cv.Label, "label"); err != nil {
 		return err
 	}
-	binary.Write(buf, binary.BigEndian, cv.Version)
-	if err := cv.Update.Marshal(buf); err != nil {
-		return err
-	}
-	return nil
+	writeNumeric(buf, cv.Version)
+	return cv.Update.Marshal(buf)
 }
 
 type VrfInput struct {
@@ -101,10 +90,10 @@ type VrfInput struct {
 }
 
 func (vi *VrfInput) Marshal(buf *bytes.Buffer) error {
-	if err := writeU8Bytes(buf, vi.Label, "label"); err != nil {
+	if err := writeBytes[uint8](buf, vi.Label, "label"); err != nil {
 		return err
 	}
-	binary.Write(buf, binary.BigEndian, vi.Version)
+	writeNumeric(buf, vi.Version)
 	return nil
 }
 
@@ -114,8 +103,8 @@ type LogEntry struct {
 }
 
 func NewLogEntry(cs suites.CipherSuite, buf *bytes.Buffer) (*LogEntry, error) {
-	var timestamp uint64
-	if err := binary.Read(buf, binary.BigEndian, &timestamp); err != nil {
+	timestamp, err := readNumeric[uint64](buf)
+	if err != nil {
 		return nil, err
 	}
 	prefixTree := make([]byte, cs.HashSize())
@@ -126,7 +115,7 @@ func NewLogEntry(cs suites.CipherSuite, buf *bytes.Buffer) (*LogEntry, error) {
 }
 
 func (le *LogEntry) Marshal(buf *bytes.Buffer) error {
-	binary.Write(buf, binary.BigEndian, le.Timestamp)
+	writeNumeric(buf, le.Timestamp)
 	buf.Write(le.PrefixTree)
 	return nil
 }
@@ -192,8 +181,5 @@ func NewLabelValue(config *PublicConfig, buf *bytes.Buffer) (*LabelValue, error)
 
 func (lv *LabelValue) Marshal(buf *bytes.Buffer) error {
 	buf.Write(lv.Opening)
-	if err := lv.Value.Marshal(buf); err != nil {
-		return err
-	}
-	return nil
+	return lv.Value.Marshal(buf)
 }

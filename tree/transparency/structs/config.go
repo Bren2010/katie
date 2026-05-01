@@ -2,7 +2,6 @@ package structs
 
 import (
 	"bytes"
-	"encoding/binary"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/crypto/vrf"
@@ -66,34 +65,34 @@ type PublicConfig struct {
 }
 
 func (pc *PublicConfig) Marshal(buf *bytes.Buffer) error {
-	binary.Write(buf, binary.BigEndian, pc.Suite.Id())
-	buf.WriteByte(byte(pc.Mode))
+	writeNumeric(buf, pc.Suite.Id())
+	writeNumeric(buf, uint8(pc.Mode))
 
-	if err := writeU16Bytes(buf, pc.SignatureKey.Bytes(), "signature public key"); err != nil {
+	if err := writeBytes[uint16](buf, pc.SignatureKey.Bytes(), "signature public key"); err != nil {
 		return err
-	} else if err := writeU16Bytes(buf, pc.VrfKey.Bytes(), "vrf public key"); err != nil {
+	} else if err := writeBytes[uint16](buf, pc.VrfKey.Bytes(), "vrf public key"); err != nil {
 		return err
 	}
 
 	switch pc.Mode {
 	case ThirdPartyManagement:
-		if err := writeU16Bytes(buf, pc.LeafPublicKey.Bytes(), "leaf public key"); err != nil {
+		if err := writeBytes[uint16](buf, pc.LeafPublicKey.Bytes(), "leaf public key"); err != nil {
 			return err
 		}
 
 	case ThirdPartyAuditing:
-		binary.Write(buf, binary.BigEndian, pc.MaxAuditorLag)
-		binary.Write(buf, binary.BigEndian, pc.AuditorStartPos)
-		if err := writeU16Bytes(buf, pc.AuditorPublicKey.Bytes(), "auditor public key"); err != nil {
+		writeNumeric(buf, pc.MaxAuditorLag)
+		writeNumeric(buf, pc.AuditorStartPos)
+		if err := writeBytes[uint16](buf, pc.AuditorPublicKey.Bytes(), "auditor public key"); err != nil {
 			return err
 		}
 	}
 
-	binary.Write(buf, binary.BigEndian, pc.MaxAhead)
-	binary.Write(buf, binary.BigEndian, pc.MaxBehind)
-	binary.Write(buf, binary.BigEndian, pc.ReasonableMonitoringWindow)
+	writeNumeric(buf, pc.MaxAhead)
+	writeNumeric(buf, pc.MaxBehind)
+	writeNumeric(buf, pc.ReasonableMonitoringWindow)
 	if writeOptional(buf, pc.MaximumLifetime > 0) {
-		binary.Write(buf, binary.BigEndian, pc.MaximumLifetime)
+		writeNumeric(buf, pc.MaximumLifetime)
 	}
 
 	return nil

@@ -2,8 +2,6 @@ package structs
 
 import (
 	"bytes"
-	"encoding/binary"
-	"errors"
 	"io"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -22,9 +20,10 @@ func newPrefixEntry(cs suites.CipherSuite, buf *bytes.Buffer) (*prefix.Entry, er
 	return &prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment}, nil
 }
 
-func marshalPrefixEntry(entry prefix.Entry, buf *bytes.Buffer) {
+func marshalPrefixEntry(entry *prefix.Entry, buf *bytes.Buffer) error {
 	buf.Write(entry.VrfOutput)
 	buf.Write(entry.Commitment)
+	return nil
 }
 
 type AuditorUpdate struct {
@@ -34,35 +33,19 @@ type AuditorUpdate struct {
 }
 
 func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate, error) {
-	var timestamp uint64
-	if err := binary.Read(buf, binary.BigEndian, &timestamp); err != nil {
+	timestamp, err := readNumeric[uint64](buf)
+	if err != nil {
 		return nil, err
 	}
 
-	var numAdded uint16
-	if err := binary.Read(buf, binary.BigEndian, &numAdded); err != nil {
+	newF := func(buf *bytes.Buffer) (*prefix.Entry, error) { return newPrefixEntry(cs, buf) }
+	added, err := readFuncSlice[uint16](buf, newF)
+	if err != nil {
 		return nil, err
 	}
-	added := make([]prefix.Entry, numAdded)
-	for i := range numAdded {
-		entry, err := newPrefixEntry(cs, buf)
-		if err != nil {
-			return nil, err
-		}
-		added[i] = *entry
-	}
-
-	var numRemoved uint16
-	if err := binary.Read(buf, binary.BigEndian, &numRemoved); err != nil {
+	removed, err := readFuncSlice[uint16](buf, newF)
+	if err != nil {
 		return nil, err
-	}
-	removed := make([]prefix.Entry, numRemoved)
-	for i := range numRemoved {
-		entry, err := newPrefixEntry(cs, buf)
-		if err != nil {
-			return nil, err
-		}
-		removed[i] = *entry
 	}
 
 	proof, err := prefix.NewPrefixProof(cs, buf)
@@ -79,26 +62,14 @@ func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate,
 }
 
 func (au *AuditorUpdate) Marshal(buf *bytes.Buffer) error {
-	binary.Write(buf, binary.BigEndian, au.Timestamp)
+	writeNumeric(buf, au.Timestamp)
 
-	if len(au.Added) > maxUint16 {
-		return errors.New("added prefix entries are too large to marshal")
-	}
-	binary.Write(buf, binary.BigEndian, uint16(len(au.Added)))
-	for _, entry := range au.Added {
-		marshalPrefixEntry(entry, buf)
-	}
-
-	if len(au.Removed) > maxUint16 {
-		return errors.New("removed prefix entries are too large to marshal")
-	}
-	binary.Write(buf, binary.BigEndian, uint16(len(au.Removed)))
-	for _, entry := range au.Removed {
-		marshalPrefixEntry(entry, buf)
-	}
-
-	if err := au.Proof.Marshal(buf); err != nil {
+	if err := writeFuncSlice[uint16](buf, au.Added, "added prefix entry", marshalPrefixEntry); err != nil {
 		return err
 	}
-	return nil
+	if err := writeFuncSlice[uint16](buf, au.Removed, "removed prefix entry", marshalPrefixEntry); err != nil {
+		return err
+	}
+
+	return au.Proof.Marshal(buf)
 }
