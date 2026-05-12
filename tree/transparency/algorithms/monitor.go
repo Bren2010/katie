@@ -29,7 +29,7 @@ type OwnerState struct {
 	UpcomingVers []uint64
 }
 
-func (os *OwnerState) setStarting(x uint64) {
+func (os *OwnerState) SetStarting(x uint64) {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 
 	os.Starting = x
@@ -173,7 +173,7 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint3
 // monitoring request.
 func (m *Monitor) ContactMonitor() error {
 	if m.Contact == nil {
-		return errors.New("no contact monitoring state found")
+		return nil
 	}
 
 	// Extract the list of monitored log entries and sort it from right to left.
@@ -368,7 +368,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) error {
 			return errors.New("binary ladder inconsistent with expected greatest version of label")
 		}
 	}
-	m.Owner.setStarting(x)
+	m.Owner.SetStarting(x)
 
 	// If the current log entry has a right child, recurse to the right child.
 	if noRightChild(x, m.treeSize) {
