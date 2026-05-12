@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -226,7 +227,6 @@ func (t *Tree) ContactMonitor(req *structs.ContactMonitorRequest) (*structs.Cont
 	if err != nil {
 		return nil, err
 	}
-	// TODO: Omit redundant binary ladder lookups.
 
 	// Verify that Entries is sorted in ascending order by `position` and that
 	// no `position` or `version` is duplicate.
@@ -251,10 +251,13 @@ func (t *Tree) ContactMonitor(req *structs.ContactMonitorRequest) (*structs.Cont
 		if int(entry.Version) >= len(index) {
 			return nil, errors.New("unexpected version found in monitoring map")
 		}
-		path := math.RightDirectPath(index[entry.Version], n)
-		if !slices.Contains(path, entry.Position) {
+		first := index[entry.Version]
+
+		path := math.RightDirectPath(first, n)
+		if entry.Position != first && !slices.Contains(path, entry.Position) {
 			return nil, errors.New("unexpected position found in monitoring map")
 		}
+
 		ptrs[entry.Position] = entry.Version
 	}
 
@@ -281,5 +284,105 @@ func (t *Tree) ContactMonitor(req *structs.ContactMonitorRequest) (*structs.Cont
 	return &structs.ContactMonitorResponse{
 		FullTreeHead: *fth,
 		Monitor:      *combinedProof,
+	}, nil
+}
+
+func (t *Tree) OwnerInit(req *structs.OwnerInitRequest) (*structs.OwnerInitResponse, error) {
+	fth, n, nP, m, err := t.fullTreeHead(req.Last)
+	if err != nil {
+		return nil, err
+	}
+	indices, err := t.batchGetIndex([][]byte{req.Label})
+	if err != nil {
+		return nil, err
+	}
+	index := indices[0]
+
+	// Execute the algorithm to update the user's view of the tree, then compute
+	// the log entries to inspect during initialization.
+	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, index)
+	provider := algorithms.NewDataProvider(t.config.Suite, handle)
+	if err := t.updateView(req.Last, provider); err != nil {
+		return nil, err
+	}
+	monitor, err := algorithms.NewMonitor(t.config.Public(), n, provider)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := monitor.InitEntries(req.Start)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute the greatest version of the label that exists at each log entry
+	// in `entries`.
+	state := &algorithms.OwnerState{Starting: 0, VerAtStarting: -1, UpcomingVers: index}
+	versions := make([]uint32, 0, len(entries))
+	for _, entry := range entries {
+		ver := state.GreatestVersionAt(entry)
+		if ver == -1 {
+			break
+		}
+		versions = append(versions, uint32(ver))
+	}
+
+	// Compute the full set of required versions that we'll need to provide VRF
+	// outputs, VRF proofs, and value commitments for.
+	accumulated := make(map[uint32]struct{})
+	accumulated[0] = struct{}{}
+	for _, ver := range versions {
+		for _, ladder := range math.SearchBinaryLadder(ver, ver, nil, nil) {
+			accumulated[ladder] = struct{}{}
+		}
+	}
+	accumulatedSorted := make([]uint32, 0, len(accumulated))
+	for ver := range accumulated {
+		accumulatedSorted = append(accumulatedSorted, ver)
+	}
+	slices.Sort(accumulatedSorted)
+
+	// Compute the VRF output and proof for all required versions.
+	vrfOutputs := make([][]byte, 0, len(accumulatedSorted))
+	binaryLadder := make([]structs.BinaryLadderStep, len(accumulatedSorted))
+	for i, ver := range accumulatedSorted {
+		vrfOutput, proof, err := t.computeVrfOutput(req.Label, ver)
+		if err != nil {
+			return nil, err
+		}
+		if int(ver) < len(index) {
+			vrfOutputs = append(vrfOutputs, vrfOutput)
+		}
+		binaryLadder[i] = structs.BinaryLadderStep{Proof: proof}
+	}
+
+	// Search the prefix tree to learn the value commitment for each required
+	// version.
+	prefixTree := prefix.NewTree(t.config.Suite, t.tx.PrefixStore())
+	results, err := prefixTree.Search([]prefix.PrefixSearch{{
+		Version:    n,
+		VrfOutputs: vrfOutputs,
+	}})
+	if err != nil {
+		return nil, err
+	}
+	for i, commitment := range results[0].Commitments {
+		binaryLadder[i].Commitment = commitment
+	}
+
+	// Finish owner initialization and output the completed proof.
+	if _, err := monitor.OwnerInit(req.Start, versions); err != nil {
+		return nil, err
+	}
+	combinedProof, err := provider.Output(n, nP, m)
+	if err != nil {
+		return nil, err
+	}
+
+	return &structs.OwnerInitResponse{
+		FullTreeHead: *fth,
+
+		GreatestVersions: versions,
+		BinaryLadder:     binaryLadder,
+		Init:             *combinedProof,
 	}, nil
 }
