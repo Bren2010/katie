@@ -37,7 +37,7 @@ func (os *OwnerState) setStarting(x uint64) {
 	os.UpcomingVers = os.UpcomingVers[idx:]
 }
 
-func (os *OwnerState) greatestVersionAt(x uint64) int {
+func (os *OwnerState) GreatestVersionAt(x uint64) int {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 	return idx + os.VerAtStarting
 }
@@ -259,23 +259,23 @@ func (m *Monitor) InitEntries(starting uint64) ([]uint64, error) {
 // `InitEntries`.
 //
 // Algorithm from the first portion of Section 8.3.
-func (m *Monitor) OwnerInit(starting uint64, vers []uint32) error {
+func (m *Monitor) OwnerInit(starting uint64, vers []uint32) ([]uint64, error) {
 	if m.Owner != nil {
-		return errors.New("label owner state is already initialized")
+		return nil, errors.New("label owner state is already initialized")
 	}
 	xs, err := m.InitEntries(starting)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Verify that the expected number of versions was provided and that each
 	// version is less than or equal to the one prior.
 	if len(vers) > len(xs) {
-		return errors.New("unexpected number of versions provided to owner initialization algorithm")
+		return nil, errors.New("unexpected number of versions provided to owner initialization algorithm")
 	}
 	for i := 1; i < len(vers); i++ {
 		if vers[i] > vers[i-1] {
-			return errors.New("unexpected increase in label version")
+			return nil, errors.New("unexpected increase in label version")
 		}
 	}
 
@@ -286,16 +286,16 @@ func (m *Monitor) OwnerInit(starting uint64, vers []uint32) error {
 		if i < len(vers) {
 			res, err := m.provider.GetSearchBinaryLadder(x, vers[i], false)
 			if err != nil {
-				return err
+				return nil, err
 			} else if res != 0 {
-				return errors.New("binary ladder inconsistent with expected greatest version of label")
+				return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
 			}
 		} else {
 			res, err := m.provider.GetSearchBinaryLadder(x, 0, false)
 			if err != nil {
-				return err
+				return nil, err
 			} else if res != -1 {
-				return errors.New("binary ladder inconsistent with expected greatest version of label")
+				return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
 			}
 		}
 	}
@@ -307,7 +307,7 @@ func (m *Monitor) OwnerInit(starting uint64, vers []uint32) error {
 	}
 	m.Owner = &OwnerState{starting, verAtStarting, nil}
 
-	return nil
+	return xs, nil
 }
 
 // ownerMonitor performs a depth-first walk of every unexpired distinguished log
@@ -345,7 +345,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) error {
 	}
 
 	// If a stop condition has been reached, stop.
-	ver := m.Owner.greatestVersionAt(x)
+	ver := m.Owner.GreatestVersionAt(x)
 	if m.provider.StopCondition(x, ver) {
 		return nil
 	}

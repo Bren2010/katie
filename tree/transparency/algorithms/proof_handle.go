@@ -154,7 +154,7 @@ func (rph *ReceivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 
 	// Verify that proof matches what we'd expect of a proper monitoring binary
 	// ladder (correct number of entries, all showing inclusion).
-	ladder := math.MonitoringBinaryLadder(ver, rph.tracker.MonitoringMap(x))
+	ladder := math.MonitoringBinaryLadder(ver)
 	if len(proof.Results) != len(ladder) {
 		return nil, errors.New("unexpected number of results present in prefix proof")
 	}
@@ -364,7 +364,7 @@ func (pph *ProducedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 	if err != nil {
 		return nil, err
 	}
-	ladder := math.MonitoringBinaryLadder(ver, pph.tracker.MonitoringMap(x)) // TODO: This is never populated with anything.
+	ladder := math.MonitoringBinaryLadder(ver)
 	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: ladder})
 	return entry.PrefixTree, nil
 }

@@ -206,7 +206,7 @@ func TestOwnerInit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = monitor.OwnerInit(87, vec.vers)
+		_, err = monitor.OwnerInit(87, vec.vers)
 
 		if err := handle.Verify(vec.requests, vec.searchLadders, nil, nil); err != nil {
 			t.Fatal(err)

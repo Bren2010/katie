@@ -33,7 +33,7 @@ func TestSearchBinaryLadder(t *testing.T) {
 }
 
 func TestMonitoringBinaryLadder(t *testing.T) {
-	ladder := fmt.Sprint(MonitoringBinaryLadder(9, nil))
+	ladder := fmt.Sprint(MonitoringBinaryLadder(9))
 	if ladder != "[0 1 3 7 9]" {
 		t.Fatalf("unexpected output: %v", ladder)
 	}

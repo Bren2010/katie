@@ -74,11 +74,11 @@ func SearchBinaryLadder(
 //
 // `t` is the target version of the label. `leftInclusion` contains versions
 // where an inclusion proof was already provided to the left.
-func MonitoringBinaryLadder(t uint32, leftInclusion map[uint32]struct{}) []uint32 {
+func MonitoringBinaryLadder(t uint32) []uint32 {
 	out := make([]uint32, 0)
 
 	for _, v := range baseBinaryLadder(t) {
-		if _, ok := leftInclusion[v]; !ok && v <= t {
+		if v <= t {
 			out = append(out, v)
 		}
 	}

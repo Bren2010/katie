@@ -2,7 +2,6 @@ package algorithms
 
 import (
 	"github.com/Bren2010/katie/tree/prefix"
-	"github.com/Bren2010/katie/tree/transparency/math"
 )
 
 type posAndVersions struct {
@@ -66,23 +65,6 @@ func (vt *versionTracker) SearchMaps(x uint64, omit bool) (leftInclusion, rightN
 		if entry.pos > x {
 			for _, ver := range entry.vers {
 				rightNonInclusion[ver] = struct{}{}
-			}
-		}
-	}
-	return
-}
-
-func (vt *versionTracker) MonitoringMap(x uint64) (leftInclusion map[uint32]struct{}) {
-	parents := make(map[uint64]struct{})
-	for _, parent := range math.LeftDirectPath(x) {
-		parents[parent] = struct{}{}
-	}
-
-	leftInclusion = make(map[uint32]struct{})
-	for _, entry := range vt.inclusion {
-		if _, ok := parents[entry.pos]; ok {
-			for _, ver := range entry.vers {
-				leftInclusion[ver] = struct{}{}
 			}
 		}
 	}
