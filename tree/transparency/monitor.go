@@ -13,8 +13,8 @@ import (
 // verifyEntries verifies that the monitoring map entries presented in a request
 // are valid. It returns the contact monitoring state.
 func verifyEntries(entries []structs.MonitorMapEntry, index []uint64, n uint64) (map[uint64]uint32, error) {
-	// Verify in ascending order by `position` and `version`, and that no
-	// `position` or `version` is duplicate.
+	// Verify that `entries` is in ascending order by both `position` and
+	// `version`, and that no `position` or `version` is duplicate.
 	for i := 1; i < len(entries); i++ {
 		if entries[i-1].Position >= entries[i].Position {
 			return nil, errors.New("monitoring map is not sorted by position")
@@ -23,8 +23,8 @@ func verifyEntries(entries []structs.MonitorMapEntry, index []uint64, n uint64) 
 		}
 	}
 
-	// Verify that each `position` is on the direct path of the first log entry
-	// to contain the associated `version` of the label.
+	// Verify that each `position` is on the (right) direct path of the first
+	// log entry to contain the associated `version` of the label.
 	ptrs := make(map[uint64]uint32)
 	for _, entry := range entries {
 		if int(entry.Version) >= len(index) {

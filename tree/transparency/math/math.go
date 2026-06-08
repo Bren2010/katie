@@ -134,7 +134,7 @@ func UpdateView(n uint64, m *uint64) []uint64 {
 		out = append(out, RightDirectPath(*m-1, n)...)
 	}
 
-	for out[len(out)-1] != n-1 {
+	for len(out) > 0 && out[len(out)-1] != n-1 {
 		out = append(out, Right(out[len(out)-1], n))
 	}
 
