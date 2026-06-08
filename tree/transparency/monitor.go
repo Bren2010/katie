@@ -204,7 +204,12 @@ func (t *Tree) OwnerInit(req *structs.OwnerInitRequest) (*structs.OwnerInitRespo
 	}
 	// Fetch the VRF proof and value commitment for all versions that may appear
 	// in a binary ladder for any version in `versions`.
-	binaryLadder, err := t.getBinaryLadder(req.Label, allLadderVersions(versions), len(op.index)-1, op.n)
+	binaryLadder, err := t.getBinaryLadder(
+		req.Label,
+		allLadderVersions(versions),
+		state.GreatestVersionAt(req.Start),
+		op.n,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package transparency
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -81,4 +82,59 @@ func TestContactMonitor(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifyContactMonitorResponse(t, res, 2)
+}
+
+func verifyOwnerInitResponse(
+	t *testing.T,
+	res *structs.OwnerInitResponse,
+	greatestVers []uint32,
+) {
+	if res.FullTreeHead.TreeHead == nil {
+		t.Fatal("tree head not provided")
+	} else if !slices.Equal(res.GreatestVersions, greatestVers) {
+		t.Fatal("unexpected greatest versions provided")
+	}
+
+	ladder := allLadderVersions(greatestVers)
+	if len(res.BinaryLadder) != len(ladder) {
+		t.Fatal("unexpected number of binary ladder steps provided")
+	}
+	for i, ver := range ladder {
+		commitmentExpected := ver <= greatestVers[len(greatestVers)-1]
+		if commitmentExpected && res.BinaryLadder[i].Commitment == nil {
+			t.Fatal("commitment not provided when expected")
+		} else if !commitmentExpected && len(res.BinaryLadder[i].Commitment) > 0 {
+			t.Fatal("commitment provided when not expected")
+		}
+	}
+
+	if len(res.Init.PrefixProofs) != len(greatestVers) {
+		t.Fatal("unexpected number of prefix proofs provided")
+	}
+}
+
+func TestOwnerInit(t *testing.T) {
+	tree, labels := generateRandomTree(t)
+
+	// Rejects non-distinguished starting log entry.
+	_, err := tree.OwnerInit(&structs.OwnerInitRequest{Label: labels[0], Start: 2})
+	if err.Error() != "requested starting position is not distinguished" {
+		t.Fatal(err)
+	}
+
+	// Accepts distinguished log entry 0, and restricts data provided to
+	// versions that existed at that point.
+	res, err := tree.OwnerInit(&structs.OwnerInitRequest{Label: labels[0], Start: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyOwnerInitResponse(t, res, []uint32{0})
+
+	// Accepts distinguished log entry 3, and restricts data provided to
+	// versions that existed at that point.
+	res, err = tree.OwnerInit(&structs.OwnerInitRequest{Label: labels[0], Start: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyOwnerInitResponse(t, res, []uint32{3})
 }
