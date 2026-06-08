@@ -138,6 +138,15 @@ func (t *Tree) startMonitor(last *uint64, label []byte) (*monitorOp, error) {
 		index:   index,
 		monitor: monitor,
 		finish: func() (*structs.FullTreeHead, *structs.CombinedTreeProof, error) {
+			for ver := range handle.RequiredVersions() {
+				vrfOutput, _, err := t.computeVrfOutput(label, ver)
+				if err != nil {
+					return nil, nil, err
+				} else if err := handle.AddVersion(ver, vrfOutput); err != nil {
+					return nil, nil, err
+				}
+			}
+
 			proof, err := provider.Output(n, nP, m)
 			if err != nil {
 				return nil, nil, err

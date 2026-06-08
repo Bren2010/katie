@@ -159,8 +159,9 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 		vrfOutput, proof, err := t.computeVrfOutput(req.Label, ver)
 		if err != nil {
 			return nil, err
+		} else if err := handle.AddVersion(ver, vrfOutput); err != nil {
+			return nil, err
 		}
-		handle.AddVersion(ver, vrfOutput, nil)
 		steps[i] = structs.BinaryLadderStep{Proof: proof}
 	}
 

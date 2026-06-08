@@ -30,10 +30,6 @@ func addVersion(
 }
 
 type ProofHandle interface {
-	// AddVersion adds the VRF output and commitment corresponding to a version
-	// of a label to the proofHandle.
-	AddVersion(ver uint32, vrfOutput, commitment []byte) error
-
 	// GetTimestamp takes as input the position of a log entry and returns the
 	// timestamp of the log entry.
 	GetTimestamp(x uint64) (uint64, error)
@@ -93,6 +89,8 @@ func NewReceivedProofHandle(cs suites.CipherSuite, inner structs.CombinedTreePro
 	}
 }
 
+// AddVersion adds the VRF output and commitment corresponding to a version of a
+// label to the ReceivedProofHandle.
 func (rph *ReceivedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
 	return addVersion(rph.cs, rph.versions, ver, vrfOutput, commitment)
 }
@@ -280,6 +278,28 @@ func NewProducedProofHandle(
 	}
 }
 
+// RequiredVersions returns the set of versions for which AddVersion must be
+// called with the corresponding VRF output for Output to return successfully.
+func (pph *ProducedProofHandle) RequiredVersions() map[uint32]struct{} {
+	accumulator := make(map[uint32]struct{})
+
+	for _, proof := range pph.proofs {
+		for _, ver := range proof.vers {
+			accumulator[ver] = struct{}{}
+		}
+	}
+
+	return accumulator
+}
+
+// AddVersion adds the VRF output corresponding to a version of a label to the
+// ProducedProofHandle.
+func (pph *ProducedProofHandle) AddVersion(ver uint32, vrfOutput []byte) error {
+	return addVersion(pph.cs, pph.versions, ver, vrfOutput, nil)
+}
+
+// GetCommitment returns the commitment associated with the requested version of
+// the label, or nil if it is not known.
 func (pph *ProducedProofHandle) GetCommitment(ver uint32) []byte {
 	return pph.versions[ver].Commitment
 }
@@ -315,10 +335,6 @@ func (pph *ProducedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error)
 	pph.logEntries[x] = *entry
 
 	return entry, nil
-}
-
-func (pph *ProducedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
-	return addVersion(pph.cs, pph.versions, ver, vrfOutput, commitment)
 }
 
 func (pph *ProducedProofHandle) GetTimestamp(x uint64) (uint64, error) {
