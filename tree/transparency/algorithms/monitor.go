@@ -138,6 +138,13 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint3
 	for _, parent := range math.RightDirectPath(x, m.treeSize) {
 		inspect = append(inspect, parent)
 		if stop != nil && *stop == parent {
+			// If the Contact Monitoring operation is being executed in the
+			// context of an Owner Monitoring operation, and the given log entry
+			// is equal to or to the right of the owner's `start` position, skip
+			// inspecting the final distinguished log entry.
+			if m.Owner != nil && x >= m.Owner.Starting {
+				inspect = inspect[:len(inspect)-1]
+			}
 			break
 		}
 	}

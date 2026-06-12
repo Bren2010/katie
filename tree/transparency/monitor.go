@@ -243,6 +243,10 @@ func (t *Tree) OwnerMonitor(req *structs.OwnerMonitorRequest) (*structs.OwnerMon
 	if err != nil {
 		return nil, err
 	}
+	// Verify that `Start` is less than the size of the tree.
+	if req.Start >= t.treeHead.TreeSize {
+		return nil, errors.New("advertised starting position is greater than tree size")
+	}
 	// Verify that `GreatestVersion` is less than or equal to the greatest known
 	// version.
 	if int(req.GreatestVersion) >= len(op.index) {
@@ -250,10 +254,7 @@ func (t *Tree) OwnerMonitor(req *structs.OwnerMonitorRequest) (*structs.OwnerMon
 	}
 
 	op.monitor.Contact = &algorithms.ContactState{Ptrs: ptrs}
-	op.monitor.Owner = &algorithms.OwnerState{
-		VerAtStarting: -1,
-		UpcomingVers:  op.index[:req.GreatestVersion+1],
-	}
+	op.monitor.Owner = &algorithms.OwnerState{VerAtStarting: -1, UpcomingVers: op.index}
 	op.monitor.Owner.SetStarting(req.Start)
 
 	// Verify that `GreatestVersion` is greater than or equal to the greatest
@@ -261,6 +262,11 @@ func (t *Tree) OwnerMonitor(req *structs.OwnerMonitorRequest) (*structs.OwnerMon
 	if int(req.GreatestVersion) < op.monitor.Owner.VerAtStarting {
 		return nil, errors.New("version advertised is less than version at starting position")
 	}
+
+	// Remove any versions that aren't known to the user from `UpcomingVers`.
+	// This ensures that the stopping condition is followed.
+	end := int(req.GreatestVersion) - op.monitor.Owner.VerAtStarting
+	op.monitor.Owner.UpcomingVers = op.monitor.Owner.UpcomingVers[:end]
 
 	if err := op.monitor.ContactMonitor(); err != nil {
 		return nil, err
@@ -276,5 +282,4 @@ func (t *Tree) OwnerMonitor(req *structs.OwnerMonitorRequest) (*structs.OwnerMon
 		FullTreeHead: *fth,
 		Monitor:      *combinedProof,
 	}, nil
-	// TODO: Do we verify that `Start` is an unexpired distinguished log entry?
 }
