@@ -70,7 +70,7 @@ func (t *Tree) putIndex(label []byte, index []uint64) error {
 
 // getVersion returns the commitment opening and the value of the requested
 // label-version pair.
-func (t *Tree) getVersion(label []byte, ver uint32) (*structs.LabelValue, error) {
+func (t *Tree) getVersion(label []byte, ver uint32) (*structs.OpeningAndValue, error) {
 	raw, err := t.tx.GetVersion(label, ver)
 	if err != nil {
 		return nil, err
@@ -79,10 +79,10 @@ func (t *Tree) getVersion(label []byte, ver uint32) (*structs.LabelValue, error)
 		// SearchResponse doesn't end up getting serialized wrong when a search
 		// produces a non-inclusion proof.
 		size := t.config.Suite.CommitmentOpeningSize()
-		return &structs.LabelValue{Opening: make([]byte, size)}, nil
+		return &structs.OpeningAndValue{Opening: make([]byte, size)}, nil
 	}
 	buf := bytes.NewBuffer(raw)
-	labelValue, err := structs.NewLabelValue(t.config.Public(), buf)
+	labelValue, err := structs.NewOpeningAndValue(t.config.Public(), buf)
 	if err != nil {
 		return nil, err
 	} else if buf.Len() != 0 {
@@ -97,7 +97,7 @@ func (t *Tree) putVersion(label []byte, ver uint32, value structs.UpdateValue) (
 	opening := commitments.GenerateOpening(t.config.Suite)
 
 	// Serialize opening and UpdateValue structure. Write to database.
-	labelValue, err := structs.Marshal(&structs.LabelValue{Opening: opening, Value: value})
+	labelValue, err := structs.Marshal(&structs.OpeningAndValue{Opening: opening, Value: value})
 	if err != nil {
 		return nil, err
 	} else if err := t.tx.PutVersion(label, ver, labelValue); err != nil {

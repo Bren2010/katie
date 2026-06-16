@@ -162,12 +162,12 @@ func (bls *BinaryLadderStep) Marshal(buf *bytes.Buffer) error {
 	return nil
 }
 
-type LabelValue struct {
+type OpeningAndValue struct {
 	Opening []byte
 	Value   UpdateValue
 }
 
-func NewLabelValue(config *PublicConfig, buf *bytes.Buffer) (*LabelValue, error) {
+func NewOpeningAndValue(config *PublicConfig, buf *bytes.Buffer) (*OpeningAndValue, error) {
 	opening := make([]byte, config.Suite.CommitmentOpeningSize())
 	if _, err := io.ReadFull(buf, opening); err != nil {
 		return nil, err
@@ -176,10 +176,10 @@ func NewLabelValue(config *PublicConfig, buf *bytes.Buffer) (*LabelValue, error)
 	if err != nil {
 		return nil, err
 	}
-	return &LabelValue{Opening: opening, Value: *value}, nil
+	return &OpeningAndValue{Opening: opening, Value: *value}, nil
 }
 
-func (lv *LabelValue) Marshal(buf *bytes.Buffer) error {
-	buf.Write(lv.Opening)
-	return lv.Value.Marshal(buf)
+func (oav *OpeningAndValue) Marshal(buf *bytes.Buffer) error {
+	buf.Write(oav.Opening)
+	return oav.Value.Marshal(buf)
 }

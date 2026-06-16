@@ -134,20 +134,20 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 	// Determine which versions we will need VRF outputs for, and also load the
 	// target version of the label.
 	var (
-		ladder     []uint32
-		labelValue *structs.LabelValue
+		ladder          []uint32
+		openingAndValue *structs.OpeningAndValue
 	)
 	if req.Version == nil {
 		if greatest < 0 {
 			ladder = []uint32{0}
-			labelValue, err = t.getVersion(req.Label, 0)
+			openingAndValue, err = t.getVersion(req.Label, 0)
 		} else {
 			ladder = math.SearchBinaryLadder(uint32(greatest), uint32(greatest), nil, nil)
-			labelValue, err = t.getVersion(req.Label, uint32(greatest))
+			openingAndValue, err = t.getVersion(req.Label, uint32(greatest))
 		}
 	} else {
 		ladder = math.SearchBinaryLadder(*req.Version, *req.Version, nil, nil)
-		labelValue, err = t.getVersion(req.Label, *req.Version)
+		openingAndValue, err = t.getVersion(req.Label, *req.Version)
 	}
 	if err != nil {
 		return nil, err
@@ -213,8 +213,8 @@ func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, erro
 		FullTreeHead: *fth,
 
 		Version: outputVer,
-		Opening: labelValue.Opening,
-		Value:   labelValue.Value,
+		Opening: openingAndValue.Opening,
+		Value:   openingAndValue.Value,
 
 		BinaryLadder: steps,
 		Search:       *combinedProof,
