@@ -247,9 +247,9 @@ func (t *Tree) OwnerMonitor(req *structs.OwnerMonitorRequest) (*structs.OwnerMon
 	if req.Start >= t.treeHead.TreeSize {
 		return nil, errors.New("advertised starting position is greater than tree size")
 	}
-	// Verify that `GreatestVersion` is less than or equal to the greatest known
-	// version.
-	if int(req.GreatestVersion) >= len(op.index) {
+	// Verify that `GreatestVersion` is either absent, or less than or equal to
+	// the greatest version of the label.
+	if req.GreatestVersion != nil && int(*req.GreatestVersion) >= len(op.index) {
 		return nil, errors.New("version advertised is greater than known greatest version")
 	}
 
@@ -257,15 +257,20 @@ func (t *Tree) OwnerMonitor(req *structs.OwnerMonitorRequest) (*structs.OwnerMon
 	op.monitor.Owner = &algorithms.OwnerState{VerAtStarting: -1, UpcomingVers: op.index}
 	op.monitor.Owner.SetStarting(req.Start)
 
-	// Verify that `GreatestVersion` is greater than or equal to the greatest
-	// version of the label that existed at `start`.
-	if int(req.GreatestVersion) < op.monitor.Owner.VerAtStarting {
-		return nil, errors.New("version advertised is less than version at starting position")
+	// Verify that, if some version of the label existed at `start`, that
+	// `GreatestVersion` is present and greater than or equal to that version.
+	if op.monitor.Owner.VerAtStarting > -1 {
+		if req.GreatestVersion == nil || int(*req.GreatestVersion) < op.monitor.Owner.VerAtStarting {
+			return nil, errors.New("version advertised is less than version at starting position")
+		}
 	}
 
 	// Remove any versions that aren't known to the user from `UpcomingVers`.
 	// This ensures that the stopping condition is followed.
-	end := int(req.GreatestVersion) - op.monitor.Owner.VerAtStarting
+	end := 0
+	if req.GreatestVersion != nil {
+		end = int(*req.GreatestVersion) - op.monitor.Owner.VerAtStarting
+	}
 	op.monitor.Owner.UpcomingVers = op.monitor.Owner.UpcomingVers[:end]
 
 	if err := op.monitor.ContactMonitor(); err != nil {

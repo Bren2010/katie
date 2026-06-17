@@ -162,20 +162,23 @@ func TestOwnerMonitor(t *testing.T) {
 	}
 
 	// Rejects `greatest_version` greater than greatest known version.
-	_, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: 200})
+	ver := uint32(200)
+	_, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
 	if err.Error() != "version advertised is greater than known greatest version" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects `greatest_version` less than greatest version at starting
 	// position.
-	_, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: 0})
+	ver = 0
+	_, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
 	if err.Error() != "version advertised is less than version at starting position" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Continues to rightmost distinguished log entry if possible.
-	res, err := tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: 6})
+	ver = 6
+	res, err := tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res.Monitor.PrefixProofs) != 2 {
@@ -184,7 +187,8 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// Stops before reaching a log entry if the version it contains is greater
 	// than the user knows about.
-	res, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: 1})
+	ver = 1
+	res, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res.Monitor.PrefixProofs) != 1 {
@@ -193,11 +197,12 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// Distinguished log entry is omitted from contact monitoring if it's to the
 	// right of the owner's starting position.
+	ver = 6
 	res, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{
 		Label:           labels[0],
 		Entries:         []structs.MonitorMapEntry{{Position: 2, Version: 2}},
 		Start:           0,
-		GreatestVersion: 6,
+		GreatestVersion: &ver,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +216,7 @@ func TestOwnerMonitor(t *testing.T) {
 		Label:           labels[0],
 		Entries:         []structs.MonitorMapEntry{{Position: 2, Version: 2}},
 		Start:           6,
-		GreatestVersion: 6,
+		GreatestVersion: &ver,
 	})
 	if err != nil {
 		t.Fatal(err)

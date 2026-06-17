@@ -271,7 +271,7 @@ type OwnerMonitorRequest struct {
 	Label           []byte
 	Entries         []MonitorMapEntry
 	Start           uint64
-	GreatestVersion uint32
+	GreatestVersion *uint32
 }
 
 func NewOwnerMonitorRequest(buf *bytes.Buffer) (*OwnerMonitorRequest, error) {
@@ -291,7 +291,7 @@ func NewOwnerMonitorRequest(buf *bytes.Buffer) (*OwnerMonitorRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	greatestVersion, err := readNumeric[uint32](buf)
+	greatestVersion, err := readOptionalNumeric[uint32](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +306,7 @@ func (omr *OwnerMonitorRequest) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	writeNumeric(buf, omr.Start)
-	writeNumeric(buf, omr.GreatestVersion)
+	writeOptionalNumeric(buf, omr.GreatestVersion)
 	return nil
 }
 
@@ -335,4 +335,106 @@ func (omr *OwnerMonitorResponse) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	return omr.Monitor.Marshal(buf)
+}
+
+type UpdateRequest struct {
+	Last *uint64
+
+	Label           []byte
+	GreatestVersion *uint32
+	Values          []LabelValue
+}
+
+func NewUpdateRequest(buf *bytes.Buffer) (*UpdateRequest, error) {
+	last, err := readOptionalNumeric[uint64](buf)
+	if err != nil {
+		return nil, err
+	}
+	label, err := readBytes[uint8](buf)
+	if err != nil {
+		return nil, err
+	}
+	greatestVersion, err := readOptionalNumeric[uint32](buf)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := readFuncSlice[uint8](buf, NewLabelValue)
+	if err != nil {
+		return nil, err
+	}
+	return &UpdateRequest{last, label, greatestVersion, entries}, nil
+}
+
+func (ur *UpdateRequest) Marshal(buf *bytes.Buffer) error {
+	writeOptionalNumeric(buf, ur.Last)
+	if err := writeBytes[uint8](buf, ur.Label, "label"); err != nil {
+		return err
+	}
+	writeOptionalNumeric(buf, ur.GreatestVersion)
+	return writeMarshalSlice[uint8](buf, ur.Values, "label value")
+}
+
+type UpdateResponse struct {
+	FullTreeHead FullTreeHead
+
+	Position uint64
+	Values   []LabelValue
+	Info     []UpdateInfo
+
+	BinaryLadder []BinaryLadderStep
+	Update       CombinedTreeProof
+}
+
+func NewUpdateResponse(config *PublicConfig, buf *bytes.Buffer) (*UpdateResponse, error) {
+	fth, err := NewFullTreeHead(config, buf)
+	if err != nil {
+		return nil, err
+	}
+
+	position, err := readNumeric[uint64](buf)
+	if err != nil {
+		return nil, err
+	}
+	values, err := readFuncSlice[uint8](buf, NewLabelValue)
+	if err != nil {
+		return nil, err
+	}
+	info, err := readFuncSlice[uint8](buf, func(buf *bytes.Buffer) (*UpdateInfo, error) {
+		return NewUpdateInfo(config, buf)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	ladder, err := readFuncSlice[uint8](buf, func(buf *bytes.Buffer) (*BinaryLadderStep, error) {
+		return NewBinaryLadderStep(config.Suite, buf)
+	})
+	if err != nil {
+		return nil, err
+	}
+	update, err := NewCombinedTreeProof(config.Suite, buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return &UpdateResponse{*fth, position, values, info, ladder, *update}, nil
+}
+
+func (ur *UpdateResponse) Marshal(buf *bytes.Buffer) error {
+	if err := ur.FullTreeHead.Marshal(buf); err != nil {
+		return err
+	}
+
+	writeNumeric(buf, ur.Position)
+	if err := writeMarshalSlice[uint8](buf, ur.Values, "label value"); err != nil {
+		return err
+	}
+	if err := writeMarshalSlice[uint8](buf, ur.Info, "update info"); err != nil {
+		return err
+	}
+
+	if err := writeMarshalSlice[uint8](buf, ur.BinaryLadder, "binary ladder"); err != nil {
+		return err
+	}
+	return ur.Update.Marshal(buf)
 }

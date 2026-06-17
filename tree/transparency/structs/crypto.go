@@ -183,3 +183,41 @@ func (oav *OpeningAndValue) Marshal(buf *bytes.Buffer) error {
 	buf.Write(oav.Opening)
 	return oav.Value.Marshal(buf)
 }
+
+type LabelValue struct {
+	Value []byte
+}
+
+func NewLabelValue(buf *bytes.Buffer) (*LabelValue, error) {
+	value, err := readBytes[uint32](buf)
+	if err != nil {
+		return nil, err
+	}
+	return &LabelValue{Value: value}, nil
+}
+
+func (lv *LabelValue) Marshal(buf *bytes.Buffer) error {
+	return writeBytes[uint32](buf, lv.Value, "label value")
+}
+
+type UpdateInfo struct {
+	Opening []byte
+	Suffix  UpdateSuffix
+}
+
+func NewUpdateInfo(config *PublicConfig, buf *bytes.Buffer) (*UpdateInfo, error) {
+	opening := make([]byte, config.Suite.CommitmentOpeningSize())
+	if _, err := io.ReadFull(buf, opening); err != nil {
+		return nil, err
+	}
+	suffix, err := NewUpdateSuffix(config, buf)
+	if err != nil {
+		return nil, err
+	}
+	return &UpdateInfo{Opening: opening, Suffix: *suffix}, nil
+}
+
+func (ui *UpdateInfo) Marshal(buf *bytes.Buffer) error {
+	buf.Write(ui.Opening)
+	return ui.Suffix.Marshal(buf)
+}
