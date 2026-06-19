@@ -29,6 +29,8 @@ type OwnerState struct {
 	UpcomingVers []uint64
 }
 
+// SetStarting sets the owner's starting position to be `x`, consuming any
+// values from `UpcomingVers` and incrementing `VerAtStarting` as appropriate.
 func (os *OwnerState) SetStarting(x uint64) {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 
@@ -37,9 +39,27 @@ func (os *OwnerState) SetStarting(x uint64) {
 	os.UpcomingVers = os.UpcomingVers[idx:]
 }
 
+// GreatestVersionAt returns the greatest version of the label that would've
+// been expected to exist at `x`, or -1 if the label didn't exist yet.
+//
+// This is not accurate for `x` values that are to the left of `Starting`.
 func (os *OwnerState) GreatestVersionAt(x uint64) int {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 	return idx + os.VerAtStarting
+}
+
+// GreatestVersion returns the absolute greatest version of the label known.
+func (os *OwnerState) GreatestVersion() int {
+	return os.VerAtStarting + len(os.UpcomingVers)
+}
+
+// LastUpdate returns the position of the last known update, or `Starting` if
+// there have been no recent updates.
+func (os *OwnerState) LastUpdate() uint64 {
+	if len(os.UpcomingVers) > 0 {
+		return os.UpcomingVers[len(os.UpcomingVers)-1]
+	}
+	return os.Starting
 }
 
 func (os *OwnerState) Clone() *OwnerState {

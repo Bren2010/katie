@@ -1,14 +1,10 @@
-package algorithms
+package math
 
-import (
-	"testing"
-
-	"github.com/Bren2010/katie/tree/transparency/math"
-)
+import "testing"
 
 func TestSearchMaps(t *testing.T) {
 	var (
-		tracker versionTracker
+		tracker VersionTracker
 
 		target       uint32 = 5 // Target version of label
 		greatest1000 uint32 = 3 // Greatest version present at log entry 1000
@@ -19,7 +15,7 @@ func TestSearchMaps(t *testing.T) {
 	if len(left) != 0 || len(right) != 0 {
 		t.Fatal("expected left and right maps")
 	}
-	ladder := math.SearchBinaryLadder(target, greatest1000, left, right)
+	ladder := SearchBinaryLadder(target, greatest1000, left, right)
 	t.Logf("pos=1000 greatest=%v ladder=%v", greatest1000, ladder)
 	tracker.AddLadder(1000, true, int(greatest1000), ladder)
 
@@ -27,7 +23,7 @@ func TestSearchMaps(t *testing.T) {
 	if len(left) != 3 || len(right) != 0 {
 		t.Fatal("unexpected left and right maps")
 	}
-	ladder = math.SearchBinaryLadder(target, greatest2000, left, right)
+	ladder = SearchBinaryLadder(target, greatest2000, left, right)
 	t.Logf("pos=2000 greatest=%v ladder=%v", greatest2000, ladder)
 	tracker.AddLadder(2000, true, int(greatest2000), ladder)
 

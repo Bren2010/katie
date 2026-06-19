@@ -123,11 +123,14 @@ func (dp *DataProvider) GetMonitoringBinaryLadder(x uint64, ver uint32) error {
 	return addPrefixTree(dp.prefixTrees, x, root)
 }
 
-func (dp *DataProvider) GetInclusionProof(x uint64, ver uint32) error {
+func (dp *DataProvider) GetInclusionProof(x uint64, vers []uint32) error {
+	if len(vers) == 0 {
+		return nil
+	}
 	if _, err := dp.GetTimestamp(x); err != nil {
 		return err
 	}
-	root, err := dp.handle.GetInclusionProof(x, ver)
+	root, err := dp.handle.GetInclusionProof(x, vers)
 	if err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
+	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
@@ -132,7 +133,7 @@ func (ph *ProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, 
 	return make([]byte, 32), nil
 }
 
-func (ph *ProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
+func (ph *ProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]byte, error) {
 	ph.inclusionProofs = append(ph.inclusionProofs, x)
 	return make([]byte, 32), nil
 }
@@ -151,5 +152,8 @@ func (ph *ProofHandle) Finish() ([][]byte, error) {
 	panic("not implemented")
 }
 func (ph *ProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
+	panic("not implemented")
+}
+func (ph *ProofHandle) Tracker() *math.VersionTracker {
 	panic("not implemented")
 }

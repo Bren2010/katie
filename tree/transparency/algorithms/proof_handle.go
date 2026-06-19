@@ -46,10 +46,10 @@ type ProofHandle interface {
 	// tree root value.
 	GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error)
 
-	// GetInclusionProof takes as input the position of a log entry and the
-	// target version to get an inclusion proof for. It returns the prefix tree
-	// root value.
-	GetInclusionProof(x uint64, ver uint32) ([]byte, error)
+	// GetInclusionProof takes as input the position of a log entry and a list
+	// of versions to get inclusion proofs for. It returns the prefix tree root
+	// value.
+	GetInclusionProof(x uint64, vers []uint32) ([]byte, error)
 
 	// GetPrefixTrees returns the prefix tree root values for the log entries at
 	// the given positions. This corresponds to either consuming or producing
@@ -68,6 +68,9 @@ type ProofHandle interface {
 	// StopCondition returns true if the proof is exhausted. This is only used
 	// for owner monitoring, since those proofs are "paginated".
 	StopCondition(x uint64, greatest int) bool
+
+	// Tracker returns the tracker used for version lookup omission.
+	Tracker() *math.VersionTracker
 }
 
 // ReceivedProofHandle implements the proofHandle interface over a
@@ -77,7 +80,7 @@ type ReceivedProofHandle struct {
 	inner structs.CombinedTreeProof
 
 	versions map[uint32]prefix.Entry
-	tracker  versionTracker
+	tracker  math.VersionTracker
 }
 
 func NewReceivedProofHandle(cs suites.CipherSuite, inner structs.CombinedTreeProof) *ReceivedProofHandle {
@@ -182,7 +185,7 @@ func (rph *ReceivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 	return root, nil
 }
 
-func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
+func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]byte, error) {
 	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, errors.New("unexpected number of prefix proofs consumed")
@@ -197,13 +200,17 @@ func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte,
 	}
 
 	// Evaluate the prefix proof and return.
-	entry, ok := rph.versions[ver]
-	if !ok {
-		return nil, errors.New("required version not known")
-	} else if entry.Commitment == nil {
-		return nil, errors.New("commitment not known for required version")
+	entries := make([]prefix.Entry, len(vers))
+	for i, ver := range vers {
+		entry, ok := rph.versions[ver]
+		if !ok {
+			return nil, errors.New("required version not known")
+		} else if entry.Commitment == nil {
+			return nil, errors.New("commitment not known for required version")
+		}
+		entries[i] = entry
 	}
-	root, err := prefix.Evaluate(rph.cs, []prefix.Entry{entry}, &proof)
+	root, err := prefix.Evaluate(rph.cs, entries, &proof)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +249,8 @@ func (rph *ReceivedProofHandle) StopCondition(_ uint64, _ int) bool {
 	return len(rph.inner.PrefixProofs) == 0
 }
 
+func (rph *ReceivedProofHandle) Tracker() *math.VersionTracker { return &rph.tracker }
+
 type requiredProof struct {
 	pos  uint64
 	vers []uint32
@@ -256,7 +265,7 @@ type ProducedProofHandle struct {
 
 	logEntries map[uint64]structs.LogEntry
 	versions   map[uint32]prefix.Entry
-	tracker    versionTracker
+	tracker    math.VersionTracker
 
 	timestamps []uint64
 	proofs     []requiredProof
@@ -385,12 +394,12 @@ func (pph *ProducedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 	return entry.PrefixTree, nil
 }
 
-func (pph *ProducedProofHandle) GetInclusionProof(x uint64, ver uint32) ([]byte, error) {
+func (pph *ProducedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]byte, error) {
 	entry, err := pph.getLogEntry(x)
 	if err != nil {
 		return nil, err
 	}
-	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: []uint32{ver}})
+	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: slices.Clone(vers)})
 	return entry.PrefixTree, nil
 }
 
@@ -469,3 +478,5 @@ func (pph *ProducedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64)
 func (pph *ProducedProofHandle) StopCondition(x uint64, ver int) bool {
 	return len(pph.proofs) >= 25 || pph.greatestAt(x) > ver
 }
+
+func (pph *ProducedProofHandle) Tracker() *math.VersionTracker { return &pph.tracker }
