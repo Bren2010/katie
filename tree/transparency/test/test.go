@@ -113,7 +113,7 @@ func (ph *ProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([
 
 	posVer, ok := ph.versions[x]
 	if !ok {
-		if ver == 0 && omit == false {
+		if ver == 0 {
 			return make([]byte, 32), -1, nil
 		}
 		panic("version not known for position")
@@ -142,6 +142,10 @@ func (ph *ProofHandle) StopCondition(x uint64, ver int) bool {
 	return ph.stopPos > 0 && ph.stopPos <= x
 }
 
+func (ph *ProofHandle) Tracker() *math.VersionTracker {
+	return &math.VersionTracker{}
+}
+
 func (ph *ProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
 	panic("not implemented")
 }
@@ -152,8 +156,5 @@ func (ph *ProofHandle) Finish() ([][]byte, error) {
 	panic("not implemented")
 }
 func (ph *ProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64) (*structs.CombinedTreeProof, error) {
-	panic("not implemented")
-}
-func (ph *ProofHandle) Tracker() *math.VersionTracker {
 	panic("not implemented")
 }

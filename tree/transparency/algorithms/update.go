@@ -42,7 +42,7 @@ func (m *Monitor) nonDistinguishedAncestor(target uint64) (*uint64, error) {
 
 func (m *Monitor) verifyPreviousTree(pos uint64) error {
 	if pos == 0 {
-		return nil
+		panic("unreachable")
 	}
 	greatestVer := m.Owner.GreatestVersion()
 	lastUpdate := m.Owner.LastUpdate()
@@ -64,8 +64,20 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 	if greatestVer >= 0 {
 		tracker := m.provider.handle.Tracker()
 		ladder := math.SearchBinaryLadder(uint32(greatestVer), uint32(greatestVer), nil, nil)
-		tracker.AddLadder(x, true, m.Owner.GreatestVersion(), ladder)
-	} // TODO: Do I need to to parent node instead?
+
+		// Compute version omissions from x itself. This requires looking at
+		// which lookups might've succeeded in a Greatest Version search that
+		// started at x's parent (if any).
+		if x != math.Root(pos) {
+			parent := math.Parent(x, pos)
+			tracker.AddLadder(parent, true, m.Owner.GreatestVersionAt(parent), ladder)
+		}
+		// Compute version omissions from all of x's children. It's not strictly
+		// true that `greatestVer` exists at `x` (in fact, it might not). But
+		// we know we won't do any lookups until `greatestVer` exists, so it
+		// doesn't change the algorithm's output.
+		tracker.AddLadder(x, true, greatestVer, ladder)
+	}
 
 	// Starting from the identified log entry, proceed down the remainder of
 	// the previous tree's frontier from left to right.
