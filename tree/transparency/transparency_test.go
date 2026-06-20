@@ -22,7 +22,7 @@ func generateRandomTree(t *testing.T) (*Tree, [][]byte) {
 		rand.Read(labels[i])
 	}
 
-	tree, err := NewTree(config, store)
+	tree, err := NewTree(config, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

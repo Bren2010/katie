@@ -17,7 +17,7 @@ func TestAddLabel(t *testing.T) {
 		label2 = []byte("other")
 	)
 
-	tree, err := NewTree(test.Config(t), store)
+	tree, err := NewTree(test.Config(t), store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRemoveLabel(t *testing.T) {
 
 	var label = []byte("label")
 
-	tree, err := NewTree(test.Config(t), store)
+	tree, err := NewTree(test.Config(t), store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestRemoveLabelTooSoon(t *testing.T) {
 
 	var label = []byte("label")
 
-	tree, err := NewTree(test.Config(t), store)
+	tree, err := NewTree(test.Config(t), store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestAddRemoveSameLabel(t *testing.T) {
 
 	var label = []byte("label")
 
-	tree, err := NewTree(test.Config(t), store)
+	tree, err := NewTree(test.Config(t), store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

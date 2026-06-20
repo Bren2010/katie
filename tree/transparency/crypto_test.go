@@ -10,7 +10,7 @@ import (
 )
 
 func TestIndexEncoding(t *testing.T) {
-	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore())
+	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestIndexEncoding(t *testing.T) {
 }
 
 func TestPutIndexRejectsNonMonotonic(t *testing.T) {
-	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore())
+	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPutIndexRejectsNonMonotonic(t *testing.T) {
 }
 
 func TestComputeVrfOutput(t *testing.T) {
-	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore())
+	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

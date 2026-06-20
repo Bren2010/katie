@@ -24,7 +24,7 @@ func makeAuditor(t *testing.T) (
 	config, auditorKey := test.ConfigWithAuditor(t)
 	store := memory.NewTransparencyStore()
 
-	tree, err := transparency.NewTree(config, store)
+	tree, err := transparency.NewTree(config, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

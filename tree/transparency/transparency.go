@@ -15,16 +15,33 @@ type LabelValue struct {
 	Value structs.UpdateValue
 }
 
+// UpdateRequest represents a request to modify the tree. When a Transparency
+// Tree is created, it takes as configuration a channel for sending
+// UpdateRequest structures to be applied to the tree, so that they can be
+// received and applied by a singular goroutine.
+type UpdateRequest struct {
+	Requests []LabelValue
+	// Once the requested modifications are made, the log entry where the new
+	// versions were inserted is sent over `Response`. If processing the request
+	// fails, `Response` is closed with no value sent.
+	Response chan<- uint64
+}
+
 // Tree is an implementation of a Transparency Tree that handles all state
 // management, the evaluation of a VRF, and generating/opening commitments.
 type Tree struct {
 	config      structs.PrivateConfig
 	tx          db.TransparencyStore
+	updater     chan<- UpdateRequest
 	treeHead    *structs.TreeHead
 	auditorHead *structs.AuditorTreeHead
 }
 
-func NewTree(config structs.PrivateConfig, tx db.TransparencyStore) (*Tree, error) {
+func NewTree(
+	config structs.PrivateConfig,
+	tx db.TransparencyStore,
+	updater chan<- UpdateRequest,
+) (*Tree, error) {
 	rawTreeHead, rawAuditor, err := tx.GetTreeHead()
 	if err != nil {
 		return nil, err
@@ -56,6 +73,7 @@ func NewTree(config structs.PrivateConfig, tx db.TransparencyStore) (*Tree, erro
 	return &Tree{
 		config:      config,
 		tx:          tx,
+		updater:     updater,
 		treeHead:    treeHead,
 		auditorHead: auditorHead,
 	}, nil

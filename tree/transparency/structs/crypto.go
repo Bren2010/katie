@@ -202,7 +202,7 @@ func (lv *LabelValue) Marshal(buf *bytes.Buffer) error {
 
 type UpdateInfo struct {
 	Opening []byte
-	Suffix  UpdateSuffix
+	UpdateSuffix
 }
 
 func NewUpdateInfo(config *PublicConfig, buf *bytes.Buffer) (*UpdateInfo, error) {
@@ -214,10 +214,10 @@ func NewUpdateInfo(config *PublicConfig, buf *bytes.Buffer) (*UpdateInfo, error)
 	if err != nil {
 		return nil, err
 	}
-	return &UpdateInfo{Opening: opening, Suffix: *suffix}, nil
+	return &UpdateInfo{Opening: opening, UpdateSuffix: *suffix}, nil
 }
 
 func (ui *UpdateInfo) Marshal(buf *bytes.Buffer) error {
 	buf.Write(ui.Opening)
-	return ui.Suffix.Marshal(buf)
+	return ui.UpdateSuffix.Marshal(buf)
 }
