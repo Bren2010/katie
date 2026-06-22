@@ -15,15 +15,22 @@ type LabelValue struct {
 	Value structs.UpdateValue
 }
 
-// UpdateRequest represents a request to modify the tree. When a Transparency
-// Tree is created, it takes as configuration a channel for sending
-// UpdateRequest structures to be applied to the tree, so that they can be
-// received and applied by a singular goroutine.
+// UpdateRequest represents a request create some new versions of a label. When
+// a Transparency Tree is created, it takes as configuration a channel for
+// sending UpdateRequest structures to be applied to the tree, so that these
+// requests can be received and applied by a central goroutine.
+//
+// This goroutine must ensure that only one UpdateRequest per `Label` is
+// processed in a single log entry. Processing multiple UpdateRequests with the
+// same `Label` will cause monitoring failures.
 type UpdateRequest struct {
-	Requests []LabelValue
-	// Once the requested modifications are made, the log entry where the new
-	// versions were inserted is sent over `Response`. If processing the request
-	// fails, `Response` is closed with no value sent.
+	Label  []byte
+	Values []structs.UpdateValue
+
+	// Once the new versions of the label are created, the log entry where the
+	// new versions were inserted is sent over `Response`. If creating the new
+	// versions fails, `Response` is closed with no value sent. This channel
+	// should have a buffer size of 1 to prevent blocking writes.
 	Response chan<- uint64
 }
 
