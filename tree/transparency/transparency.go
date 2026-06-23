@@ -7,9 +7,9 @@ import (
 
 	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
-	"github.com/Bren2010/katie/tree/transparency/auditor/wire"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
+	"github.com/Bren2010/katie/tree/transparency/wire"
 )
 
 type LabelValue struct {

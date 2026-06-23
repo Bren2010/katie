@@ -6,9 +6,9 @@ import (
 	"slices"
 
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
-	"github.com/Bren2010/katie/tree/transparency/auditor/wire"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
+	"github.com/Bren2010/katie/tree/transparency/wire"
 )
 
 func (t *Tree) Update(

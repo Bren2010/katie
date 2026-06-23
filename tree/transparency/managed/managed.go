@@ -4,19 +4,22 @@ import (
 	"context"
 
 	"github.com/Bren2010/katie/db"
-	"github.com/Bren2010/katie/tree/transparency/auditor/wire"
 	"github.com/Bren2010/katie/tree/transparency/structs"
+	"github.com/Bren2010/katie/tree/transparency/wire"
 )
 
 // ManagedLog wraps a Transparency Log implementation and signs new values that
 // are submitted through Update before they are sequenced.
 //
 // To be clear, this code is run by a Service Operator whose Transparency Log is
-// hosted by a Third-Party Manager.
+// hosted by a Third-Party Manager. All operations except Update are direct
+// proxies.
 type ManagedLog struct {
 	log wire.Interface
 	tx  db.ManagedLogStore
 }
+
+var _ wire.Interface = &ManagedLog{}
 
 func NewManagedLog(log wire.Interface, tx db.ManagedLogStore) *ManagedLog {
 	return &ManagedLog{log: log, tx: tx}
