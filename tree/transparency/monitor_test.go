@@ -1,6 +1,7 @@
 package transparency
 
 import (
+	"context"
 	"slices"
 	"testing"
 
@@ -20,45 +21,46 @@ func verifyContactMonitorResponse(
 }
 
 func TestContactMonitor(t *testing.T) {
+	ctx := context.Background()
 	tree, labels := generateRandomTree(t)
 
 	// Verify no position is duplicate.
 	entries := []structs.MonitorMapEntry{{Position: 1, Version: 0}, {Position: 1, Version: 1}}
-	_, err := tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	_, err := tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err.Error() != "monitoring map is not sorted by position" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Verify no version is duplicate.
 	entries = []structs.MonitorMapEntry{{Position: 0, Version: 0}, {Position: 1, Version: 0}}
-	_, err = tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	_, err = tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err.Error() != "monitoring map is not sorted by version" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects versions greater than expected.
 	entries = []structs.MonitorMapEntry{{Position: 0, Version: 700}}
-	_, err = tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	_, err = tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err.Error() != "unexpected version found in monitoring map" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects positions that aren't on the version's direct path.
 	entries = []structs.MonitorMapEntry{{Position: 2, Version: 0}}
-	_, err = tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	_, err = tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err.Error() != "unexpected position found in monitoring map" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects positions that are greater than tree size.
 	entries = []structs.MonitorMapEntry{{Position: 200, Version: 0}}
-	_, err = tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	_, err = tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err.Error() != "unexpected position found in monitoring map" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Accepts empty monitoring map.
-	res, err := tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: nil})
+	res, err := tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ func TestContactMonitor(t *testing.T) {
 	// Accepts monitoring map with one entry where position is equal to where
 	// version was inserted.
 	entries = []structs.MonitorMapEntry{{Position: 2, Version: 2}}
-	res, err = tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	res, err = tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +78,7 @@ func TestContactMonitor(t *testing.T) {
 	// Accepts monitoring map with one entry where position is on right direct
 	// path of where version was inserted.
 	entries = []structs.MonitorMapEntry{{Position: 1, Version: 0}}
-	res, err = tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	res, err = tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func TestContactMonitor(t *testing.T) {
 
 	// Accepts monitoring map with multiple entries.
 	entries = []structs.MonitorMapEntry{{Position: 2, Version: 2}, {Position: 4, Version: 4}}
-	res, err = tree.ContactMonitor(&structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
+	res, err = tree.ContactMonitor(ctx, &structs.ContactMonitorRequest{Label: labels[0], Entries: entries})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,23 +123,24 @@ func verifyOwnerInitResponse(
 }
 
 func TestOwnerInit(t *testing.T) {
+	ctx := context.Background()
 	tree, labels := generateRandomTree(t)
 
 	// Rejects non-distinguished starting log entry.
-	_, err := tree.OwnerInit(&structs.OwnerInitRequest{Label: labels[0], Start: 2})
+	_, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 2})
 	if err.Error() != "requested starting position is not distinguished" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects starting log entry greater than tree size.
-	_, err = tree.OwnerInit(&structs.OwnerInitRequest{Label: labels[0], Start: 200})
+	_, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 200})
 	if err.Error() != "requested starting position is not distinguished" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Accepts distinguished log entry 0, and restricts data provided to
 	// versions that existed at that point.
-	res, err := tree.OwnerInit(&structs.OwnerInitRequest{Label: labels[0], Start: 0})
+	res, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +148,7 @@ func TestOwnerInit(t *testing.T) {
 
 	// Accepts distinguished log entry 3, and restricts data provided to
 	// versions that existed at that point.
-	res, err = tree.OwnerInit(&structs.OwnerInitRequest{Label: labels[0], Start: 3})
+	res, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,17 +156,18 @@ func TestOwnerInit(t *testing.T) {
 }
 
 func TestOwnerMonitor(t *testing.T) {
+	ctx := context.Background()
 	tree, labels := generateRandomTree(t)
 
 	// Rejects `start` greater than tree size.
-	_, err := tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 200})
+	_, err := tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 200})
 	if err.Error() != "advertised starting position is greater than tree size" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects `greatest_version` greater than greatest known version.
 	ver := uint32(200)
-	_, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
+	_, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
 	if err.Error() != "version advertised is greater than known greatest version" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,14 +175,14 @@ func TestOwnerMonitor(t *testing.T) {
 	// Rejects `greatest_version` less than greatest version at starting
 	// position.
 	ver = 0
-	_, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
+	_, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
 	if err.Error() != "version advertised is less than version at starting position" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Continues to rightmost distinguished log entry if possible.
 	ver = 6
-	res, err := tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
+	res, err := tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res.Monitor.PrefixProofs) != 2 {
@@ -188,7 +192,7 @@ func TestOwnerMonitor(t *testing.T) {
 	// Stops before reaching a log entry if the version it contains is greater
 	// than the user knows about.
 	ver = 1
-	res, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
+	res, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res.Monitor.PrefixProofs) != 1 {
@@ -198,7 +202,7 @@ func TestOwnerMonitor(t *testing.T) {
 	// Distinguished log entry is omitted from contact monitoring if it's to the
 	// right of the owner's starting position.
 	ver = 6
-	res, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{
+	res, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{
 		Label:           labels[0],
 		Entries:         []structs.MonitorMapEntry{{Position: 2, Version: 2}},
 		Start:           0,
@@ -212,7 +216,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// Distinguished log entry is not omitted from contact monitoring if it's to
 	// the left of the owner's starting position.
-	res, err = tree.OwnerMonitor(&structs.OwnerMonitorRequest{
+	res, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{
 		Label:           labels[0],
 		Entries:         []structs.MonitorMapEntry{{Position: 2, Version: 2}},
 		Start:           6,

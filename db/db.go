@@ -47,7 +47,14 @@ type TransparencyStore interface {
 	Commit() error
 }
 
+// AuditorStore is the interface that a Third-Party Auditor uses to communicate
+// with its database.
 type AuditorStore interface {
 	GetState() (raw []byte, err error)
 	PutState(raw []byte) error
+}
+
+// ManagedLogStore is the interface that a Service Operator with a Third-Party
+// Manager uses to communicate with its database.
+type ManagedLogStore interface {
 }

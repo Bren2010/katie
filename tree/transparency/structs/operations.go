@@ -374,6 +374,45 @@ func (ur *UpdateRequest) Marshal(buf *bytes.Buffer) error {
 	return writeMarshalSlice[uint8](buf, ur.Values, "label value")
 }
 
+type ManagerUpdateRequest struct {
+	Last *uint64
+
+	Label           []byte
+	GreatestVersion *uint32
+	Values          []UpdateValue
+}
+
+func NewManagerUpdateRequest(config *PublicConfig, buf *bytes.Buffer) (*ManagerUpdateRequest, error) {
+	last, err := readOptionalNumeric[uint64](buf)
+	if err != nil {
+		return nil, err
+	}
+	label, err := readBytes[uint8](buf)
+	if err != nil {
+		return nil, err
+	}
+	greatestVersion, err := readOptionalNumeric[uint32](buf)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := readFuncSlice[uint8](buf, func(buf *bytes.Buffer) (*UpdateValue, error) {
+		return NewUpdateValue(config, buf)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &ManagerUpdateRequest{last, label, greatestVersion, entries}, nil
+}
+
+func (mur *ManagerUpdateRequest) Marshal(buf *bytes.Buffer) error {
+	writeOptionalNumeric(buf, mur.Last)
+	if err := writeBytes[uint8](buf, mur.Label, "label"); err != nil {
+		return err
+	}
+	writeOptionalNumeric(buf, mur.GreatestVersion)
+	return writeMarshalSlice[uint8](buf, mur.Values, "label value")
+}
+
 type UpdateResponse struct {
 	FullTreeHead FullTreeHead
 

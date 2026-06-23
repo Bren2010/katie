@@ -1,6 +1,7 @@
 package transparency
 
 import (
+	"context"
 	"errors"
 	"slices"
 
@@ -156,7 +157,10 @@ func (t *Tree) startMonitor(last *uint64, label []byte) (*monitorOp, error) {
 	}, nil
 }
 
-func (t *Tree) ContactMonitor(req *structs.ContactMonitorRequest) (*structs.ContactMonitorResponse, error) {
+func (t *Tree) ContactMonitor(
+	ctx context.Context,
+	req *structs.ContactMonitorRequest,
+) (*structs.ContactMonitorResponse, error) {
 	op, err := t.startMonitor(req.Last, req.Label)
 	if err != nil {
 		return nil, err
@@ -181,7 +185,10 @@ func (t *Tree) ContactMonitor(req *structs.ContactMonitorRequest) (*structs.Cont
 	}, nil
 }
 
-func (t *Tree) OwnerInit(req *structs.OwnerInitRequest) (*structs.OwnerInitResponse, error) {
+func (t *Tree) OwnerInit(
+	ctx context.Context,
+	req *structs.OwnerInitRequest,
+) (*structs.OwnerInitResponse, error) {
 	op, err := t.startMonitor(req.Last, req.Label)
 	if err != nil {
 		return nil, err
@@ -232,7 +239,10 @@ func (t *Tree) OwnerInit(req *structs.OwnerInitRequest) (*structs.OwnerInitRespo
 	}, nil
 }
 
-func (t *Tree) OwnerMonitor(req *structs.OwnerMonitorRequest) (*structs.OwnerMonitorResponse, error) {
+func (t *Tree) OwnerMonitor(
+	ctx context.Context,
+	req *structs.OwnerMonitorRequest,
+) (*structs.OwnerMonitorResponse, error) {
 	op, err := t.startMonitor(req.Last, req.Label)
 	if err != nil {
 		return nil, err

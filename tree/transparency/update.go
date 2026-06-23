@@ -6,17 +6,16 @@ import (
 	"slices"
 
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
+	"github.com/Bren2010/katie/tree/transparency/auditor/wire"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
-type UpdateResponse struct {
-	Out *structs.UpdateResponse
-	Err error
-}
-
-func (t *Tree) Update(ctx context.Context, req *structs.UpdateRequest) (<-chan UpdateResponse, error) {
-	ch := make(chan UpdateResponse)
+func (t *Tree) Update(
+	ctx context.Context,
+	req *structs.UpdateRequest,
+) (<-chan wire.UpdateResponse, error) {
+	ch := make(chan wire.UpdateResponse)
 
 	up := newUpdater(t, ctx, ch)
 	if err := up.setRequest(req); err != nil {
@@ -27,10 +26,25 @@ func (t *Tree) Update(ctx context.Context, req *structs.UpdateRequest) (<-chan U
 	return ch, nil
 }
 
+func (t *Tree) ManagerUpdate(
+	ctx context.Context,
+	req *structs.ManagerUpdateRequest,
+) (<-chan wire.UpdateResponse, error) {
+	ch := make(chan wire.UpdateResponse)
+
+	up := newUpdater(t, ctx, ch)
+	if err := up.setManagerRequest(req); err != nil {
+		return nil, err
+	}
+	go up.process()
+
+	return ch, nil
+}
+
 type updater struct {
 	tree *Tree
 	ctx  context.Context
-	ch   chan UpdateResponse
+	ch   chan wire.UpdateResponse
 
 	last   *uint64
 	label  []byte
@@ -40,7 +54,7 @@ type updater struct {
 	ver   int      // ver is the next version the user needs to be informed about.
 }
 
-func newUpdater(t *Tree, ctx context.Context, ch chan UpdateResponse) *updater {
+func newUpdater(t *Tree, ctx context.Context, ch chan wire.UpdateResponse) *updater {
 	return &updater{tree: t, ctx: ctx, ch: ch}
 }
 
@@ -65,7 +79,24 @@ func (u *updater) setRequest(req *structs.UpdateRequest) error {
 	return nil
 }
 
-func (u *updater) send(res UpdateResponse) bool {
+func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
+	indices, err := u.tree.batchGetIndex([][]byte{req.Label})
+	if err != nil {
+		return err
+	}
+
+	u.last = req.Last
+	u.label = req.Label
+	u.values = req.Values
+	u.index = indices[0]
+	u.ver = 0
+	if req.GreatestVersion != nil {
+		u.ver = int(*req.GreatestVersion) + 1
+	}
+	return nil
+}
+
+func (u *updater) send(res wire.UpdateResponse) bool {
 	select {
 	case u.ch <- res:
 		return true
@@ -82,7 +113,7 @@ func (u *updater) process() {
 	// unknown versions.
 	for u.ver < len(u.index) {
 		out, err := u.next(true)
-		if ok := u.send(UpdateResponse{Out: out, Err: err}); !ok {
+		if ok := u.send(wire.UpdateResponse{Out: out, Err: err}); !ok {
 			return
 		} else if err != nil {
 			return
@@ -96,7 +127,9 @@ func (u *updater) process() {
 	if len(u.values) == 0 {
 		return
 	} else if u.tree.updater == nil {
-		u.send(UpdateResponse{Err: errors.New("transparency tree does not support user-submitted label updates")})
+		u.send(wire.UpdateResponse{
+			Err: errors.New("transparency tree does not support user-submitted label updates"),
+		})
 		return
 	}
 	res := make(chan uint64, 1)
@@ -114,14 +147,16 @@ func (u *updater) process() {
 	select {
 	case pos, ok = <-res:
 		if !ok {
-			u.send(UpdateResponse{Err: errors.New("failed to sequence requested new versions of label")})
+			u.send(wire.UpdateResponse{
+				Err: errors.New("failed to sequence requested new versions of label"),
+			})
 			return
 		}
 	case <-u.ctx.Done():
 		return
 	}
 	if err := u.reloadTree(pos); err != nil {
-		u.send(UpdateResponse{Err: err})
+		u.send(wire.UpdateResponse{Err: err})
 		return
 	}
 
@@ -129,7 +164,7 @@ func (u *updater) process() {
 	// others that were created concurrently.
 	for u.ver < len(u.index) {
 		out, err := u.next(u.index[u.ver] != pos)
-		if ok := u.send(UpdateResponse{Out: out, Err: err}); !ok {
+		if ok := u.send(wire.UpdateResponse{Out: out, Err: err}); !ok {
 			return
 		} else if err != nil {
 			return

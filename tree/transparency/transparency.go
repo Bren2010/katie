@@ -2,10 +2,12 @@ package transparency
 
 import (
 	"bytes"
+	"context"
 	"errors"
 
 	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
+	"github.com/Bren2010/katie/tree/transparency/auditor/wire"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
@@ -43,6 +45,11 @@ type Tree struct {
 	treeHead    *structs.TreeHead
 	auditorHead *structs.AuditorTreeHead
 }
+
+var (
+	_ wire.Interface        = &Tree{}
+	_ wire.ManagerInterface = &Tree{}
+)
 
 func NewTree(
 	config structs.PrivateConfig,
@@ -141,7 +148,10 @@ func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error
 	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
 }
 
-func (t *Tree) Search(req *structs.SearchRequest) (*structs.SearchResponse, error) {
+func (t *Tree) Search(
+	ctx context.Context,
+	req *structs.SearchRequest,
+) (*structs.SearchResponse, error) {
 	fth, n, nP, m, err := t.fullTreeHead(req.Last)
 	if err != nil {
 		return nil, err
