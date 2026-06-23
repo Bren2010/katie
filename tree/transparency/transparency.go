@@ -26,7 +26,19 @@ type LabelValue struct {
 // processed in a single log entry. Processing multiple UpdateRequests with the
 // same `Label` will cause monitoring failures.
 type UpdateRequest struct {
-	Label  []byte
+	Label []byte
+
+	// StartingVersion is the version that should be assigned to the first
+	// element of `Values`, if any. This is used in Third-Party Management mode
+	// to align version counters assigned by the Service Operator and the
+	// Manager. If this is less than what would be assigned naturally, empty or
+	// tombstone versions need to be sequenced such that they match. If this is
+	// greater than what would be assigned, an error condition has occured and
+	// the request should be rejected.
+	StartingVersion *uint32
+
+	// Values contains the values for the new label versions, in the order that
+	// version counters should be assigned.
 	Values []structs.UpdateValue
 
 	// Once the new versions of the label are created, the log entry where the

@@ -379,6 +379,7 @@ type ManagerUpdateRequest struct {
 
 	Label           []byte
 	GreatestVersion *uint32
+	SignedVersion   uint32
 	Values          []UpdateValue
 }
 
@@ -395,13 +396,17 @@ func NewManagerUpdateRequest(config *PublicConfig, buf *bytes.Buffer) (*ManagerU
 	if err != nil {
 		return nil, err
 	}
+	signedVersion, err := readNumeric[uint32](buf)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := readFuncSlice[uint8](buf, func(buf *bytes.Buffer) (*UpdateValue, error) {
 		return NewUpdateValue(config, buf)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &ManagerUpdateRequest{last, label, greatestVersion, entries}, nil
+	return &ManagerUpdateRequest{last, label, greatestVersion, signedVersion, entries}, nil
 }
 
 func (mur *ManagerUpdateRequest) Marshal(buf *bytes.Buffer) error {
@@ -410,6 +415,7 @@ func (mur *ManagerUpdateRequest) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	writeOptionalNumeric(buf, mur.GreatestVersion)
+	writeNumeric(buf, mur.SignedVersion)
 	return writeMarshalSlice[uint8](buf, mur.Values, "label value")
 }
 

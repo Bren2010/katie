@@ -46,9 +46,10 @@ type updater struct {
 	ctx  context.Context
 	ch   chan wire.UpdateResponse
 
-	last   *uint64
-	label  []byte
-	values []structs.UpdateValue
+	last      *uint64
+	label     []byte
+	signedVer *uint32
+	values    []structs.UpdateValue
 
 	index []uint64 // index is the label's index.
 	ver   int      // ver is the next version the user needs to be informed about.
@@ -80,6 +81,24 @@ func (u *updater) setRequest(req *structs.UpdateRequest) error {
 }
 
 func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
+	// Verify service operator signatures.
+	for i, val := range req.Values {
+		tbs, err := structs.Marshal(&structs.UpdateTBS{
+			Config:  u.tree.config.Public(),
+			Label:   req.Label,
+			Version: req.SignedVersion + uint32(i),
+			Value:   val.Value,
+		})
+		if err != nil {
+			return err
+		}
+		ok := u.tree.config.LeafPublicKey.Verify(tbs, val.Signature)
+		if !ok {
+			return errors.New("leaf signature verification failed")
+		}
+	}
+
+	// Load index and populate updater state.
 	indices, err := u.tree.batchGetIndex([][]byte{req.Label})
 	if err != nil {
 		return err
@@ -87,6 +106,7 @@ func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
 
 	u.last = req.Last
 	u.label = req.Label
+	u.signedVer = &req.SignedVersion
 	u.values = req.Values
 	u.index = indices[0]
 	u.ver = 0
@@ -133,7 +153,13 @@ func (u *updater) process() {
 		return
 	}
 	res := make(chan uint64, 1)
-	req := UpdateRequest{Label: u.label, Values: u.values, Response: res}
+	req := UpdateRequest{
+		Label:           u.label,
+		StartingVersion: u.signedVer,
+		Values:          u.values,
+
+		Response: res,
+	}
 	select {
 	case u.tree.updater <- req:
 	case <-u.ctx.Done():

@@ -1,8 +1,13 @@
+// Package managed implements the logic for the Service Operator portion of a
+// Transparency Log with a Third-Party Manager.
 package managed
 
 import (
+	"bytes"
 	"context"
+	"errors"
 
+	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 	"github.com/Bren2010/katie/tree/transparency/wire"
@@ -11,18 +16,31 @@ import (
 // ManagedLog wraps a Transparency Log implementation and signs new values that
 // are submitted through Update before they are sequenced.
 //
-// To be clear, this code is run by a Service Operator whose Transparency Log is
-// hosted by a Third-Party Manager. All operations except Update are direct
-// proxies.
+// This code is run by a Service Operator whose Transparency Log is hosted by a
+// Third-Party Manager. All operations except Update are direct proxies.
 type ManagedLog struct {
-	log wire.Interface
-	tx  db.ManagedLogStore
+	config *structs.PublicConfig
+	log    wire.ManagerInterface
+	tx     db.ManagedLogStore
+	priv   suites.SigningPrivateKey
 }
 
 var _ wire.Interface = &ManagedLog{}
 
-func NewManagedLog(log wire.Interface, tx db.ManagedLogStore) *ManagedLog {
-	return &ManagedLog{log: log, tx: tx}
+func NewManagedLog(
+	config *structs.PublicConfig,
+	log wire.ManagerInterface,
+	tx db.ManagedLogStore,
+	priv suites.SigningPrivateKey,
+) (*ManagedLog, error) {
+	if config.Mode != structs.ThirdPartyManagement {
+		return nil, errors.New("transparency log is not configured with third party manager")
+	} else if config.LeafPublicKey == nil {
+		return nil, errors.New("no leaf public key provided in configuration")
+	} else if !bytes.Equal(config.LeafPublicKey.Bytes(), priv.Public().Bytes()) {
+		return nil, errors.New("private key does not match leaf public key")
+	}
+	return &ManagedLog{config, log, tx, priv}, nil
 }
 
 func (ml *ManagedLog) Search(
@@ -57,5 +75,40 @@ func (ml *ManagedLog) Update(
 	ctx context.Context,
 	req *structs.UpdateRequest,
 ) (<-chan wire.UpdateResponse, error) {
-	panic("not implemented")
+	prev, err := ml.tx.IncrementGreatestVersion(req.Label, len(req.Values))
+	if err != nil {
+		return nil, err
+	}
+
+	// Sign new versions of the label.
+	values := make([]structs.UpdateValue, len(req.Values))
+	for i, val := range req.Values {
+		tbs, err := structs.Marshal(&structs.UpdateTBS{
+			Config:  ml.config,
+			Label:   req.Label,
+			Version: uint32(prev + 1 + i),
+			Value:   val.Value,
+		})
+		if err != nil {
+			return nil, err
+		}
+		sig, err := ml.priv.Sign(tbs)
+		if err != nil {
+			return nil, err
+		}
+		values[i] = structs.UpdateValue{
+			Value:        val.Value,
+			UpdateSuffix: structs.UpdateSuffix{Signature: sig},
+		}
+	}
+
+	// Submit signed, new versions to manager to sequencing.
+	return ml.log.ManagerUpdate(ctx, &structs.ManagerUpdateRequest{
+		Last: req.Last,
+
+		Label:           req.Label,
+		GreatestVersion: req.GreatestVersion,
+		SignedVersion:   uint32(prev + 1),
+		Values:          values,
+	})
 }

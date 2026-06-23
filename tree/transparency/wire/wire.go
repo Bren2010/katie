@@ -21,6 +21,8 @@ type Interface interface {
 
 // ManagerInterface is the interface implemented by a Third-Party Manager.
 type ManagerInterface interface {
+	Interface
+
 	// ManagerUpdate is the same as the normal Update operation, except it also
 	// takes in signatures from the Service Operator over each value.
 	ManagerUpdate(ctx context.Context, req *structs.ManagerUpdateRequest) (<-chan UpdateResponse, error)

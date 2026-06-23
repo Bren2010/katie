@@ -216,3 +216,22 @@ func (as *AuditorStore) PutState(raw []byte) error {
 	as.Data = dup(raw)
 	return nil
 }
+
+type ManagedLogStore struct {
+	Data map[string]int
+}
+
+func NewManagedLogStore() *ManagedLogStore {
+	return &ManagedLogStore{Data: make(map[string]int)}
+}
+
+func (mls *ManagedLogStore) IncrementGreatestVersion(label []byte, count int) (int, error) {
+	labelStr := fmt.Sprintf("%x", label)
+
+	ver, ok := mls.Data[labelStr]
+	mls.Data[labelStr] += count
+	if !ok {
+		return -1, nil
+	}
+	return ver, nil
+}

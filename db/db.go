@@ -57,4 +57,8 @@ type AuditorStore interface {
 // ManagedLogStore is the interface that a Service Operator with a Third-Party
 // Manager uses to communicate with its database.
 type ManagedLogStore interface {
+	// IncrementGreatestVersion atomically increments the greatest version of
+	// the label that exists by `count` and returns the previous greatest
+	// version of the label, or -1 if the label didn't exist previously.
+	IncrementGreatestVersion(label []byte, count int) (int, error)
 }
