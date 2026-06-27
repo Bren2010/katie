@@ -29,7 +29,7 @@ func (ile *IndexedLogEntry) Marshal(buf *bytes.Buffer) error {
 	return ile.LogEntry.Marshal(buf)
 }
 
-type ClientState struct {
+type ClientState struct { // TODO: Marshallers out of data.
 	TreeHead        TreeHead
 	AuditorTreeHead *AuditorTreeHead
 	FullSubtrees    [][]byte
@@ -79,4 +79,15 @@ func (cs *ClientState) Marshal(buf *bytes.Buffer) error {
 		entrySlice = append(entrySlice, IndexedLogEntry{Pos: pos, LogEntry: entry})
 	}
 	return writeMarshalSlice[uint8](buf, entrySlice, "log entry")
+}
+
+type ClientLabelState struct {
+}
+
+func NewClientLabelState(cs suites.CipherSuite, buf *bytes.Buffer) (*ClientLabelState, error) {
+
+}
+
+func (cls *ClientLabelState) Marshal(buf *bytes.Buffer) error {
+	return nil
 }
