@@ -62,3 +62,10 @@ type ManagedLogStore interface {
 	// version of the label, or -1 if the label didn't exist previously.
 	IncrementGreatestVersion(label []byte, count int) (int, error)
 }
+
+// ClientStore is the interface that a Key Transparency client uses to interact
+// with its locally-stored data regarding a Transparency Log.
+type ClientStore interface {
+	GetTreeHead() ([]byte, error)
+	PutTreeHead(raw []byte) error
+}

@@ -180,9 +180,9 @@ func (dp *DataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 }
 
 type ProofResult struct {
-	fullSubtrees [][]byte                    // The full subtrees for the user to retain.
-	additional   [][]byte                    // The additional tree head, if requested.
-	logEntries   map[uint64]structs.LogEntry // Log entries for the user to retain.
+	FullSubtrees [][]byte                    // The full subtrees for the user to retain.
+	Additional   [][]byte                    // The additional tree head, if requested.
+	LogEntries   map[uint64]structs.LogEntry // Log entries for the user to retain.
 }
 
 // Finish takes as input the current tree size `n`, an optional additional tree
