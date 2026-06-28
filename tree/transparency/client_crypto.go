@@ -1,79 +1,223 @@
 package transparency
 
 import (
-	"bytes"
 	"errors"
 
 	"github.com/Bren2010/katie/crypto/commitments"
+	"github.com/Bren2010/katie/tree/log"
+	"github.com/Bren2010/katie/tree/transparency/algorithms"
+	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
-func verifyTreeHead(
+type verifier struct {
+	config *structs.PublicConfig
+	state  *structs.ClientState
+	fth    structs.FullTreeHead
+
+	handle   *algorithms.ReceivedProofHandle
+	provider *algorithms.DataProvider
+
+	n  uint64
+	nP *uint64
+	m  *uint64
+}
+
+func newVerifier(
 	config *structs.PublicConfig,
 	state *structs.ClientState,
+	last *uint64,
 	fth structs.FullTreeHead,
-	root, rootP []byte,
-	rightmost uint64,
+	proof structs.CombinedTreeProof,
+) (*verifier, error) {
+	// Set up ProofHandle and DataProvider.
+	handle := algorithms.NewReceivedProofHandle(config.Suite, proof)
+	provider := algorithms.NewDataProvider(config.Suite, handle)
+	if state != nil {
+		err := provider.AddRetained(state.FullSubtrees, state.LogEntries)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Determine tree sizes.
+	var n uint64
+	if fth.TreeHead != nil {
+		n = fth.TreeHead.TreeSize
+	} else if last != nil {
+		n = *last
+	} else {
+		return nil, errors.New("no tree head was provided when required")
+	}
+
+	var nP *uint64
+	if fth.AuditorTreeHead != nil {
+		nP = &fth.AuditorTreeHead.TreeSize
+	}
+
+	return &verifier{config, state, fth, handle, provider, n, nP, last}, nil
+}
+
+func (v *verifier) updateView() error {
+	return algorithms.UpdateView(v.config, v.n, v.m, v.provider)
+}
+
+func (v *verifier) greatestVersionSearch(ver uint32) (uint64, error) {
+	return algorithms.GreatestVersionSearch(v.config, ver, v.n, v.provider)
+}
+
+func (v *verifier) fixedVersionSearch(ver uint32) (uint64, error) {
+	return algorithms.FixedVersionSearch(v.config, ver, v.n, v.provider)
+}
+
+func (v *verifier) monitor() (*algorithms.Monitor, error) {
+	return algorithms.NewMonitor(v.config, v.n, v.provider)
+}
+
+func (v *verifier) rightmostDistinguished() (*uint64, error) {
+	return algorithms.RightmostDistinguished(v.config, v.n, v.provider)
+}
+
+func (v *verifier) processLadder(
+	label []byte,
+	ladder []structs.BinaryLadderStep,
+	vers []uint32,
+	manual map[uint32][]byte,
 ) error {
-	if fth.TreeHead == nil {
-		if state == nil {
+	if len(ladder) != len(vers) {
+		return errors.New("incorrect number of binary ladder steps provided")
+	}
+
+	for i, ver := range vers {
+		input, err := structs.Marshal(&structs.VrfInput{Label: label, Version: ver})
+		if err != nil {
+			return err
+		}
+		vrfOutput, err := v.config.VrfKey.Verify(input, ladder[i].Proof)
+		if err != nil {
+			return err
+		}
+
+		commitment, ok := manual[ver]
+		if ok && ladder[i].Commitment != nil {
+			return errors.New("commitment provided when not expected")
+		} else if !ok {
+			commitment = ladder[i].Commitment
+		}
+
+		if err := v.handle.AddVersion(ver, vrfOutput, commitment); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (v *verifier) verifyTreeHead(root, rootP []byte) error {
+	if v.fth.TreeHead == nil {
+		if v.state == nil {
 			return errors.New("same tree head not allowed when client has no state")
 		}
-		// Note: Verifying that the rightmost timestamp is within the bounds set by
-		// MaxAhead and MaxBehind is done in algorithms.UpdateView().
+		// Note: Verifying that the rightmost timestamp is within the bounds set
+		// by MaxAhead and MaxBehind is done in algorithms.UpdateView().
 		return nil
 	}
 
 	// Verify the size and signature on the tree head.
-	if state != nil && state.TreeHead.TreeSize <= fth.TreeHead.TreeSize {
+	if v.state != nil && v.state.TreeHead.TreeSize <= v.n {
 		return errors.New("provided tree size is not greater than advertised")
 	}
 	tbs, err := structs.Marshal(&structs.TreeHeadTBS{
-		Config:   config,
-		TreeSize: fth.TreeHead.TreeSize,
+		Config:   v.config,
+		TreeSize: v.n,
 		Root:     root,
 	})
 	if err != nil {
 		return err
 	}
-	ok := config.SignatureKey.Verify(tbs, fth.TreeHead.Signature)
+	ok := v.config.SignatureKey.Verify(tbs, v.fth.TreeHead.Signature)
 	if !ok {
 		return errors.New("failed to verify tree head signature")
-	} else if fth.AuditorTreeHead == nil {
+	} else if v.fth.AuditorTreeHead == nil {
 		return nil
 	}
 
 	// Verify size and signature of the auditor tree head.
-	if state != nil {
-		if state.AuditorTreeHead == nil {
+	if v.state != nil {
+		if v.state.AuditorTreeHead == nil {
 			return errors.New("missing previous auditor tree head")
-		} else if state.AuditorTreeHead.TreeSize < config.AuditorStartPos {
+		} else if v.state.AuditorTreeHead.TreeSize < v.config.AuditorStartPos {
 			return errors.New("previous auditor tree size does not cover new auditor start position")
 		}
 	}
-	if fth.AuditorTreeHead.Timestamp > rightmost {
+	rightmost, err := v.provider.GetTimestamp(v.n - 1)
+	if err != nil {
+		return err
+	}
+	auditorTreeHead := v.fth.AuditorTreeHead
+	if auditorTreeHead.Timestamp > rightmost {
 		return errors.New("auditor timestamp is greater than rightmost log entry timestamp")
-	} else if rightmost-fth.AuditorTreeHead.Timestamp > config.MaxAuditorLag {
+	} else if rightmost-auditorTreeHead.Timestamp > v.config.MaxAuditorLag {
 		return errors.New("auditor timestamp is too far behind rightmost log entry timestamp")
-	} else if fth.AuditorTreeHead.TreeSize > fth.TreeHead.TreeSize {
+	} else if auditorTreeHead.TreeSize > v.n {
 		return errors.New("auditor tree size is greater than transparency log tree size")
 	}
 
 	tbs, err = structs.Marshal(&structs.AuditorTreeHeadTBS{
-		Config:    config,
-		Timestamp: fth.AuditorTreeHead.Timestamp,
-		TreeSize:  fth.AuditorTreeHead.TreeSize,
+		Config:    v.config,
+		Timestamp: auditorTreeHead.Timestamp,
+		TreeSize:  auditorTreeHead.TreeSize,
 		Root:      rootP,
 	})
 	if err != nil {
 		return err
 	}
-	ok = config.AuditorPublicKey.Verify(tbs, fth.TreeHead.Signature)
+	ok = v.config.AuditorPublicKey.Verify(tbs, auditorTreeHead.Signature)
 	if !ok {
 		return errors.New("failed to verify auditor signature")
 	}
 
 	return nil
+}
+
+func (v *verifier) finish() (*structs.ClientState, error) {
+	result, err := v.provider.Finish(v.n, v.nP, v.m)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute a candidate root value for the tree and, if needed, the subtree
+	// signed by the auditor.
+	root, err := log.Root(v.config.Suite, v.n, result.FullSubtrees)
+	if err != nil {
+		return nil, err
+	}
+
+	var rootP []byte
+	if v.nP != nil {
+		rootP, err = log.Root(v.config.Suite, *v.nP, result.Additional)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Verify the signature on the tree head.
+	err = v.verifyTreeHead(root, rootP)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute and return the updated client state.
+	updated := &structs.ClientState{
+		TreeHead:        v.state.TreeHead,
+		AuditorTreeHead: v.fth.AuditorTreeHead,
+		FullSubtrees:    result.FullSubtrees,
+		LogEntries:      result.LogEntries,
+	}
+	if v.fth.TreeHead != nil {
+		updated.TreeHead = *v.fth.TreeHead
+	}
+	return updated, nil
 }
 
 func verifyUpdateValue(
@@ -124,58 +268,29 @@ func computeCommitment(
 	return commitments.Commit(config.Suite, opening, commitmentValue), nil
 }
 
-func (c *Client) getState() (*structs.ClientState, error) {
-	raw, err := c.tx.GetState()
-	if err != nil {
-		return nil, err
-	} else if raw == nil {
-		return nil, nil
+func updateLabelState(state *structs.ClientLabelState, terminal, n uint64, ver uint32) uint64 {
+	path := append([]uint64{terminal}, math.RightDirectPath(terminal, n)...)
+
+	for i, pos := range path {
+		other, ok := state.Contact[pos]
+		if !ok {
+			continue
+		} else if other > ver {
+			// This map entry shows a greater version than what we did in our
+			// request, so we should have stopped one step back.
+			if i == 0 {
+				return terminal
+			}
+			terminal = path[i-1]
+			state.Contact[terminal] = ver
+			return terminal
+		}
+		// Our request proved a greater version than this one, so we can delete
+		// it and keep working up the path.
+		delete(state.Contact, pos)
 	}
 
-	buf := bytes.NewBuffer(raw)
-	state, err := structs.NewClientState(c.config.Suite, buf)
-	if err != nil {
-		return nil, err
-	} else if buf.Len() != 0 {
-		return nil, errors.New("unexpected data appended to client state")
-	}
-
-	return state, nil
-}
-
-func (c *Client) getLabelState(label []byte) (*structs.ClientLabelState, error) {
-	raw, err := c.tx.GetLabelState(label)
-	if err != nil {
-		return nil, err
-	} else if raw == nil {
-		return nil, nil
-	}
-
-	buf := bytes.NewBuffer(raw)
-	state, err := structs.NewClientLabelState(c.config.Suite, buf)
-	if err != nil {
-		return nil, err
-	} else if buf.Len() != 0 {
-		return nil, errors.New("unexpected data appended to client label state")
-	}
-
-	return state, nil
-}
-
-func (c *Client) putState(updated *structs.ClientState) error {
-	raw, err := structs.Marshal(updated)
-	if err != nil {
-		return err
-	}
-	return c.tx.PutState(raw)
-}
-
-func (c *Client) last() (*uint64, error) {
-	state, err := c.getState()
-	if err != nil {
-		return nil, err
-	} else if state == nil {
-		return nil, nil
-	}
-	return &state.TreeHead.TreeSize, nil
+	terminal = path[len(path)-1]
+	state.Contact[terminal] = ver
+	return terminal
 }

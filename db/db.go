@@ -66,22 +66,24 @@ type ManagedLogStore interface {
 // ClientStore is the interface that a Key Transparency client uses to interact
 // with its locally-stored data regarding a Transparency Log.
 type ClientStore interface {
-	// GetState returns the raw Transparency Log state for the client.
+	// GetState returns the Transparency Log state for the client.
 	GetState() ([]byte, error)
 
-	// GetLabelState returns the raw state specific to `label`.
+	// GetLabelState returns the state specific to `label`.
 	GetLabelState(label []byte) ([]byte, error)
 
-	// GetStaleLabel returns any label that was stored with a `terminal` value
-	// to the left of `rightmostDLE`.
-	GetStaleLabel(rightmostDLE uint64) ([][]byte, error)
+	// GetStaleLabel returns any label stored with a `terminal` value less than
+	// or equal to `cutoff`.
+	GetStaleLabel(cutoff uint64) ([][]byte, error)
 
 	// PutState updates the global Transparency Log state to `raw`.
 	PutState(raw []byte) error
 
-	// PutLabelState updates the global Transparency Log state to `raw`, and
-	// updates the state for `label` to be `rawLabel` with terminal log entry
-	// `terminal` (used in GetStaleLabel). The global state and label-specific
-	// state are updated atomically.
+	// PutLabelState updates the global Transparency Log state to `raw`. It also
+	// updates the label-specific state for `label` to be `rawLabel` with
+	// terminal log entry `terminal` (used in GetStaleLabel).
+	//
+	// The global state and label-specific state are updated atomically.
+	// `rawLabel` may be nil, in which case the label-specific state is deleted.
 	PutLabelState(raw, label, rawLabel []byte, terminal uint64) error
 }

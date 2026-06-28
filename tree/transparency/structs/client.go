@@ -75,11 +75,11 @@ func NewClientState(config *PublicConfig, buf *bytes.Buffer) (*ClientState, erro
 	}, nil
 }
 
-func (cs *ClientState) Marshal(config *PublicConfig, buf *bytes.Buffer) error {
+func (cs *ClientState) Marshal(buf *bytes.Buffer) error {
 	if err := cs.TreeHead.Marshal(buf); err != nil {
 		return err
 	}
-	if config.Mode == ThirdPartyAuditing {
+	if cs.AuditorTreeHead != nil {
 		if err := cs.AuditorTreeHead.Marshal(buf); err != nil {
 			return err
 		}
@@ -155,7 +155,7 @@ type ClientLabelState struct {
 	Owner   *LabelOwnerState
 }
 
-func NewClientLabelState(cs suites.CipherSuite, buf *bytes.Buffer) (*ClientLabelState, error) {
+func NewClientLabelState(buf *bytes.Buffer) (*ClientLabelState, error) {
 	ptrSlice, err := readFuncSlice[uint32](buf, NewLabelContactState)
 	if err != nil {
 		return nil, err
