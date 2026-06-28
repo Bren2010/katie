@@ -127,45 +127,15 @@ func (los *LabelOwnerState) Marshal(buf *bytes.Buffer) error {
 	return writeNumericSlice[uint32](buf, los.UpcomingVers, "upcoming versions")
 }
 
-type LabelContactState struct {
-	Pos uint64
-	Ver uint32
-}
-
-func NewLabelContactState(buf *bytes.Buffer) (*LabelContactState, error) {
-	pos, err := readNumeric[uint64](buf)
-	if err != nil {
-		return nil, err
-	}
-	ver, err := readNumeric[uint32](buf)
-	if err != nil {
-		return nil, err
-	}
-	return &LabelContactState{Pos: pos, Ver: ver}, nil
-}
-
-func (lcs *LabelContactState) Marshal(buf *bytes.Buffer) error {
-	writeNumeric(buf, lcs.Pos)
-	writeNumeric(buf, lcs.Ver)
-	return nil
-}
-
 type ClientLabelState struct {
-	Contact map[uint64]uint32
+	Contact []MonitorMapEntry
 	Owner   *LabelOwnerState
 }
 
 func NewClientLabelState(buf *bytes.Buffer) (*ClientLabelState, error) {
-	ptrSlice, err := readFuncSlice[uint32](buf, NewLabelContactState)
+	contact, err := readFuncSlice[uint32](buf, NewMonitorMapEntry)
 	if err != nil {
 		return nil, err
-	}
-	contact := make(map[uint64]uint32)
-	for _, pair := range ptrSlice {
-		if _, ok := contact[pair.Pos]; ok {
-			return nil, errors.New("same log entry present multiple times")
-		}
-		contact[pair.Pos] = pair.Ver
 	}
 
 	var owner *LabelOwnerState
@@ -181,15 +151,25 @@ func NewClientLabelState(buf *bytes.Buffer) (*ClientLabelState, error) {
 	return &ClientLabelState{Contact: contact, Owner: owner}, nil
 }
 
-func (cls *ClientLabelState) Marshal(buf *bytes.Buffer) error {
-	ptrSlice := make([]LabelContactState, 0, len(cls.Contact))
-	for pos, ver := range cls.Contact {
-		ptrSlice = append(ptrSlice, LabelContactState{Pos: pos, Ver: ver})
+func (cls *ClientLabelState) GetContact() map[uint64]uint32 {
+	ptrs := make(map[uint64]uint32)
+	for _, entry := range cls.Contact {
+		ptrs[entry.Position] = entry.Version
 	}
-	if err := writeMarshalSlice[uint32](buf, ptrSlice, "contact state"); err != nil {
+	return ptrs
+}
+
+func (cls *ClientLabelState) SetContact(ptrs map[uint64]uint32) {
+	cls.Contact = cls.Contact[:0]
+	for pos, ver := range ptrs {
+		cls.Contact = append(cls.Contact, MonitorMapEntry{Position: pos, Version: ver})
+	}
+}
+
+func (cls *ClientLabelState) Marshal(buf *bytes.Buffer) error {
+	if err := writeMarshalSlice[uint32](buf, cls.Contact, "contact state"); err != nil {
 		return err
 	}
-
 	if writeOptional(buf, cls.Owner != nil) {
 		return cls.Owner.Marshal(buf)
 	}

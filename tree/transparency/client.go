@@ -64,11 +64,8 @@ func (c *Client) getState() (*structs.ClientState, error) {
 	return state, nil
 }
 
-func (c *Client) getLabelState(label []byte) (*structs.ClientLabelState, error) {
-	raw, err := c.tx.GetLabelState(label)
-	if err != nil {
-		return nil, err
-	} else if raw == nil {
+func parseLabelState(raw []byte) (*structs.ClientLabelState, error) {
+	if raw == nil {
 		return nil, nil
 	}
 
@@ -81,6 +78,26 @@ func (c *Client) getLabelState(label []byte) (*structs.ClientLabelState, error) 
 	}
 
 	return state, nil
+}
+
+func (c *Client) getLabelState(label []byte) (*structs.ClientLabelState, error) {
+	raw, err := c.tx.GetLabelState(label)
+	if err != nil {
+		return nil, err
+	}
+	return parseLabelState(raw)
+}
+
+func (c *Client) getStaleLabel(cutoff uint64) ([]byte, *structs.ClientLabelState, error) {
+	label, raw, err := c.tx.GetStaleLabel(cutoff)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := parseLabelState(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	return label, state, nil
 }
 
 func (c *Client) putState(updated *structs.ClientState) error {
@@ -119,6 +136,27 @@ func (c *Client) last() (*uint64, error) {
 		return nil, nil
 	}
 	return &state.TreeHead.TreeSize, nil
+}
+
+func (c *Client) lastAndRightmostDLE() (uint64, uint64, error) {
+	state, err := c.getState()
+	if err != nil {
+		return 0, 0, err
+	} else if state == nil {
+		return 0, 0, errors.New("unable to make request with no state")
+	}
+	last := state.TreeHead.TreeSize
+
+	provider := algorithms.NewDataProvider(c.config.Suite, nil)
+	provider.AddRetained(nil, state.LogEntries)
+	rightmostDLE, err := algorithms.RightmostDistinguished(c.config, last, provider)
+	if err != nil {
+		return 0, 0, err
+	} else if rightmostDLE == nil {
+		return 0, 0, errors.New("unable to make request if no distinguished log entries exist")
+	}
+
+	return last, *rightmostDLE, nil
 }
 
 func (c *Client) start(
@@ -251,7 +289,6 @@ func (c *Client) OwnerInit(label []byte) (
 	VerifyFunc[*structs.OwnerInitResponse],
 	error,
 ) {
-	// Verify that the client doesn't already own the requested label.
 	labelState, err := c.getLabelState(label)
 	if err != nil {
 		return nil, nil, err
@@ -259,26 +296,11 @@ func (c *Client) OwnerInit(label []byte) (
 		return nil, nil, errors.New("label is already owned")
 	}
 
-	// Load the client state to determine the `Last` field to advertise and the
-	// rightmost distinguished log entry (to use as our `Start` entry).
-	state, err := c.getState()
+	last, start, err := c.lastAndRightmostDLE()
 	if err != nil {
 		return nil, nil, err
-	} else if state == nil {
-		return nil, nil, errors.New("unable to make owner init request with no state")
 	}
-	last := &state.TreeHead.TreeSize
-
-	provider := algorithms.NewDataProvider(c.config.Suite, nil)
-	provider.AddRetained(nil, state.LogEntries)
-	start, err := algorithms.RightmostDistinguished(c.config, *last, provider)
-	if err != nil {
-		return nil, nil, err
-	} else if start == nil {
-		return nil, nil, errors.New("unable to make owner init request if no distinguished log entries exist")
-	}
-
-	req := &structs.OwnerInitRequest{Last: last, Label: label, Start: *start}
+	req := &structs.OwnerInitRequest{Last: &last, Label: label, Start: start}
 	return req, c.ownerInit(req), nil
 }
 
@@ -304,12 +326,15 @@ func (c *Client) ownerInit(req *structs.OwnerInitRequest) VerifyFunc[*structs.Ow
 		for i, ver := range ladder {
 			if _, ok := greatestVersions[ver]; !ok {
 				continue
-			} else if res.BinaryLadder[i].Commitment != nil {
+			} else if res.BinaryLadder[i].Commitment == nil {
 				return errors.New("commitment not provided when expected")
 			}
 		}
 
 		// Verify the proof.
+		if err := v.updateView(); err != nil {
+			return err
+		}
 		monitor, err := v.monitor()
 		if err != nil {
 			return err
@@ -337,32 +362,97 @@ func (c *Client) ownerInit(req *structs.OwnerInitRequest) VerifyFunc[*structs.Ow
 	}
 }
 
-// NextOwnerMonitor returns the next label where Owner Monitoring is
-// recommended, or nil if none.
-func (c *Client) NextOwnerMonitor() ([]byte, error) {
-	panic("not implemented")
-}
-
-func (c *Client) OwnerMonitor(label []byte) (
-	*structs.OwnerMonitorRequest,
-	VerifyFunc[*structs.OwnerMonitorResponse],
+func (c *Client) Monitor() (
+	structs.Marshaller, // *structs.ContactMonitorRequest or *structs.OwnerMonitorRequest
+	VerifyFunc[structs.Marshaller], // *structs.ContactMonitorResponse or *structs.OwnerMonitorResponse
 	error,
 ) {
-	panic("not implemented")
+	last, cutoff, err := c.lastAndRightmostDLE()
+	if err != nil {
+		return nil, nil, err
+	}
+	label, labelState, err := c.getStaleLabel(cutoff)
+	if err != nil {
+		return nil, nil, err
+	} else if labelState == nil {
+		return nil, nil, errors.New("unexpected error occurred")
+	}
+
+	if labelState.Owner == nil {
+		req := &structs.ContactMonitorRequest{
+			Last:    &last,
+			Label:   label,
+			Entries: labelState.Contact,
+		}
+		return req, c.contactMonitor(req), nil
+	}
+	req := &structs.OwnerMonitorRequest{
+		Last:    &last,
+		Label:   label,
+		Entries: labelState.Contact,
+		Start:   labelState.Owner.Starting,
+	}
+	greatest := labelState.Owner.VerAtStarting + len(labelState.Owner.UpcomingVers)
+	if greatest >= 0 {
+		greatest := uint32(greatest)
+		req.GreatestVersion = &greatest
+	}
+	return req, c.ownerMonitor(req), nil
 }
 
-// NextContactMonitor returns the next label where Contact Monitoring is
-// recommended, or nil if none.
-func (c *Client) NextContactMonitor() ([]byte, error) {
-	panic("not implemented")
+func (c *Client) contactMonitor(req *structs.ContactMonitorRequest) VerifyFunc[structs.Marshaller] {
+	return func(marsh structs.Marshaller) error {
+		res, ok := marsh.(*structs.ContactMonitorResponse)
+		if !ok {
+			return errors.New("expected contact monitor response, unexpected value received")
+		}
+		labelState, err := c.getLabelState(req.Label)
+		if err != nil {
+			return err
+		}
+
+		// Verify the proof.
+		v, err := c.start(req.Last, res.FullTreeHead, res.Monitor)
+		if err != nil {
+			return err
+		} else if err := v.updateView(); err != nil {
+			return err
+		}
+		monitor, err := v.monitor()
+		if err != nil {
+			return err
+		}
+		monitor.Contact = &algorithms.ContactState{Ptrs: labelState.GetContact()}
+		if err := monitor.ContactMonitor(); err != nil {
+			return err
+		}
+		updated, err := v.finish()
+		if err != nil {
+			return err
+		}
+
+		// Update the global and label-specific state.
+		labelState.SetContact(monitor.Contact.Ptrs)
+
+		terminal, err := v.rightmostDistinguished()
+		if err != nil {
+			return err
+		} else if terminal == nil {
+			return errors.New("unable to compute rightmost distinguished log entry")
+		}
+
+		return c.putLabelState(updated, req.Label, labelState, *terminal)
+	}
 }
 
-func (c *Client) ContactMonitor(label []byte) (
-	*structs.ContactMonitorRequest,
-	VerifyFunc[*structs.ContactMonitorRequest],
-	error,
-) {
-	panic("not implemented")
+func (c *Client) ownerMonitor(req *structs.OwnerMonitorRequest) VerifyFunc[structs.Marshaller] {
+	return func(marsh structs.Marshaller) error {
+		res, ok := marsh.(*structs.OwnerMonitorResponse)
+		if !ok {
+			return errors.New("expected owner monitor response, unexpected value received")
+		}
+		panic("not implemented")
+	}
 }
 
 func (c *Client) Update(label []byte, values [][]byte) (

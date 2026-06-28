@@ -73,8 +73,8 @@ type ClientStore interface {
 	GetLabelState(label []byte) ([]byte, error)
 
 	// GetStaleLabel returns any label stored with a `terminal` value less than
-	// or equal to `cutoff`.
-	GetStaleLabel(cutoff uint64) ([][]byte, error)
+	// or equal to `cutoff` and its corresponding state.
+	GetStaleLabel(cutoff uint64) ([]byte, []byte, error)
 
 	// PutState updates the global Transparency Log state to `raw`.
 	PutState(raw []byte) error
