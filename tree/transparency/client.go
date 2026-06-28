@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/Bren2010/katie/db"
+	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
@@ -250,7 +251,90 @@ func (c *Client) OwnerInit(label []byte) (
 	VerifyFunc[*structs.OwnerInitResponse],
 	error,
 ) {
-	panic("not implemented")
+	// Verify that the client doesn't already own the requested label.
+	labelState, err := c.getLabelState(label)
+	if err != nil {
+		return nil, nil, err
+	} else if labelState != nil && labelState.Owner != nil {
+		return nil, nil, errors.New("label is already owned")
+	}
+
+	// Load the client state to determine the `Last` field to advertise and the
+	// rightmost distinguished log entry (to use as our `Start` entry).
+	state, err := c.getState()
+	if err != nil {
+		return nil, nil, err
+	} else if state == nil {
+		return nil, nil, errors.New("unable to make owner init request with no state")
+	}
+	last := &state.TreeHead.TreeSize
+
+	provider := algorithms.NewDataProvider(c.config.Suite, nil)
+	provider.AddRetained(nil, state.LogEntries)
+	start, err := algorithms.RightmostDistinguished(c.config, *last, provider)
+	if err != nil {
+		return nil, nil, err
+	} else if start == nil {
+		return nil, nil, errors.New("unable to make owner init request if no distinguished log entries exist")
+	}
+
+	req := &structs.OwnerInitRequest{Last: last, Label: label, Start: *start}
+	return req, c.ownerInit(req), nil
+}
+
+func (c *Client) ownerInit(req *structs.OwnerInitRequest) VerifyFunc[*structs.OwnerInitResponse] {
+	return func(res *structs.OwnerInitResponse) error {
+		v, err := c.start(req.Last, res.FullTreeHead, res.Init)
+		if err != nil {
+			return err
+		}
+
+		// Verify that the expected number of entries is in `BinaryLadder` and
+		// that a commitment is provided for each version in `GreatestVersion`.
+		ladder := allLadderVersions(res.GreatestVersions)
+		err = v.processLadder(req.Label, res.BinaryLadder, ladder, nil)
+		if err != nil {
+			return err
+		}
+
+		greatestVersions := make(map[uint32]struct{})
+		for _, ver := range res.GreatestVersions {
+			greatestVersions[ver] = struct{}{}
+		}
+		for i, ver := range ladder {
+			if _, ok := greatestVersions[ver]; !ok {
+				continue
+			} else if res.BinaryLadder[i].Commitment != nil {
+				return errors.New("commitment not provided when expected")
+			}
+		}
+
+		// Verify the proof.
+		monitor, err := v.monitor()
+		if err != nil {
+			return err
+		}
+		_, err = monitor.OwnerInit(req.Start, res.GreatestVersions)
+		if err != nil {
+			return err
+		}
+		updated, err := v.finish()
+		if err != nil {
+			return err
+		}
+
+		// Update the global and label-specific state.
+		labelState, err := c.getLabelState(req.Label)
+		if err != nil {
+			return err
+		}
+		labelState.Owner = &structs.LabelOwnerState{
+			Starting:      monitor.Owner.Starting,
+			VerAtStarting: monitor.Owner.VerAtStarting,
+			UpcomingVers:  monitor.Owner.UpcomingVers,
+		}
+		return c.putLabelState(updated, req.Label, labelState, req.Start)
+	}
 }
 
 // NextOwnerMonitor returns the next label where Owner Monitoring is
