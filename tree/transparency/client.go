@@ -279,7 +279,20 @@ func (c *Client) search(req *structs.SearchRequest) VerifyFunc[*structs.SearchRe
 		if err != nil {
 			return err
 		}
-		terminal = updateLabelState(labelState, terminal, v.n, target)
+		contact := algorithms.NewContactState(labelState.Contact)
+
+		path := append([]uint64{terminal}, math.RightDirectPath(terminal, v.n)...)
+		for _, pos := range path {
+			posVer, ok := contact.Ptrs[pos]
+			if ok && posVer > target {
+				break
+			}
+			contact.Ptrs[pos] = target
+			terminal = pos
+		}
+		simplifyMonitoringMap(contact.Ptrs, v.n)
+
+		labelState.Contact = contact.Struct()
 		return c.putLabelState(updated, req.Label, labelState, terminal)
 	}
 }
@@ -353,11 +366,7 @@ func (c *Client) ownerInit(req *structs.OwnerInitRequest) VerifyFunc[*structs.Ow
 		if err != nil {
 			return err
 		}
-		labelState.Owner = &structs.LabelOwnerState{
-			Starting:      monitor.Owner.Starting,
-			VerAtStarting: monitor.Owner.VerAtStarting,
-			UpcomingVers:  monitor.Owner.UpcomingVers,
-		}
+		labelState.Owner = monitor.Owner.Struct()
 		return c.putLabelState(updated, req.Label, labelState, req.Start)
 	}
 }
@@ -384,7 +393,7 @@ func (c *Client) Monitor() (
 			Label:   label,
 			Entries: labelState.Contact,
 		}
-		return req, c.contactMonitor(req), nil
+		return req, c.contactMonitor(labelState, req), nil
 	}
 	req := &structs.OwnerMonitorRequest{
 		Last:    &last,
@@ -397,18 +406,17 @@ func (c *Client) Monitor() (
 		greatest := uint32(greatest)
 		req.GreatestVersion = &greatest
 	}
-	return req, c.ownerMonitor(req), nil
+	return req, c.ownerMonitor(labelState, req), nil
 }
 
-func (c *Client) contactMonitor(req *structs.ContactMonitorRequest) VerifyFunc[structs.Marshaller] {
+func (c *Client) contactMonitor(
+	labelState *structs.ClientLabelState,
+	req *structs.ContactMonitorRequest,
+) VerifyFunc[structs.Marshaller] {
 	return func(marsh structs.Marshaller) error {
 		res, ok := marsh.(*structs.ContactMonitorResponse)
 		if !ok {
 			return errors.New("expected contact monitor response, unexpected value received")
-		}
-		labelState, err := c.getLabelState(req.Label)
-		if err != nil {
-			return err
 		}
 
 		// Verify the proof.
@@ -422,7 +430,7 @@ func (c *Client) contactMonitor(req *structs.ContactMonitorRequest) VerifyFunc[s
 		if err != nil {
 			return err
 		}
-		monitor.Contact = &algorithms.ContactState{Ptrs: labelState.GetContact()}
+		monitor.Contact = algorithms.NewContactState(labelState.Contact)
 		if err := monitor.ContactMonitor(); err != nil {
 			return err
 		}
@@ -432,7 +440,7 @@ func (c *Client) contactMonitor(req *structs.ContactMonitorRequest) VerifyFunc[s
 		}
 
 		// Update the global and label-specific state.
-		labelState.SetContact(monitor.Contact.Ptrs)
+		labelState.Contact = monitor.Contact.Struct()
 
 		terminal, err := v.rightmostDistinguished()
 		if err != nil {
@@ -445,13 +453,44 @@ func (c *Client) contactMonitor(req *structs.ContactMonitorRequest) VerifyFunc[s
 	}
 }
 
-func (c *Client) ownerMonitor(req *structs.OwnerMonitorRequest) VerifyFunc[structs.Marshaller] {
+func (c *Client) ownerMonitor(
+	labelState *structs.ClientLabelState,
+	req *structs.OwnerMonitorRequest,
+) VerifyFunc[structs.Marshaller] {
 	return func(marsh structs.Marshaller) error {
 		res, ok := marsh.(*structs.OwnerMonitorResponse)
 		if !ok {
 			return errors.New("expected owner monitor response, unexpected value received")
 		}
-		panic("not implemented")
+
+		// Verify the proof.
+		v, err := c.start(req.Last, res.FullTreeHead, res.Monitor)
+		if err != nil {
+			return err
+		} else if err := v.updateView(); err != nil {
+			return err
+		}
+		monitor, err := v.monitor()
+		if err != nil {
+			return err
+		}
+		monitor.Contact = algorithms.NewContactState(labelState.Contact)
+		monitor.Owner = algorithms.NewOwnerState(labelState.Owner)
+		if err := monitor.ContactMonitor(); err != nil {
+			return err
+		} else if err := monitor.OwnerMonitor(); err != nil {
+			return err
+		}
+		updated, err := v.finish()
+		if err != nil {
+			return err
+		}
+
+		// Update the global and label-specific state.
+		labelState.Contact = monitor.Contact.Struct()
+		labelState.Owner = monitor.Owner.Struct()
+
+		return c.putLabelState(updated, req.Label, labelState, labelState.Owner.Starting)
 	}
 }
 

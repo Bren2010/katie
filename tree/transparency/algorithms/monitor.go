@@ -16,6 +16,22 @@ type ContactState struct {
 	Ptrs map[uint64]uint32
 }
 
+func NewContactState(entries []structs.MonitorMapEntry) *ContactState {
+	ptrs := make(map[uint64]uint32)
+	for _, entry := range entries {
+		ptrs[entry.Position] = entry.Version
+	}
+	return &ContactState{Ptrs: ptrs}
+}
+
+func (cs *ContactState) Struct() []structs.MonitorMapEntry {
+	out := make([]structs.MonitorMapEntry, 0, len(cs.Ptrs))
+	for pos, ver := range cs.Ptrs {
+		out = append(out, structs.MonitorMapEntry{Position: pos, Version: ver})
+	}
+	return out
+}
+
 // OwnerState wraps the state maintained by the owner of a single label.
 type OwnerState struct {
 	// Starting is the position of the rightmost distinguished log entry that
@@ -27,6 +43,22 @@ type OwnerState struct {
 	VerAtStarting int
 	// UpcomingVers is the position of each upcoming new version of the label.
 	UpcomingVers []uint64
+}
+
+func NewOwnerState(from *structs.LabelOwnerState) *OwnerState {
+	return &OwnerState{
+		Starting:      from.Starting,
+		VerAtStarting: from.VerAtStarting,
+		UpcomingVers:  from.UpcomingVers,
+	}
+}
+
+func (os *OwnerState) Struct() *structs.LabelOwnerState {
+	return &structs.LabelOwnerState{
+		Starting:      os.Starting,
+		VerAtStarting: os.VerAtStarting,
+		UpcomingVers:  os.UpcomingVers,
+	}
 }
 
 // SetStarting sets the owner's starting position to be `x`, consuming any

@@ -268,29 +268,23 @@ func computeCommitment(
 	return commitments.Commit(config.Suite, opening, commitmentValue), nil
 }
 
-func updateLabelState(state *structs.ClientLabelState, terminal, n uint64, ver uint32) uint64 {
-	path := append([]uint64{terminal}, math.RightDirectPath(terminal, n)...)
+func simplifyMonitoringMap(ptrs map[uint64]uint32, n uint64) {
+	for {
+		modified := false
 
-	for i, pos := range path {
-		other, ok := state.Contact[pos]
-		if !ok {
-			continue
-		} else if other > ver {
-			// This map entry shows a greater version than what we did in our
-			// request, so we should have stopped one step back.
-			if i == 0 {
-				return terminal
+		for pos, ver := range ptrs {
+			path := math.RightDirectPath(pos, n)
+			if len(path) == 0 {
+				continue
+			} else if parent, ok := ptrs[path[0]]; !ok || parent < ver {
+				continue
 			}
-			terminal = path[i-1]
-			state.Contact[terminal] = ver
-			return terminal
+			delete(ptrs, pos)
+			modified = true
 		}
-		// Our request proved a greater version than this one, so we can delete
-		// it and keep working up the path.
-		delete(state.Contact, pos)
-	}
 
-	terminal = path[len(path)-1]
-	state.Contact[terminal] = ver
-	return terminal
+		if !modified {
+			return
+		}
+	}
 }

@@ -151,21 +151,6 @@ func NewClientLabelState(buf *bytes.Buffer) (*ClientLabelState, error) {
 	return &ClientLabelState{Contact: contact, Owner: owner}, nil
 }
 
-func (cls *ClientLabelState) GetContact() map[uint64]uint32 {
-	ptrs := make(map[uint64]uint32)
-	for _, entry := range cls.Contact {
-		ptrs[entry.Position] = entry.Version
-	}
-	return ptrs
-}
-
-func (cls *ClientLabelState) SetContact(ptrs map[uint64]uint32) {
-	cls.Contact = cls.Contact[:0]
-	for pos, ver := range ptrs {
-		cls.Contact = append(cls.Contact, MonitorMapEntry{Position: pos, Version: ver})
-	}
-}
-
 func (cls *ClientLabelState) Marshal(buf *bytes.Buffer) error {
 	if err := writeMarshalSlice[uint32](buf, cls.Contact, "contact state"); err != nil {
 		return err
