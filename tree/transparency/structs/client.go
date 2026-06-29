@@ -3,12 +3,13 @@ package structs
 import (
 	"bytes"
 	"errors"
+	"io"
 
 	"github.com/Bren2010/katie/crypto/suites"
 )
 
 type IndexedLogEntry struct {
-	Pos uint64
+	Position uint64
 	LogEntry
 }
 
@@ -21,11 +22,11 @@ func NewIndexedLogEntry(cs suites.CipherSuite, buf *bytes.Buffer) (*IndexedLogEn
 	if err != nil {
 		return nil, err
 	}
-	return &IndexedLogEntry{Pos: pos, LogEntry: *entry}, nil
+	return &IndexedLogEntry{Position: pos, LogEntry: *entry}, nil
 }
 
 func (ile *IndexedLogEntry) Marshal(buf *bytes.Buffer) error {
-	writeNumeric(buf, ile.Pos)
+	writeNumeric(buf, ile.Position)
 	return ile.LogEntry.Marshal(buf)
 }
 
@@ -61,10 +62,10 @@ func NewClientState(config *PublicConfig, buf *bytes.Buffer) (*ClientState, erro
 	}
 	logEntries := make(map[uint64]LogEntry)
 	for _, entry := range entrySlice {
-		if _, ok := logEntries[entry.Pos]; ok {
+		if _, ok := logEntries[entry.Position]; ok {
 			return nil, errors.New("same log entry present multiple times")
 		}
-		logEntries[entry.Pos] = entry.LogEntry
+		logEntries[entry.Position] = entry.LogEntry
 	}
 
 	return &ClientState{
@@ -90,7 +91,7 @@ func (cs *ClientState) Marshal(buf *bytes.Buffer) error {
 
 	entrySlice := make([]IndexedLogEntry, 0, len(cs.LogEntries))
 	for pos, entry := range cs.LogEntries {
-		entrySlice = append(entrySlice, IndexedLogEntry{Pos: pos, LogEntry: entry})
+		entrySlice = append(entrySlice, IndexedLogEntry{Position: pos, LogEntry: entry})
 	}
 	return writeMarshalSlice[uint8](buf, entrySlice, "log entry")
 }
@@ -127,12 +128,55 @@ func (los *LabelOwnerState) Marshal(buf *bytes.Buffer) error {
 	return writeNumericSlice[uint32](buf, los.UpcomingVers, "upcoming versions")
 }
 
-type ClientLabelState struct {
-	Contact []MonitorMapEntry
-	Owner   *LabelOwnerState
+type RetainedVersion struct {
+	Version    uint32
+	VrfOutput  []byte
+	Commitment []byte
 }
 
-func NewClientLabelState(buf *bytes.Buffer) (*ClientLabelState, error) {
+func NewRetainedVersion(cs suites.CipherSuite, buf *bytes.Buffer) (*RetainedVersion, error) {
+	version, err := readNumeric[uint32](buf)
+	if err != nil {
+		return nil, err
+	}
+
+	vrfOutput := make([]byte, cs.HashSize())
+	if _, err := io.ReadFull(buf, vrfOutput); err != nil {
+		return nil, err
+	}
+
+	var commitment []byte
+	if present, err := readOptional(buf); err != nil {
+		return nil, err
+	} else if present {
+		commitment = make([]byte, cs.HashSize())
+		if _, err := io.ReadFull(buf, commitment); err != nil {
+			return nil, err
+		}
+	}
+	return &RetainedVersion{
+		Version:    version,
+		VrfOutput:  vrfOutput,
+		Commitment: commitment,
+	}, nil
+}
+
+func (rv *RetainedVersion) Marshal(buf *bytes.Buffer) error {
+	writeNumeric(buf, rv.Version)
+	buf.Write(rv.VrfOutput)
+	if writeOptional(buf, rv.Commitment != nil) {
+		buf.Write(rv.Commitment)
+	}
+	return nil
+}
+
+type ClientLabelState struct {
+	Contact  []MonitorMapEntry
+	Owner    *LabelOwnerState
+	Versions []RetainedVersion
+}
+
+func NewClientLabelState(cs suites.CipherSuite, buf *bytes.Buffer) (*ClientLabelState, error) {
 	contact, err := readFuncSlice[uint32](buf, NewMonitorMapEntry)
 	if err != nil {
 		return nil, err
@@ -148,7 +192,11 @@ func NewClientLabelState(buf *bytes.Buffer) (*ClientLabelState, error) {
 		}
 	}
 
-	return &ClientLabelState{Contact: contact, Owner: owner}, nil
+	versions, err := readFuncSlice[uint32](buf, func(buf *bytes.Buffer) (*RetainedVersion, error) {
+		return NewRetainedVersion(cs, buf)
+	})
+
+	return &ClientLabelState{Contact: contact, Owner: owner, Versions: versions}, nil
 }
 
 func (cls *ClientLabelState) Marshal(buf *bytes.Buffer) error {
@@ -158,5 +206,5 @@ func (cls *ClientLabelState) Marshal(buf *bytes.Buffer) error {
 	if writeOptional(buf, cls.Owner != nil) {
 		return cls.Owner.Marshal(buf)
 	}
-	return nil
+	return writeMarshalSlice[uint32](buf, cls.Versions, "retained versions")
 }

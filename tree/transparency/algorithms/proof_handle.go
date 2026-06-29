@@ -98,6 +98,10 @@ func (rph *ReceivedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []b
 	return addVersion(rph.cs, rph.versions, ver, vrfOutput, commitment)
 }
 
+func (rph *ReceivedProofHandle) Versions() map[uint32]prefix.Entry {
+	return rph.versions
+}
+
 func (rph *ReceivedProofHandle) GetTimestamp(x uint64) (uint64, error) {
 	if len(rph.inner.Timestamps) == 0 {
 		return 0, errors.New("unexpected number of timestamps consumed")

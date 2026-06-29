@@ -64,28 +64,12 @@ func (c *Client) getState() (*structs.ClientState, error) {
 	return state, nil
 }
 
-func parseLabelState(raw []byte) (*structs.ClientLabelState, error) {
-	if raw == nil {
-		return nil, nil
-	}
-
-	buf := bytes.NewBuffer(raw)
-	state, err := structs.NewClientLabelState(buf)
-	if err != nil {
-		return nil, err
-	} else if buf.Len() != 0 {
-		return nil, errors.New("unexpected data appended to client label state")
-	}
-
-	return state, nil
-}
-
 func (c *Client) getLabelState(label []byte) (*structs.ClientLabelState, error) {
 	raw, err := c.tx.GetLabelState(label)
 	if err != nil {
 		return nil, err
 	}
-	return parseLabelState(raw)
+	return parseLabelState(c.config, raw)
 }
 
 func (c *Client) getStaleLabel(cutoff uint64) ([]byte, *structs.ClientLabelState, error) {
@@ -93,7 +77,7 @@ func (c *Client) getStaleLabel(cutoff uint64) ([]byte, *structs.ClientLabelState
 	if err != nil {
 		return nil, nil, err
 	}
-	state, err := parseLabelState(raw)
+	state, err := parseLabelState(c.config, raw)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,54 +112,6 @@ func (c *Client) putLabelState(
 	return c.tx.PutLabelState(raw, label, rawLabel, terminal)
 }
 
-func (c *Client) last() (*uint64, error) {
-	state, err := c.getState()
-	if err != nil {
-		return nil, err
-	} else if state == nil {
-		return nil, nil
-	}
-	return &state.TreeHead.TreeSize, nil
-}
-
-func (c *Client) lastAndRightmostDLE() (uint64, uint64, error) {
-	state, err := c.getState()
-	if err != nil {
-		return 0, 0, err
-	} else if state == nil {
-		return 0, 0, errors.New("unable to make request with no state")
-	}
-	last := state.TreeHead.TreeSize
-
-	provider := algorithms.NewDataProvider(c.config.Suite, nil)
-	provider.AddRetained(nil, state.LogEntries)
-	rightmostDLE, err := algorithms.RightmostDistinguished(c.config, last, provider)
-	if err != nil {
-		return 0, 0, err
-	} else if rightmostDLE == nil {
-		return 0, 0, errors.New("unable to make request if no distinguished log entries exist")
-	}
-
-	return last, *rightmostDLE, nil
-}
-
-func (c *Client) start(
-	last *uint64,
-	fth structs.FullTreeHead,
-	proof structs.CombinedTreeProof,
-) (*verifier, error) {
-	state, err := c.getState()
-	if err != nil {
-		return nil, err
-	}
-	stateMatches := (state == nil && last == nil) ||
-		(state != nil && last != nil && state.TreeHead.TreeSize == *last)
-	if !stateMatches {
-		return nil, errors.New("client state does not match request")
-	}
-	return newVerifier(c.config, state, last, fth, proof)
-}
-
 // GreatestVersionSearch returns a SearchRequest for the greatest version of
 // `label` and a function to verify the corresponding SearchResponse.
 func (c *Client) GreatestVersionSearch(label []byte) (
@@ -183,12 +119,12 @@ func (c *Client) GreatestVersionSearch(label []byte) (
 	VerifyFunc[*structs.SearchResponse],
 	error,
 ) {
-	last, err := c.last()
+	state, err := c.getState()
 	if err != nil {
 		return nil, nil, err
 	}
-	req := &structs.SearchRequest{Last: last, Label: label, Version: nil}
-	return req, c.search(req), nil
+	req := &structs.SearchRequest{Last: getLast(state), Label: label, Version: nil}
+	return req, c.search(state, req), nil
 }
 
 // FixedVersionSearch returns a SearchRequest for the requested version of
@@ -198,17 +134,20 @@ func (c *Client) FixedVersionSearch(label []byte, ver uint32) (
 	VerifyFunc[*structs.SearchResponse],
 	error,
 ) {
-	last, err := c.last()
+	state, err := c.getState()
 	if err != nil {
 		return nil, nil, err
 	}
-	req := &structs.SearchRequest{Last: last, Label: label, Version: &ver}
-	return req, c.search(req), nil
+	req := &structs.SearchRequest{Last: getLast(state), Label: label, Version: &ver}
+	return req, c.search(state, req), nil
 }
 
-func (c *Client) search(req *structs.SearchRequest) VerifyFunc[*structs.SearchResponse] {
+func (c *Client) search(
+	state *structs.ClientState,
+	req *structs.SearchRequest,
+) VerifyFunc[*structs.SearchResponse] {
 	return func(res *structs.SearchResponse) error {
-		v, err := c.start(req.Last, res.FullTreeHead, res.Search)
+		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Search)
 		if err != nil {
 			return err
 		}
@@ -263,8 +202,7 @@ func (c *Client) search(req *structs.SearchRequest) VerifyFunc[*structs.SearchRe
 			return err
 		}
 
-		// Try to bail out early by updating only the global state, but also
-		// update the label-specific state if it's necessary.
+		// Try to bail out early by updating only the global state.
 		if c.config.Mode != structs.ContactMonitoring {
 			return c.putState(updated)
 		}
@@ -275,24 +213,19 @@ func (c *Client) search(req *structs.SearchRequest) VerifyFunc[*structs.SearchRe
 			return c.putState(updated)
 		}
 
+		// Updating label-specific state is necessary.
 		labelState, err := c.getLabelState(req.Label)
 		if err != nil {
 			return err
 		}
-		contact := algorithms.NewContactState(labelState.Contact)
-
-		path := append([]uint64{terminal}, math.RightDirectPath(terminal, v.n)...)
-		for _, pos := range path {
-			posVer, ok := contact.Ptrs[pos]
-			if ok && posVer > target {
-				break
-			}
-			contact.Ptrs[pos] = target
-			terminal = pos
+		terminal, err = updateContactState(labelState, terminal, v.n, target)
+		if err != nil {
+			return err
 		}
-		simplifyMonitoringMap(contact.Ptrs, v.n)
-
-		labelState.Contact = contact.Struct()
+		err = updateRetainedVersions(labelState, v.handle.Versions())
+		if err != nil {
+			return err
+		}
 		return c.putLabelState(updated, req.Label, labelState, terminal)
 	}
 }
@@ -314,10 +247,13 @@ func (c *Client) OwnerInit(label []byte) (
 		return nil, nil, err
 	}
 	req := &structs.OwnerInitRequest{Last: &last, Label: label, Start: start}
-	return req, c.ownerInit(req), nil
+	return req, c.ownerInit(labelState, req), nil
 }
 
-func (c *Client) ownerInit(req *structs.OwnerInitRequest) VerifyFunc[*structs.OwnerInitResponse] {
+func (c *Client) ownerInit(
+	labelState *structs.ClientLabelState,
+	req *structs.OwnerInitRequest,
+) VerifyFunc[*structs.OwnerInitResponse] {
 	return func(res *structs.OwnerInitResponse) error {
 		v, err := c.start(req.Last, res.FullTreeHead, res.Init)
 		if err != nil {
@@ -362,10 +298,6 @@ func (c *Client) ownerInit(req *structs.OwnerInitRequest) VerifyFunc[*structs.Ow
 		}
 
 		// Update the global and label-specific state.
-		labelState, err := c.getLabelState(req.Label)
-		if err != nil {
-			return err
-		}
 		labelState.Owner = monitor.Owner.Struct()
 		return c.putLabelState(updated, req.Label, labelState, req.Start)
 	}

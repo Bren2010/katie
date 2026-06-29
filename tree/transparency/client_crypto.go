@@ -1,10 +1,12 @@
 package transparency
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/Bren2010/katie/crypto/commitments"
 	"github.com/Bren2010/katie/tree/log"
+	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -220,6 +222,46 @@ func (v *verifier) finish() (*structs.ClientState, error) {
 	return updated, nil
 }
 
+func getLast(state *structs.ClientState) *uint64 {
+	if state == nil {
+		return nil
+	}
+	return &state.TreeHead.TreeSize
+}
+
+func getDistinguished(config *structs.PublicConfig, state *structs.ClientState) (uint64, error) {
+	if state == nil {
+		return 0, errors.New("unable to make request with no state")
+	}
+
+	provider := algorithms.NewDataProvider(config.Suite, nil)
+	provider.AddRetained(nil, state.LogEntries)
+	rightmostDLE, err := algorithms.RightmostDistinguished(config, state.TreeHead.TreeSize, provider)
+	if err != nil {
+		return 0, err
+	} else if rightmostDLE == nil {
+		return 0, errors.New("unable to make request if no distinguished log entries exist")
+	}
+
+	return *rightmostDLE, nil
+}
+
+func parseLabelState(config *structs.PublicConfig, raw []byte) (*structs.ClientLabelState, error) {
+	if raw == nil {
+		return &structs.ClientLabelState{}, nil
+	}
+
+	buf := bytes.NewBuffer(raw)
+	state, err := structs.NewClientLabelState(config.Suite, buf)
+	if err != nil {
+		return nil, err
+	} else if buf.Len() != 0 {
+		return nil, errors.New("unexpected data appended to client label state")
+	}
+
+	return state, nil
+}
+
 func verifyUpdateValue(
 	config *structs.PublicConfig,
 	label []byte,
@@ -287,4 +329,75 @@ func simplifyMonitoringMap(ptrs map[uint64]uint32, n uint64) {
 			return
 		}
 	}
+}
+
+func updateContactState(
+	state *structs.ClientLabelState,
+	x, n uint64,
+	ver uint32,
+) (uint64, error) {
+	contact := algorithms.NewContactState(state.Contact)
+
+	path := append([]uint64{x}, math.RightDirectPath(x, n)...)
+	for _, pos := range path {
+		posVer, ok := contact.Ptrs[pos]
+		if ok && posVer > ver {
+			break
+		}
+		contact.Ptrs[pos] = ver
+		x = pos
+	}
+	simplifyMonitoringMap(contact.Ptrs, n)
+
+	state.Contact = contact.Struct()
+	return x, nil
+}
+
+func updateRetainedVersions(
+	state *structs.ClientLabelState,
+	versions map[uint32]prefix.Entry,
+) error {
+	// Calculate the set of versions we need to retain: 1.) versions in a
+	// monitoring binary ladder for any version being contact monitored, and 2.)
+	// versions in a search binary ladder for any version that's at or to the
+	// right of `Starting` (or just 0 if there are none).
+	required := make(map[uint32]struct{})
+
+	for _, entry := range state.Contact {
+		for _, ver := range math.MonitoringBinaryLadder(entry.Version) {
+			required[ver] = struct{}{}
+		}
+	}
+
+	if state.Owner != nil {
+		starting := state.Owner.VerAtStarting
+		ownedVersions := make([]uint32, 0)
+		if starting >= 0 {
+			ownedVersions = append(ownedVersions, uint32(starting))
+		}
+		for i := range len(state.Owner.UpcomingVers) {
+			ownedVersions = append(ownedVersions, uint32(starting+i+1))
+		}
+
+		for _, ver := range allLadderVersions(ownedVersions) {
+			required[ver] = struct{}{}
+		}
+	}
+
+	// Build the slice of RetainedVersion structures that will be stored.
+	retained := make([]structs.RetainedVersion, 0, len(required))
+	for ver, _ := range required {
+		entry, ok := versions[ver]
+		if !ok {
+			return errors.New("required version not found")
+		}
+		retained = append(retained, structs.RetainedVersion{
+			Version:    ver,
+			VrfOutput:  entry.VrfOutput,
+			Commitment: entry.Commitment,
+		})
+	}
+	state.Versions = retained
+
+	return nil
 }
