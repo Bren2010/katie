@@ -98,8 +98,9 @@ func (rph *ReceivedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []b
 	return addVersion(rph.cs, rph.versions, ver, vrfOutput, commitment)
 }
 
-func (rph *ReceivedProofHandle) Versions() map[uint32]prefix.Entry {
-	return rph.versions
+func (rph *ReceivedProofHandle) GetVersion(ver uint32) (prefix.Entry, bool) {
+	entry, ok := rph.versions[ver]
+	return entry, ok
 }
 
 func (rph *ReceivedProofHandle) GetTimestamp(x uint64) (uint64, error) {

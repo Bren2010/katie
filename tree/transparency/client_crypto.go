@@ -6,7 +6,6 @@ import (
 
 	"github.com/Bren2010/katie/crypto/commitments"
 	"github.com/Bren2010/katie/tree/log"
-	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -78,6 +77,16 @@ func (v *verifier) monitor() (*algorithms.Monitor, error) {
 
 func (v *verifier) rightmostDistinguished() (*uint64, error) {
 	return algorithms.RightmostDistinguished(v.config, v.n, v.provider)
+}
+
+func (v *verifier) addLabelState(state *structs.ClientLabelState) error {
+	for _, entry := range state.Versions {
+		err := v.handle.AddVersion(entry.Version, entry.VrfOutput, entry.Commitment)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (v *verifier) processLadder(
@@ -355,7 +364,7 @@ func updateContactState(
 
 func updateRetainedVersions(
 	state *structs.ClientLabelState,
-	versions map[uint32]prefix.Entry,
+	handle *algorithms.ReceivedProofHandle,
 ) error {
 	// Calculate the set of versions we need to retain: 1.) versions in a
 	// monitoring binary ladder for any version being contact monitored, and 2.)
@@ -387,7 +396,7 @@ func updateRetainedVersions(
 	// Build the slice of RetainedVersion structures that will be stored.
 	retained := make([]structs.RetainedVersion, 0, len(required))
 	for ver, _ := range required {
-		entry, ok := versions[ver]
+		entry, ok := handle.GetVersion(ver)
 		if !ok {
 			return errors.New("required version not found")
 		}

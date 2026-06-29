@@ -217,13 +217,13 @@ func (c *Client) search(
 		labelState, err := c.getLabelState(req.Label)
 		if err != nil {
 			return err
+		} else if err := v.addLabelState(labelState); err != nil {
+			return err
 		}
 		terminal, err = updateContactState(labelState, terminal, v.n, target)
 		if err != nil {
 			return err
-		}
-		err = updateRetainedVersions(labelState, v.handle.Versions())
-		if err != nil {
+		} else if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
 		}
 		return c.putLabelState(updated, req.Label, labelState, terminal)
@@ -235,27 +235,32 @@ func (c *Client) OwnerInit(label []byte) (
 	VerifyFunc[*structs.OwnerInitResponse],
 	error,
 ) {
+	state, err := c.getState()
+	if err != nil {
+		return nil, nil, err
+	}
 	labelState, err := c.getLabelState(label)
 	if err != nil {
 		return nil, nil, err
 	} else if labelState != nil && labelState.Owner != nil {
 		return nil, nil, errors.New("label is already owned")
 	}
-
-	last, start, err := c.lastAndRightmostDLE()
+	start, err := getDistinguished(c.config, state)
 	if err != nil {
 		return nil, nil, err
 	}
-	req := &structs.OwnerInitRequest{Last: &last, Label: label, Start: start}
-	return req, c.ownerInit(labelState, req), nil
+
+	req := &structs.OwnerInitRequest{Last: getLast(state), Label: label, Start: start}
+	return req, c.ownerInit(state, labelState, req), nil
 }
 
 func (c *Client) ownerInit(
+	state *structs.ClientState,
 	labelState *structs.ClientLabelState,
 	req *structs.OwnerInitRequest,
 ) VerifyFunc[*structs.OwnerInitResponse] {
 	return func(res *structs.OwnerInitResponse) error {
-		v, err := c.start(req.Last, res.FullTreeHead, res.Init)
+		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Init)
 		if err != nil {
 			return err
 		}
@@ -273,9 +278,8 @@ func (c *Client) ownerInit(
 			greatestVersions[ver] = struct{}{}
 		}
 		for i, ver := range ladder {
-			if _, ok := greatestVersions[ver]; !ok {
-				continue
-			} else if res.BinaryLadder[i].Commitment == nil {
+			_, ok := greatestVersions[ver]
+			if ok && res.BinaryLadder[i].Commitment == nil {
 				return errors.New("commitment not provided when expected")
 			}
 		}
@@ -299,6 +303,11 @@ func (c *Client) ownerInit(
 
 		// Update the global and label-specific state.
 		labelState.Owner = monitor.Owner.Struct()
+		if err := v.addLabelState(labelState); err != nil {
+			return err
+		} else if err := updateRetainedVersions(labelState, v.handle); err != nil {
+			return err
+		}
 		return c.putLabelState(updated, req.Label, labelState, req.Start)
 	}
 }
