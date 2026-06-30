@@ -29,6 +29,14 @@ func (cs *ContactState) Struct() []structs.MonitorMapEntry {
 	for pos, ver := range cs.Ptrs {
 		out = append(out, structs.MonitorMapEntry{Position: pos, Version: ver})
 	}
+	slices.SortFunc(out, func(a, b structs.MonitorMapEntry) int {
+		if a.Position < b.Position {
+			return -1
+		} else if a.Position > b.Position {
+			return 1
+		}
+		return 0
+	})
 	return out
 }
 

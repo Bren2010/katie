@@ -76,6 +76,8 @@ func (c *Client) getStaleLabel(cutoff uint64) ([]byte, *structs.ClientLabelState
 	label, raw, err := c.tx.GetStaleLabel(cutoff)
 	if err != nil {
 		return nil, nil, err
+	} else if label == nil {
+		return nil, nil, nil
 	}
 	state, err := parseLabelState(c.config, raw)
 	if err != nil {
@@ -230,6 +232,8 @@ func (c *Client) search(
 	}
 }
 
+// OwnerInit returns an OwnerInitRequest for the requested `label` and a
+// function to verify the corresponding OwnerInitResponse.
 func (c *Client) OwnerInit(label []byte) (
 	*structs.OwnerInitRequest,
 	VerifyFunc[*structs.OwnerInitResponse],
@@ -312,32 +316,44 @@ func (c *Client) ownerInit(
 	}
 }
 
+// Monitor determines a single label where monitoring is recommended and returns
+// either a ContactMonitorRequest or an OwnerMonitorRequest, depending on
+// whether the label is owned or not. It returns a function to verify the
+// corresponding ContactMonitorResponse or OwnerMonitorResponse.
+//
+// This function may return nil if no label needs to be monitored right now.
 func (c *Client) Monitor() (
 	structs.Marshaller, // *structs.ContactMonitorRequest or *structs.OwnerMonitorRequest
 	VerifyFunc[structs.Marshaller], // *structs.ContactMonitorResponse or *structs.OwnerMonitorResponse
 	error,
 ) {
-	last, cutoff, err := c.lastAndRightmostDLE()
+	state, err := c.getState()
+	if err != nil {
+		return nil, nil, err
+	}
+	cutoff, err := getDistinguished(c.config, state)
 	if err != nil {
 		return nil, nil, err
 	}
 	label, labelState, err := c.getStaleLabel(cutoff)
 	if err != nil {
 		return nil, nil, err
-	} else if labelState == nil {
+	} else if label == nil {
+		return nil, nil, nil
+	} else if len(labelState.Contact) == 0 && labelState.Owner == nil {
 		return nil, nil, errors.New("unexpected error occurred")
 	}
 
 	if labelState.Owner == nil {
 		req := &structs.ContactMonitorRequest{
-			Last:    &last,
+			Last:    getLast(state),
 			Label:   label,
 			Entries: labelState.Contact,
 		}
-		return req, c.contactMonitor(labelState, req), nil
+		return req, c.contactMonitor(state, labelState, req), nil
 	}
 	req := &structs.OwnerMonitorRequest{
-		Last:    &last,
+		Last:    getLast(state),
 		Label:   label,
 		Entries: labelState.Contact,
 		Start:   labelState.Owner.Starting,
@@ -347,10 +363,11 @@ func (c *Client) Monitor() (
 		greatest := uint32(greatest)
 		req.GreatestVersion = &greatest
 	}
-	return req, c.ownerMonitor(labelState, req), nil
+	return req, c.ownerMonitor(state, labelState, req), nil
 }
 
 func (c *Client) contactMonitor(
+	state *structs.ClientState,
 	labelState *structs.ClientLabelState,
 	req *structs.ContactMonitorRequest,
 ) VerifyFunc[structs.Marshaller] {
@@ -361,8 +378,10 @@ func (c *Client) contactMonitor(
 		}
 
 		// Verify the proof.
-		v, err := c.start(req.Last, res.FullTreeHead, res.Monitor)
+		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Monitor)
 		if err != nil {
+			return err
+		} else if err := v.addLabelState(labelState); err != nil {
 			return err
 		} else if err := v.updateView(); err != nil {
 			return err
@@ -382,6 +401,9 @@ func (c *Client) contactMonitor(
 
 		// Update the global and label-specific state.
 		labelState.Contact = monitor.Contact.Struct()
+		if err := updateRetainedVersions(labelState, v.handle); err != nil {
+			return err
+		}
 
 		terminal, err := v.rightmostDistinguished()
 		if err != nil {
@@ -395,6 +417,7 @@ func (c *Client) contactMonitor(
 }
 
 func (c *Client) ownerMonitor(
+	state *structs.ClientState,
 	labelState *structs.ClientLabelState,
 	req *structs.OwnerMonitorRequest,
 ) VerifyFunc[structs.Marshaller] {
@@ -405,8 +428,10 @@ func (c *Client) ownerMonitor(
 		}
 
 		// Verify the proof.
-		v, err := c.start(req.Last, res.FullTreeHead, res.Monitor)
+		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Monitor)
 		if err != nil {
+			return err
+		} else if err := v.addLabelState(labelState); err != nil {
 			return err
 		} else if err := v.updateView(); err != nil {
 			return err
@@ -430,7 +455,9 @@ func (c *Client) ownerMonitor(
 		// Update the global and label-specific state.
 		labelState.Contact = monitor.Contact.Struct()
 		labelState.Owner = monitor.Owner.Struct()
-
+		if err := updateRetainedVersions(labelState, v.handle); err != nil {
+			return err
+		}
 		return c.putLabelState(updated, req.Label, labelState, labelState.Owner.Starting)
 	}
 }
