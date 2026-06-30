@@ -41,6 +41,40 @@ func (t *Tree) ManagerUpdate(
 	return ch, nil
 }
 
+// updateLadderVersions returns the set of versions that a VRF proof needs to be
+// provided for in an UpdateResponse, where the first version created in the
+// UpdateResponse is `startVer` and the final version created is `endVer`.
+//
+// Specifically: the versions in a search binary ladder for `endVer`, plus
+// versions in the range [startVer, endVer), excluding versions that exist in
+// the search binary ladder for `startVer-1`.
+func updateLadderVersions(startVer, endVer uint32) []uint32 {
+	dedup := make(map[uint32]struct{})
+
+	for _, ver := range math.SearchBinaryLadder(endVer, endVer, nil, nil) {
+		dedup[ver] = struct{}{}
+	}
+	for ver := startVer; ver < endVer; ver++ {
+		dedup[ver] = struct{}{}
+	}
+	if startVer == 0 {
+		delete(dedup, 0)
+	} else {
+		for _, ver := range math.SearchBinaryLadder(startVer-1, startVer-1, nil, nil) {
+			delete(dedup, ver)
+		}
+	}
+
+	// Convert `dedup` into a sorted slice of versions.
+	versions := make([]uint32, 0, len(dedup))
+	for ver := range dedup {
+		versions = append(versions, ver)
+	}
+	slices.Sort(versions)
+
+	return versions
+}
+
 type updater struct {
 	tree *Tree
 	ctx  context.Context
@@ -278,35 +312,7 @@ func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []st
 // version inserted. `startVer` and `endVer` are the same if only one version
 // was inserted.
 func (u *updater) ladder(startVer, endVer int) ([]structs.BinaryLadderStep, error) {
-	// Compute the set of versions that we need to compute VRF outputs for:
-	// versions in a search binary ladder for `endVer`, plus versions in the
-	// range [startVer, endVer), excluding versions that exist in the search
-	// binary ladder for `startVer-1`.
-	dedup := make(map[uint32]struct{})
-
-	for _, ver := range math.SearchBinaryLadder(uint32(endVer), uint32(endVer), nil, nil) {
-		dedup[ver] = struct{}{}
-	}
-	for ver := startVer; ver < endVer; ver++ {
-		dedup[uint32(ver)] = struct{}{}
-	}
-	if startVer == 0 {
-		delete(dedup, 0)
-	} else {
-		for _, ver := range math.SearchBinaryLadder(uint32(startVer-1), uint32(startVer-1), nil, nil) {
-			delete(dedup, ver)
-		}
-	}
-
-	// Convert `dedup` into a sorted slice of versions.
-	versions := make([]uint32, 0, len(dedup))
-	for ver := range dedup {
-		versions = append(versions, ver)
-	}
-	slices.Sort(versions)
-
-	// Compute VRF outputs and load commitments for (maybe) existing lesser
-	// versions.
+	versions := updateLadderVersions(uint32(startVer), uint32(endVer))
 	return u.tree.getBinaryLadder(u.label, versions, startVer-1, u.tree.treeHead.TreeSize)
 }
 

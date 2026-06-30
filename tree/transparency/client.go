@@ -346,22 +346,20 @@ func (c *Client) Monitor() (
 
 	if labelState.Owner == nil {
 		req := &structs.ContactMonitorRequest{
-			Last:    getLast(state),
+			Last: getLast(state),
+
 			Label:   label,
 			Entries: labelState.Contact,
 		}
 		return req, c.contactMonitor(state, labelState, req), nil
 	}
 	req := &structs.OwnerMonitorRequest{
-		Last:    getLast(state),
-		Label:   label,
-		Entries: labelState.Contact,
-		Start:   labelState.Owner.Starting,
-	}
-	greatest := labelState.Owner.VerAtStarting + len(labelState.Owner.UpcomingVers)
-	if greatest >= 0 {
-		greatest := uint32(greatest)
-		req.GreatestVersion = &greatest
+		Last: getLast(state),
+
+		Label:           label,
+		Entries:         labelState.Contact,
+		Start:           labelState.Owner.Starting,
+		GreatestVersion: greatestVersion(labelState.Owner),
 	}
 	return req, c.ownerMonitor(state, labelState, req), nil
 }
@@ -462,10 +460,153 @@ func (c *Client) ownerMonitor(
 	}
 }
 
+// Update returns an UpdateRequest to create new versions of `label` with the
+// given `values`. It returns a StreamVerifier that can be used to process a
+// stream of UpdateResponse structures.
 func (c *Client) Update(label []byte, values [][]byte) (
 	*structs.UpdateRequest,
-	VerifyFunc[*structs.UpdateResponse],
+	*StreamVerifier,
 	error,
 ) {
-	panic("not implemented")
+	state, err := c.getState()
+	if err != nil {
+		return nil, nil, err
+	}
+	labelState, err := c.getLabelState(label)
+	if err != nil {
+		return nil, nil, err
+	} else if labelState == nil || labelState.Owner == nil {
+		return nil, nil, errors.New("label must be owned to be updated")
+	}
+
+	labelValues := make([]structs.LabelValue, len(values))
+	for i, val := range values {
+		labelValues[i] = structs.LabelValue{Value: val}
+	}
+	req := &structs.UpdateRequest{
+		Last: getLast(state),
+
+		Label:           label,
+		GreatestVersion: greatestVersion(labelState.Owner),
+		Values:          labelValues,
+	}
+	verifier := &StreamVerifier{
+		client:     c,
+		state:      state,
+		labelState: labelState,
+		req:        req,
+	}
+	return req, verifier, nil
+}
+
+// StreamVerifier is used to verify a stream of UpdateResponse structures
+// without initiating a new request between each one.
+type StreamVerifier struct {
+	client     *Client
+	state      *structs.ClientState
+	labelState *structs.ClientLabelState
+	req        *structs.UpdateRequest
+}
+
+func (sv *StreamVerifier) verifyValues(
+	values []structs.LabelValue,
+	res *structs.UpdateResponse,
+) (uint32, map[uint32][]byte, error) {
+	if len(res.Info) == 0 || len(res.Info) != len(values) {
+		return 0, nil, errors.New("unable to process update response")
+	}
+
+	startVer := uint32(0)
+	if greatest := greatestVersion(sv.labelState.Owner); greatest != nil {
+		startVer = *greatest + 1
+	}
+	commitments := make(map[uint32][]byte)
+
+	for i, val := range values {
+		ver := startVer + uint32(i)
+		info := res.Info[i]
+		update := structs.UpdateValue{Value: val.Value, UpdateSuffix: info.UpdateSuffix}
+
+		// If Third-Party Management is used, verify signature.
+		err := verifyUpdateValue(sv.client.config, sv.req.Label, ver, update)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		// Compute commitment for version.
+		commitment, err := computeCommitment(sv.client.config, info.Opening, sv.req.Label, ver, update)
+		if err != nil {
+			return 0, nil, err
+		}
+		commitments[ver] = commitment
+	}
+
+	return startVer, commitments, nil
+}
+
+// Verify processes the given UpdateResponse. If it returns an error, the
+// StreamVerifier is invalidated and should no longer be used.
+func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
+	var (
+		startVer    uint32
+		commitments map[uint32][]byte
+		err         error
+	)
+	if len(res.Values) == 0 {
+		startVer, commitments, err = sv.verifyValues(sv.req.Values, res)
+	} else {
+		startVer, commitments, err = sv.verifyValues(res.Values, res)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Verify that no commitment is provided for a version greater than or equal
+	// to `startVer`.
+	ladder := updateLadderVersions(startVer, startVer+uint32(len(res.Info)-1))
+	for i, ver := range ladder {
+		if ver >= startVer && res.BinaryLadder[i].Commitment != nil {
+			return errors.New("commitment provided when not expected")
+		}
+	}
+
+	// Verify the expected number of entries is present in res.BinaryLadder.
+	v, err := newVerifier(sv.client.config, sv.state, getLast(sv.state), res.FullTreeHead, res.Update)
+	if err != nil {
+		return err
+	} else if err := v.addLabelState(sv.labelState); err != nil {
+		return err
+	}
+	err = v.processLadder(sv.req.Label, res.BinaryLadder, ladder, commitments)
+	if err != nil {
+		return err
+	}
+
+	// Verify the proof.
+	if err := v.updateView(); err != nil {
+		return err
+	}
+	monitor, err := v.monitor()
+	if err != nil {
+		return err
+	}
+	monitor.Contact = algorithms.NewContactState(sv.labelState.Contact)
+	monitor.Owner = algorithms.NewOwnerState(sv.labelState.Owner)
+	if err := monitor.Update(res.Position, len(res.Info)); err != nil {
+		return err
+	}
+	updated, err := v.finish()
+	if err != nil {
+		return err
+	}
+
+	// Update the global and label-specific state.
+	sv.state = updated
+	sv.labelState.Contact = monitor.Contact.Struct()
+	sv.labelState.Owner = monitor.Owner.Struct()
+	if err := updateRetainedVersions(sv.labelState, v.handle); err != nil {
+		return err
+	}
+
+	return sv.client.putLabelState(updated, sv.req.Label, sv.labelState, sv.labelState.Owner.Starting)
 }

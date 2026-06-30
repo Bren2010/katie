@@ -11,6 +11,8 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
+// verifier abstracts CombinedTreeProof verification to make it slightly simpler
+// for the methods on Client.
 type verifier struct {
 	config *structs.PublicConfig
 	state  *structs.ClientState
@@ -79,6 +81,10 @@ func (v *verifier) rightmostDistinguished() (*uint64, error) {
 	return algorithms.RightmostDistinguished(v.config, v.n, v.provider)
 }
 
+// addLabelState adds all of the retained VRF outputs and commitments to the
+// ProofHandle so that they can be used in proof verification. It also ensures,
+// if other VRF outputs / commitments were provided in the query response, that
+// those are consistent with what we've retained.
 func (v *verifier) addLabelState(state *structs.ClientLabelState) error {
 	for _, entry := range state.Versions {
 		err := v.handle.AddVersion(entry.Version, entry.VrfOutput, entry.Commitment)
@@ -89,6 +95,9 @@ func (v *verifier) addLabelState(state *structs.ClientLabelState) error {
 	return nil
 }
 
+// processLadder converts all of the VRF proofs in `ladder` into VRF outputs and
+// adds them to the ProofHandle. Any manually-computed commitments that should
+// be used for a label version are provided in `manual`.
 func (v *verifier) processLadder(
 	label []byte,
 	ladder []structs.BinaryLadderStep,
@@ -191,6 +200,8 @@ func (v *verifier) verifyTreeHead(root, rootP []byte) error {
 	return nil
 }
 
+// finish computes the final tree root, verifies the transparency log's
+// signature over it, and returns the new state for the client to retain.
 func (v *verifier) finish() (*structs.ClientState, error) {
 	result, err := v.provider.Finish(v.n, v.nP, v.m)
 	if err != nil {
@@ -255,6 +266,15 @@ func getDistinguished(config *structs.PublicConfig, state *structs.ClientState) 
 	return *rightmostDLE, nil
 }
 
+func greatestVersion(owner *structs.LabelOwnerState) *uint32 {
+	greatest := owner.VerAtStarting + len(owner.UpcomingVers)
+	if greatest >= 0 {
+		greatest := uint32(greatest)
+		return &greatest
+	}
+	return nil
+}
+
 func parseLabelState(config *structs.PublicConfig, raw []byte) (*structs.ClientLabelState, error) {
 	if raw == nil {
 		return &structs.ClientLabelState{}, nil
@@ -271,6 +291,8 @@ func parseLabelState(config *structs.PublicConfig, raw []byte) (*structs.ClientL
 	return state, nil
 }
 
+// verifyUpdateValue checks that, if Third-Party Management is used, that the
+// signature from the Service Operator is valid.
 func verifyUpdateValue(
 	config *structs.PublicConfig,
 	label []byte,
@@ -319,6 +341,7 @@ func computeCommitment(
 	return commitments.Commit(config.Suite, opening, commitmentValue), nil
 }
 
+// simplifyMonitoringMap removes any redundant entries from the map `ptrs`.
 func simplifyMonitoringMap(ptrs map[uint64]uint32, n uint64) {
 	for {
 		modified := false
@@ -340,6 +363,9 @@ func simplifyMonitoringMap(ptrs map[uint64]uint32, n uint64) {
 	}
 }
 
+// updateContactState is used specifically after Search operations. It computes
+// the rightmost terminal log entry for the search, and removes any map entries
+// that no longer need to be monitored as a result of this search.
 func updateContactState(
 	state *structs.ClientLabelState,
 	x, n uint64,
@@ -362,6 +388,8 @@ func updateContactState(
 	return x, nil
 }
 
+// updateRetainedVersions recomputes the set of VRF outputs and commitments that
+// the client should retain.
 func updateRetainedVersions(
 	state *structs.ClientLabelState,
 	handle *algorithms.ReceivedProofHandle,
