@@ -6,13 +6,16 @@ import (
 	"github.com/Bren2010/katie/tree/prefix"
 )
 
+const maxUint32 uint64 = (1 << 32) - 1
+
 func baseBinaryLadder(n uint32) []uint32 {
-	out := make([]uint32, 0)
+	n64 := uint64(n)
+	out := make([]uint64, 0)
 
 	for {
-		val := (uint32(1) << len(out)) - 1
+		val := (uint64(1) << len(out)) - 1
 		out = append(out, val)
-		if val > n {
+		if val > n64 {
 			break
 		}
 	}
@@ -21,14 +24,20 @@ func baseBinaryLadder(n uint32) []uint32 {
 	for lowerBound+1 < upperBound {
 		val := (lowerBound + upperBound) / 2
 		out = append(out, val)
-		if val <= n {
+		if val <= n64 && val <= maxUint32 {
 			lowerBound = val
 		} else {
 			upperBound = val
 		}
 	}
 
-	return out
+	out32 := make([]uint32, 0, len(out))
+	for _, v := range out {
+		if v <= maxUint32 {
+			out32 = append(out32, uint32(v))
+		}
+	}
+	return out32
 }
 
 // SearchBinaryLadder returns the versions of a label to lookup for a search
@@ -72,8 +81,7 @@ func SearchBinaryLadder(
 // MonitoringBinaryLadder returns the versions of a label to lookup for a
 // monitoring binary ladder.
 //
-// `t` is the target version of the label. `leftInclusion` contains versions
-// where an inclusion proof was already provided to the left.
+// `t` is the target version of the label.
 func MonitoringBinaryLadder(t uint32) []uint32 {
 	out := make([]uint32, 0)
 
