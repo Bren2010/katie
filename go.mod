@@ -1,6 +1,6 @@
 module github.com/Bren2010/katie
 
-go 1.22
+go 1.25
 
 require (
 	filippo.io/edwards25519 v1.1.0
