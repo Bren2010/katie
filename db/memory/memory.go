@@ -233,6 +233,9 @@ func NewManagedLogStore() *ManagedLogStore {
 }
 
 func (mls *ManagedLogStore) IncrementGreatestVersion(label []byte, count int) (int, error) {
+	if count < 1 {
+		return 0, errors.New("count must be greater than or equal to 1")
+	}
 	labelStr := fmt.Sprintf("%x", label)
 	ver, ok := mls.Data[labelStr]
 	if !ok {

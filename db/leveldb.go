@@ -57,22 +57,14 @@ func (c *ldbConn) Commit() error {
 
 	b := new(leveldb.Batch)
 	for key, value := range c.batch {
-		if key == leveldbTreeHeadKey {
-			continue
-		} else if value == nil {
+		if value == nil {
 			b.Delete([]byte(key))
 		} else {
 			b.Put([]byte(key), value)
 		}
 	}
-	if err := c.conn.Write(b, nil); err != nil {
+	if err := c.conn.Write(b, &opt.WriteOptions{Sync: true}); err != nil {
 		return err
-	}
-	if value, ok := c.batch[leveldbTreeHeadKey]; ok {
-		wo := &opt.WriteOptions{Sync: true}
-		if err := c.conn.Put([]byte(leveldbTreeHeadKey), value, wo); err != nil {
-			return err
-		}
 	}
 
 	c.batch = make(map[string][]byte)
@@ -147,7 +139,7 @@ func (ldb *ldbTransparencyStore) DeleteIndex(label []byte) error {
 }
 
 func (ldb *ldbTransparencyStore) GetVersion(label []byte, ver uint32) ([]byte, error) {
-	raw, err := ldb.conn.Get("v" + fmt.Sprintf("%x:%x", label, ver))
+	raw, err := ldb.conn.Get("v" + fmt.Sprintf("%x:%v", label, ver))
 	if err == leveldb.ErrNotFound {
 		return nil, nil
 	} else if err != nil {
@@ -157,11 +149,11 @@ func (ldb *ldbTransparencyStore) GetVersion(label []byte, ver uint32) ([]byte, e
 }
 
 func (ldb *ldbTransparencyStore) PutVersion(label []byte, ver uint32, data []byte) error {
-	return ldb.conn.Put("v"+fmt.Sprintf("%x:%x", label, ver), data)
+	return ldb.conn.Put("v"+fmt.Sprintf("%x:%v", label, ver), data)
 }
 
 func (ldb *ldbTransparencyStore) DeleteVersion(label []byte, ver uint32) error {
-	return ldb.conn.Delete("v" + fmt.Sprintf("%x:%x", label, ver))
+	return ldb.conn.Delete("v" + fmt.Sprintf("%x:%v", label, ver))
 }
 
 func (ldb *ldbTransparencyStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
