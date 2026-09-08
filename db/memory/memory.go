@@ -1,7 +1,12 @@
 // Package memory provides in-memory implementations of the database interfaces.
+//
+// It gets its own subpackage rather than living in the parent package so that
+// all of the structures and fields can be exported without causing excessive
+// pollution.
 package memory
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -18,7 +23,7 @@ func dup(b []byte) []byte {
 }
 
 type TransparencyStore struct {
-	TreeHead, Auditor []byte
+	TreeHead, Auditor *[]byte
 	Indices           map[string][]byte
 	Versions          map[string][]byte
 	LogEntries        map[uint64][]byte
@@ -30,7 +35,10 @@ type TransparencyStore struct {
 }
 
 func NewTransparencyStore() *TransparencyStore {
+	var treeHead, auditor []byte
 	return &TransparencyStore{
+		TreeHead:   &treeHead,
+		Auditor:    &auditor,
 		Indices:    make(map[string][]byte),
 		Versions:   make(map[string][]byte),
 		LogEntries: make(map[uint64][]byte),
@@ -53,21 +61,21 @@ func (ts *TransparencyStore) Clone() db.TransparencyStore {
 		logStore:    ts.logStore,
 		prefixStore: ts.prefixStore,
 
-		ReadOnly: false,
+		ReadOnly: true,
 	}
 }
 
 func (ts *TransparencyStore) GetTreeHead() ([]byte, []byte, error) {
-	return dup(ts.TreeHead), dup(ts.Auditor), nil
+	return dup(*ts.TreeHead), dup(*ts.Auditor), nil
 }
 
 func (ts *TransparencyStore) PutTreeHead(raw []byte) error {
-	ts.TreeHead = dup(raw)
+	*ts.TreeHead = dup(raw)
 	return nil
 }
 
 func (ts *TransparencyStore) PutAuditorTreeHead(raw []byte) error {
-	ts.Auditor = dup(raw)
+	*ts.Auditor = dup(raw)
 	return nil
 }
 
@@ -187,7 +195,6 @@ func (ps *PrefixStore) BatchGet(keys []string) (map[string][]byte, error) {
 			out[key] = dup(val)
 		}
 	}
-
 	return out, nil
 }
 
@@ -227,11 +234,66 @@ func NewManagedLogStore() *ManagedLogStore {
 
 func (mls *ManagedLogStore) IncrementGreatestVersion(label []byte, count int) (int, error) {
 	labelStr := fmt.Sprintf("%x", label)
-
 	ver, ok := mls.Data[labelStr]
-	mls.Data[labelStr] += count
 	if !ok {
-		return -1, nil
+		ver = -1
 	}
+	mls.Data[labelStr] = ver + count
 	return ver, nil
+}
+
+type ClientLabelState struct {
+	Raw      []byte
+	Terminal uint64
+}
+
+type ClientStore struct {
+	State      []byte
+	LabelState map[string]ClientLabelState
+}
+
+func NewClientState() *ClientStore {
+	return &ClientStore{LabelState: make(map[string]ClientLabelState)}
+}
+
+func (cs *ClientStore) GetState() ([]byte, error) {
+	return dup(cs.State), nil
+}
+
+func (cs *ClientStore) GetLabelState(label []byte) ([]byte, error) {
+	return dup(cs.LabelState[hex.EncodeToString(label)].Raw), nil
+}
+
+func (cs *ClientStore) GetStaleLabel(cutoff uint64) ([]byte, []byte, error) {
+	for labelStr, state := range cs.LabelState {
+		if state.Terminal <= cutoff {
+			label, err := hex.DecodeString(labelStr)
+			if err != nil {
+				return nil, nil, err
+			}
+			return label, dup(state.Raw), nil
+		}
+	}
+	return nil, nil, nil
+}
+
+func (cs *ClientStore) PutState(raw []byte) error {
+	cs.State = dup(raw)
+	return nil
+}
+
+func (cs *ClientStore) PutLabelState(raw, label, rawLabel []byte, terminal uint64) error {
+	cs.State = dup(raw)
+
+	labelStr := hex.EncodeToString(label)
+	if rawLabel == nil {
+		delete(cs.LabelState, labelStr)
+	} else {
+		cs.LabelState[labelStr] = ClientLabelState{
+			Raw:      dup(rawLabel),
+			Terminal: terminal,
+		}
+	}
+
+	return nil
 }

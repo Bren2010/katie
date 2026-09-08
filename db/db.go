@@ -1,6 +1,15 @@
 // Package db implements database wrappers that match a common interface.
 package db
 
+func dup(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
+}
+
 // LogStore is the interface a Log Tree uses to communicate with its database.
 type LogStore interface {
 	BatchGet(keys []uint64) (map[uint64][]byte, error)
@@ -84,7 +93,8 @@ type ClientStore interface {
 	// updates the label-specific state for `label` to be `rawLabel` with
 	// terminal log entry `terminal` (used in GetStaleLabel).
 	//
-	// The global state and label-specific state are updated atomically.
 	// `rawLabel` may be nil, in which case the label-specific state is deleted.
+	// The global state and label-specific state are either both updated
+	// successfully, or neither are.
 	PutLabelState(raw, label, rawLabel []byte, terminal uint64) error
 }

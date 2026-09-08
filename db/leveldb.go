@@ -5,18 +5,10 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 const leveldbTreeHeadKey = "tree-head"
-
-func dup(in []byte) []byte {
-	if in == nil {
-		return nil
-	}
-	out := make([]byte, len(in))
-	copy(out, in)
-	return out
-}
 
 // ldbConn is a wrapper around a base LevelDB database that handles batching
 // writes between commits transparently.
@@ -40,11 +32,22 @@ func (c *ldbConn) Get(key string) ([]byte, error) {
 	return c.conn.Get([]byte(key), nil)
 }
 
-func (c *ldbConn) Put(key string, value []byte) {
+func (c *ldbConn) Put(key string, value []byte) error {
+	if c.readonly {
+		panic("connection is readonly")
+	} else if value == nil {
+		return errors.New("leveldb: unable to store nil value")
+	}
+	c.batch[key] = dup(value)
+	return nil
+}
+
+func (c *ldbConn) Delete(key string) error {
 	if c.readonly {
 		panic("connection is readonly")
 	}
-	c.batch[key] = dup(value)
+	c.batch[key] = nil
+	return nil
 }
 
 func (c *ldbConn) Commit() error {
@@ -66,7 +69,8 @@ func (c *ldbConn) Commit() error {
 		return err
 	}
 	if value, ok := c.batch[leveldbTreeHeadKey]; ok {
-		if err := c.conn.Put([]byte(leveldbTreeHeadKey), value, nil); err != nil {
+		wo := &opt.WriteOptions{Sync: true}
+		if err := c.conn.Put([]byte(leveldbTreeHeadKey), value, wo); err != nil {
 			return err
 		}
 	}
@@ -111,13 +115,11 @@ func (ldb *ldbTransparencyStore) GetTreeHead() ([]byte, []byte, error) {
 }
 
 func (ldb *ldbTransparencyStore) PutTreeHead(raw []byte) error {
-	ldb.conn.Put(leveldbTreeHeadKey, raw)
-	return nil
+	return ldb.conn.Put(leveldbTreeHeadKey, raw)
 }
 
 func (ldb *ldbTransparencyStore) PutAuditorTreeHead(raw []byte) error {
-	ldb.conn.Put("auditor-tree-head", raw)
-	return nil
+	return ldb.conn.Put("auditor-tree-head", raw)
 }
 
 func (ldb *ldbTransparencyStore) BatchGetIndex(labels [][]byte) ([][]byte, error) {
@@ -137,16 +139,11 @@ func (ldb *ldbTransparencyStore) BatchGetIndex(labels [][]byte) ([][]byte, error
 }
 
 func (ldb *ldbTransparencyStore) PutIndex(label, index []byte) error {
-	if index == nil {
-		return errors.New("leveldb: can not store nil value")
-	}
-	ldb.conn.Put("i"+fmt.Sprintf("%x", label), index)
-	return nil
+	return ldb.conn.Put("i"+fmt.Sprintf("%x", label), index)
 }
 
 func (ldb *ldbTransparencyStore) DeleteIndex(label []byte) error {
-	ldb.conn.Put("i"+fmt.Sprintf("%x", label), nil)
-	return nil
+	return ldb.conn.Delete("i" + fmt.Sprintf("%x", label))
 }
 
 func (ldb *ldbTransparencyStore) GetVersion(label []byte, ver uint32) ([]byte, error) {
@@ -160,16 +157,11 @@ func (ldb *ldbTransparencyStore) GetVersion(label []byte, ver uint32) ([]byte, e
 }
 
 func (ldb *ldbTransparencyStore) PutVersion(label []byte, ver uint32, data []byte) error {
-	if data == nil {
-		return errors.New("leveldb: can not store nil value")
-	}
-	ldb.conn.Put("v"+fmt.Sprintf("%x:%x", label, ver), data)
-	return nil
+	return ldb.conn.Put("v"+fmt.Sprintf("%x:%x", label, ver), data)
 }
 
 func (ldb *ldbTransparencyStore) DeleteVersion(label []byte, ver uint32) error {
-	ldb.conn.Put("v"+fmt.Sprintf("%x:%x", label, ver), nil)
-	return nil
+	return ldb.conn.Delete("v" + fmt.Sprintf("%x:%x", label, ver))
 }
 
 func (ldb *ldbTransparencyStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
@@ -189,16 +181,11 @@ func (ldb *ldbTransparencyStore) BatchGet(keys []uint64) (map[uint64][]byte, err
 }
 
 func (ldb *ldbTransparencyStore) Put(key uint64, data []byte) error {
-	if data == nil {
-		return errors.New("leveldb: can not store nil value")
-	}
-	ldb.conn.Put("t"+fmt.Sprint(key), data)
-	return nil
+	return ldb.conn.Put("t"+fmt.Sprint(key), data)
 }
 
 func (ldb *ldbTransparencyStore) Delete(key uint64) error {
-	ldb.conn.Put("t"+fmt.Sprint(key), nil)
-	return nil
+	return ldb.conn.Delete("t" + fmt.Sprint(key))
 }
 
 func (ldb *ldbTransparencyStore) LogStore() LogStore {
@@ -235,16 +222,11 @@ func (ls *ldbLogStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
 }
 
 func (ls *ldbLogStore) Put(key uint64, value []byte) error {
-	if value == nil {
-		return errors.New("leveldb: can not store nil value")
-	}
-	ls.conn.Put("l"+fmt.Sprint(key), value)
-	return nil
+	return ls.conn.Put("l"+fmt.Sprint(key), value)
 }
 
 func (ls *ldbLogStore) Delete(key uint64) error {
-	ls.conn.Put("l"+fmt.Sprint(key), nil)
-	return nil
+	return ls.conn.Delete("l" + fmt.Sprint(key))
 }
 
 // ldbPrefixStore implements the PrefixStore interface over LevelDB.
@@ -269,14 +251,9 @@ func (ps *ldbPrefixStore) BatchGet(keys []string) (map[string][]byte, error) {
 }
 
 func (ps *ldbPrefixStore) Put(key string, value []byte) error {
-	if value == nil {
-		return errors.New("leveldb: can not store nil value")
-	}
-	ps.conn.Put("p"+key, value)
-	return nil
+	return ps.conn.Put("p"+key, value)
 }
 
 func (ps *ldbPrefixStore) Delete(key string) error {
-	ps.conn.Put("p"+key, nil)
-	return nil
+	return ps.conn.Delete("p" + key)
 }
