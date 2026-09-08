@@ -379,8 +379,9 @@ type ManagerUpdateRequest struct {
 
 	Label           []byte
 	GreatestVersion *uint32
-	SignedVersion   uint32
 	Values          []UpdateValue
+
+	SignedVersion uint32
 }
 
 func NewManagerUpdateRequest(config *PublicConfig, buf *bytes.Buffer) (*ManagerUpdateRequest, error) {
@@ -388,6 +389,7 @@ func NewManagerUpdateRequest(config *PublicConfig, buf *bytes.Buffer) (*ManagerU
 	if err != nil {
 		return nil, err
 	}
+
 	label, err := readBytes[uint8](buf)
 	if err != nil {
 		return nil, err
@@ -396,17 +398,19 @@ func NewManagerUpdateRequest(config *PublicConfig, buf *bytes.Buffer) (*ManagerU
 	if err != nil {
 		return nil, err
 	}
-	signedVersion, err := readNumeric[uint32](buf)
-	if err != nil {
-		return nil, err
-	}
-	entries, err := readFuncSlice[uint8](buf, func(buf *bytes.Buffer) (*UpdateValue, error) {
+	values, err := readFuncSlice[uint8](buf, func(buf *bytes.Buffer) (*UpdateValue, error) {
 		return NewUpdateValue(config, buf)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &ManagerUpdateRequest{last, label, greatestVersion, signedVersion, entries}, nil
+
+	signedVersion, err := readNumeric[uint32](buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ManagerUpdateRequest{last, label, greatestVersion, values, signedVersion}, nil
 }
 
 func (mur *ManagerUpdateRequest) Marshal(buf *bytes.Buffer) error {
@@ -415,8 +419,11 @@ func (mur *ManagerUpdateRequest) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	writeOptionalNumeric(buf, mur.GreatestVersion)
+	if err := writeMarshalSlice[uint8](buf, mur.Values, "label value"); err != nil {
+		return err
+	}
 	writeNumeric(buf, mur.SignedVersion)
-	return writeMarshalSlice[uint8](buf, mur.Values, "label value")
+	return nil
 }
 
 type UpdateResponse struct {

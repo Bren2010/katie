@@ -75,6 +75,17 @@ func (ml *ManagedLog) Update(
 	ctx context.Context,
 	req *structs.UpdateRequest,
 ) (<-chan wire.UpdateResponse, error) {
+	if len(req.Values) == 0 {
+		return ml.log.ManagerUpdate(ctx, &structs.ManagerUpdateRequest{
+			Last: req.Last,
+
+			Label:           req.Label,
+			GreatestVersion: req.GreatestVersion,
+			Values:          nil,
+
+			SignedVersion: 0,
+		})
+	}
 	prev, err := ml.tx.IncrementGreatestVersion(req.Label, len(req.Values))
 	if err != nil {
 		return nil, err
@@ -108,7 +119,8 @@ func (ml *ManagedLog) Update(
 
 		Label:           req.Label,
 		GreatestVersion: req.GreatestVersion,
-		SignedVersion:   uint32(prev + 1),
 		Values:          values,
+
+		SignedVersion: uint32(prev + 1),
 	})
 }

@@ -15,30 +15,32 @@ func (t *Tree) Update(
 	ctx context.Context,
 	req *structs.UpdateRequest,
 ) (<-chan wire.UpdateResponse, error) {
-	ch := make(chan wire.UpdateResponse)
-
-	up := newUpdater(t, ctx, ch)
+	if t.config.Mode == structs.ThirdPartyManagement {
+		return nil, errors.New("update may not be called directly on third party manager")
+	}
+	up := newUpdater(t, ctx)
 	if err := up.setRequest(req); err != nil {
 		return nil, err
 	}
 	go up.process()
 
-	return ch, nil
+	return up.ch, nil
 }
 
 func (t *Tree) ManagerUpdate(
 	ctx context.Context,
 	req *structs.ManagerUpdateRequest,
 ) (<-chan wire.UpdateResponse, error) {
-	ch := make(chan wire.UpdateResponse)
-
-	up := newUpdater(t, ctx, ch)
+	if t.config.Mode != structs.ThirdPartyManagement {
+		return nil, errors.New("manager update may not be called when not using third party management")
+	}
+	up := newUpdater(t, ctx)
 	if err := up.setManagerRequest(req); err != nil {
 		return nil, err
 	}
 	go up.process()
 
-	return ch, nil
+	return up.ch, nil
 }
 
 // updateLadderVersions returns the set of versions that a VRF proof needs to be
@@ -82,15 +84,19 @@ type updater struct {
 
 	last      *uint64
 	label     []byte
-	signedVer *uint32
 	values    []structs.UpdateValue
+	signedVer *uint32
 
-	index []uint64 // index is the label's index.
+	index []uint64 // index is the label's index (= position of each version).
 	ver   int      // ver is the next version the user needs to be informed about.
 }
 
-func newUpdater(t *Tree, ctx context.Context, ch chan wire.UpdateResponse) *updater {
-	return &updater{tree: t, ctx: ctx, ch: ch}
+func newUpdater(t *Tree, ctx context.Context) *updater {
+	return &updater{
+		tree: t,
+		ctx:  ctx,
+		ch:   make(chan wire.UpdateResponse),
+	}
 }
 
 func (u *updater) setRequest(req *structs.UpdateRequest) error {
@@ -115,6 +121,8 @@ func (u *updater) setRequest(req *structs.UpdateRequest) error {
 }
 
 func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
+	// TODO: Sequence padding versions.
+
 	// Verify service operator signatures.
 	for i, val := range req.Values {
 		tbs, err := structs.Marshal(&structs.UpdateTBS{
@@ -140,8 +148,8 @@ func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
 
 	u.last = req.Last
 	u.label = req.Label
-	u.signedVer = &req.SignedVersion
 	u.values = req.Values
+	u.signedVer = &req.SignedVersion
 	u.index = indices[0]
 	u.ver = 0
 	if req.GreatestVersion != nil {
@@ -152,10 +160,10 @@ func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
 
 func (u *updater) send(res wire.UpdateResponse) bool {
 	select {
-	case u.ch <- res:
-		return true
 	case <-u.ctx.Done():
 		return false
+	case u.ch <- res:
+		return true
 	}
 }
 
@@ -261,7 +269,13 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 	monitor, err := algorithms.NewMonitor(t.config.Public(), n, provider)
 	if err != nil {
 		return nil, err
-	} else if err := monitor.Update(pos, len(info)); err != nil {
+	}
+	// monitor.Owner = &algorithms.OwnerState{
+	// 	VerAtStarting:
+	// 	UpcomingVers: ,
+	// }
+	// TODO: populate owner state
+	if err := monitor.Update(pos, len(info)); err != nil {
 		return nil, err
 	}
 	proof, err := provider.Output(n, nP, m)
