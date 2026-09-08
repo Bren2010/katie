@@ -46,7 +46,10 @@ func encodeToCurve(salt, m []byte) *edwards25519.Point {
 
 // generateNonce deterministically generates a private key from hStr.
 func generateNonce(lower, hStr []byte) *edwards25519.Scalar {
-	kStr := sha512.Sum512(append(lower, hStr...))
+	hashed := make([]byte, len(lower)+len(hStr))
+	copy(hashed, lower)
+	copy(hashed[len(lower):], hStr)
+	kStr := sha512.Sum512(hashed)
 
 	k, err := new(edwards25519.Scalar).SetUniformBytes(kStr[:])
 	if err != nil {

@@ -3,16 +3,42 @@ package p256
 
 import (
 	"bytes"
-	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
-	"math/big"
 
+	"filippo.io/bigmod"
 	"filippo.io/nistec"
 	"github.com/Bren2010/katie/crypto/vrf"
 )
+
+// order is the order of the P-256 base point, as a modulus for constant-time
+// scalar arithmetic.
+var order = func() *bigmod.Modulus {
+	m, err := bigmod.NewModulus([]byte{
+		0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84,
+		0xf3, 0xb9, 0xca, 0xc2, 0xfc, 0x63, 0x25, 0x51,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return m
+}()
+
+// newScalar returns `raw` as a scalar reduced modulo the group order, or an
+// error if `raw` is not in the range [1, order-1]. It runs in constant time.
+func newScalar(raw []byte) (*bigmod.Nat, error) {
+	scalar, err := bigmod.NewNat().SetBytes(raw, order)
+	if err != nil {
+		return nil, err
+	} else if scalar.IsZero() == 1 {
+		return nil, errors.New("scalar is zero")
+	}
+	return scalar, nil
+}
 
 // encodeToCurve implements the trial-and-increment algorithm for encoding a
 // byte string to a curve point.
@@ -58,7 +84,16 @@ func mac(key, message []byte) []byte {
 // generateNonce deterministically generates a private key from hStr.
 func generateNonce(priv, hStr []byte) []byte {
 	// a. h1 = H(m)
-	h1 := sha256.Sum256(hStr)
+	//
+	// Steps d and f below consume bits2octets(h1), which reduces h1 modulo the
+	// group order. Since the hash output and the group order have the same bit
+	// length, this only changes h1 when it's greater than or equal to the order.
+	h1Sum := sha256.Sum256(hStr)
+	h1Nat, err := bigmod.NewNat().SetOverflowingBytes(h1Sum[:], order)
+	if err != nil {
+		panic(err)
+	}
+	h1 := h1Nat.Bytes(order)
 
 	// b. V = 0x01 0x01 ... 0x01
 	V := make([]byte, 32)
@@ -74,7 +109,7 @@ func generateNonce(priv, hStr []byte) []byte {
 	buf.Write(V)
 	buf.WriteByte(0x00)
 	buf.Write(priv)
-	buf.Write(h1[:])
+	buf.Write(h1)
 
 	K = mac(K, buf.Bytes())
 
@@ -86,7 +121,7 @@ func generateNonce(priv, hStr []byte) []byte {
 	buf.Write(V)
 	buf.WriteByte(0x01)
 	buf.Write(priv)
-	buf.Write(h1[:])
+	buf.Write(h1)
 
 	K = mac(K, buf.Bytes())
 
@@ -99,8 +134,7 @@ func generateNonce(priv, hStr []byte) []byte {
 		V = mac(K, V)
 
 		// Return if acceptable.
-		vInt := new(big.Int).SetBytes(V)
-		if vInt.Sign() == 1 && vInt.Cmp(elliptic.P256().Params().N) == -1 {
+		if _, err := newScalar(V); err == nil {
 			return V
 		}
 
@@ -153,8 +187,7 @@ func GeneratePrivateKey() []byte {
 		k := make([]byte, 32)
 		rand.Read(k)
 
-		kInt := new(big.Int).SetBytes(k)
-		if kInt.Sign() == 1 && kInt.Cmp(elliptic.P256().Params().N) == -1 {
+		if _, err := newScalar(k); err == nil {
 			return k
 		}
 	}
@@ -164,8 +197,7 @@ func NewPrivateKey(raw []byte) (*PrivateKey, error) {
 	if len(raw) != 32 {
 		return nil, errors.New("vrf private key is unexpected length")
 	}
-	kInt := new(big.Int).SetBytes(raw)
-	if kInt.Sign() != 1 || kInt.Cmp(elliptic.P256().Params().N) != -1 {
+	if _, err := newScalar(raw); err != nil {
 		return nil, errors.New("vrf private key is malformed")
 	}
 
@@ -200,17 +232,26 @@ func (p *PrivateKey) Prove(m []byte) (output []byte, proof []byte) {
 	}
 	c := generateChallenge(p.point, H, Gamma, kB, kH)
 
-	cInt := new(big.Int).SetBytes(c)
-	xInt := new(big.Int).SetBytes(p.scalar)
-	kInt := new(big.Int).SetBytes(k)
-
-	sInt := new(big.Int).Mul(cInt, xInt)
-	sInt.Add(sInt, kInt).Mod(sInt, elliptic.P256().Params().N)
+	// s = (k + c*x) mod q, computed in constant time since it involves the
+	// private key.
+	cNat, err := bigmod.NewNat().SetBytes(c, order)
+	if err != nil {
+		panic(err)
+	}
+	xNat, err := newScalar(p.scalar)
+	if err != nil {
+		panic(err)
+	}
+	kNat, err := newScalar(k)
+	if err != nil {
+		panic(err)
+	}
+	s := cNat.Mul(xNat, order).Add(kNat, order)
 
 	proof = make([]byte, 33+16+32)
 	copy(proof[:33], Gamma.BytesCompressed())
 	copy(proof[33:49], c)
-	sInt.FillBytes(proof[49:])
+	copy(proof[49:], s.Bytes(order))
 
 	output = proofToHash(proof[:33])
 
@@ -260,8 +301,7 @@ func (p *PublicKey) verify(m, proof []byte) error {
 	copy(c[16:], proof[33:49])
 
 	s := proof[49:]
-	sInt := new(big.Int).SetBytes(s)
-	if sInt.Sign() != 1 || sInt.Cmp(elliptic.P256().Params().N) != -1 {
+	if _, err := bigmod.NewNat().SetBytes(s, order); err != nil {
 		return errors.New("vrf proof is malformed")
 	}
 
