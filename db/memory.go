@@ -53,7 +53,7 @@ func NewMemoryManagedLogStore() ManagedLogStore {
 	return memManagedLog{data: make(map[string]int)}
 }
 
-func (mls memManagedLog) IncrementGreatestVersion(label []byte, count int) (int, error) {
+func (mls memManagedLog) IncrementGreatestVersion(ctx context.Context, label []byte, count int) (int, error) {
 	if count < 1 {
 		return 0, errors.New("count must be greater than or equal to 1")
 	}

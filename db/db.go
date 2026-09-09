@@ -41,7 +41,7 @@ type ManagedLogStore interface {
 	// IncrementGreatestVersion atomically increments the greatest version of
 	// the label that exists by `count` and returns the previous greatest
 	// version of the label, or -1 if the label didn't exist previously.
-	IncrementGreatestVersion(label []byte, count int) (int, error)
+	IncrementGreatestVersion(ctx context.Context, label []byte, count int) (int, error)
 }
 
 // ClientStore is the interface that a Key Transparency client uses to interact
