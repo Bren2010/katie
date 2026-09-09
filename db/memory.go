@@ -6,17 +6,17 @@ import (
 	"fmt"
 )
 
-type memoryKeyValueStore struct {
+type memKeyValue struct {
 	Data map[string][]byte
 }
 
 // NewMemoryKeyValueStore returns an in-memory implementation of the
 // KeyValueStore interface.
 func NewMemoryKeyValueStore() KeyValueStore {
-	return memoryKeyValueStore{make(map[string][]byte)}
+	return memKeyValue{make(map[string][]byte)}
 }
 
-func (kv memoryKeyValueStore) BatchGet(ctx context.Context, keys []string) ([][]byte, error) {
+func (kv memKeyValue) BatchGet(ctx context.Context, keys []string) ([][]byte, error) {
 	out := make([][]byte, len(keys))
 	for i, key := range keys {
 		out[i] = dup(kv.Data[key])
@@ -24,7 +24,7 @@ func (kv memoryKeyValueStore) BatchGet(ctx context.Context, keys []string) ([][]
 	return out, nil
 }
 
-func (kv memoryKeyValueStore) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
+func (kv memKeyValue) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
 	for key, value := range batch {
 		kv.Data[key] = dup(value)
 	}
@@ -32,28 +32,28 @@ func (kv memoryKeyValueStore) Commit(ctx context.Context, batch map[string][]byt
 	return nil
 }
 
-type memoryAuditorStore struct {
+type memAuditor struct {
 	Data []byte
 }
 
-func NewMemoryAuditorStore() AuditorStore { return &memoryAuditorStore{} }
+func NewMemoryAuditorStore() AuditorStore { return &memAuditor{} }
 
-func (as *memoryAuditorStore) GetState() ([]byte, error) { return dup(as.Data), nil }
+func (as *memAuditor) GetState() ([]byte, error) { return dup(as.Data), nil }
 
-func (as *memoryAuditorStore) PutState(raw []byte) error {
+func (as *memAuditor) PutState(raw []byte) error {
 	as.Data = dup(raw)
 	return nil
 }
 
-type memoryManagedLogStore struct {
+type memManagedLog struct {
 	Data map[string]int
 }
 
 func NewMemoryManagedLogStore() ManagedLogStore {
-	return memoryManagedLogStore{Data: make(map[string]int)}
+	return memManagedLog{Data: make(map[string]int)}
 }
 
-func (mls memoryManagedLogStore) IncrementGreatestVersion(label []byte, count int) (int, error) {
+func (mls memManagedLog) IncrementGreatestVersion(label []byte, count int) (int, error) {
 	if count < 1 {
 		return 0, errors.New("count must be greater than or equal to 1")
 	}

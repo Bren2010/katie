@@ -18,7 +18,7 @@ type KeyValueStore interface {
 	// BatchGet returns the values of the corresponding keys.
 	BatchGet(ctx context.Context, keys []string) ([][]byte, error)
 
-	// Commit writes a batch of new key-value pairs to the database, and updates
+	// Commit writes a batch of new key-value pairs to the database and updates
 	// the key "tree-head" to have the value `treeHead`.
 	//
 	// The store ensures that the "tree-head" key is only modified if all of the

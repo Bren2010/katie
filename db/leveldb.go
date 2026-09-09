@@ -8,7 +8,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-type leveldbKeyValueStore struct {
+type ldbKeyValue struct {
 	conn *leveldb.DB
 }
 
@@ -22,10 +22,10 @@ func NewLDBKeyValueStore(file string) (KeyValueStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return leveldbKeyValueStore{conn: conn}, nil
+	return ldbKeyValue{conn: conn}, nil
 }
 
-func (kv leveldbKeyValueStore) BatchGet(ctx context.Context, keys []string) ([][]byte, error) {
+func (kv ldbKeyValue) BatchGet(ctx context.Context, keys []string) ([][]byte, error) {
 	out := make([][]byte, len(keys))
 
 	for i, key := range keys {
@@ -34,14 +34,15 @@ func (kv leveldbKeyValueStore) BatchGet(ctx context.Context, keys []string) ([][
 			out[i] = nil
 		} else if err != nil {
 			return nil, err
+		} else {
+			out[i] = res
 		}
-		out[i] = res
 	}
 
 	return out, nil
 }
 
-func (kv leveldbKeyValueStore) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
+func (kv ldbKeyValue) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
 	b := new(leveldb.Batch)
 	for key, value := range batch {
 		if value == nil {

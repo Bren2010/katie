@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -16,12 +17,18 @@ const (
 	prefixTreePrefix   = "p"
 )
 
+// TransparencyStore is used by a Transparency Tree to communicate with its
+// database. It handles batching and transactional-ish writes.
 type TransparencyStore struct {
 	ctx   context.Context
 	kv    KeyValueStore
 	batch map[string][]byte
 }
 
+// NewTransparencyStore returns a new TransparencyStore. `ctx` is the parent
+// context for all database operations, `kv` is the underlying KeyValueStore,
+// and `readOnly` indicates whether the TransparencyStore should reject writes
+// or not.
 func NewTransparencyStore(ctx context.Context, kv KeyValueStore, readOnly bool) TransparencyStore {
 	var batch map[string][]byte
 	if !readOnly {
@@ -154,6 +161,8 @@ func (ts TransparencyStore) Commit() error {
 		temp, _, err := ts.GetTreeHead()
 		if err != nil {
 			return err
+		} else if temp == nil {
+			return errors.New("no tree head currently or previously written")
 		}
 		treeHead = temp
 	}
