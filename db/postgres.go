@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 )
+
+var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type psqlManagedLog struct {
 	conn  *sql.DB
@@ -20,12 +23,14 @@ type psqlManagedLog struct {
 func NewPSQLManagedLogStore(conn *sql.DB, table string) (ManagedLogStore, error) {
 	if conn == nil {
 		return nil, errors.New("no database connection provided")
+	} else if !identifier.MatchString(table) {
+		return nil, errors.New("table name is not a valid sql identifier")
 	}
 
-	_, err := conn.Exec(`CREATE TABLE IF NOT EXISTS $1 (
+	_, err := conn.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %v (
 		label BYTEA PRIMARY KEY,
-		version BIGINT NOT NULL CHECK (version >= 0 AND version < $2)
-	)`, table, 1<<32)
+		version BIGINT NOT NULL CHECK (version >= 0 AND version < %d)
+	)`, table, 1<<32))
 	if err != nil {
 		return nil, err
 	}
@@ -38,12 +43,12 @@ func (ml psqlManagedLog) IncrementGreatestVersion(ctx context.Context, label []b
 		return 0, errors.New("count must be greater than or equal to 1")
 	}
 
-	row := ml.conn.QueryRowContext(ctx, `INSERT INTO $1 AS t (label, version)
-		VALUES ($3, $4::bigint - 1)
+	row := ml.conn.QueryRowContext(ctx, fmt.Sprintf(`INSERT INTO %v AS t (label, version)
+		VALUES ($1, $2::bigint - 1)
 		ON CONFLICT (label) DO UPDATE
-			SET version = t.version + $4::bigint
-			WHERE t.version + $4::bigint < $2
-		RETURNING version - $4::bigint`, ml.table, 1<<32, label, int64(count))
+			SET version = t.version + $2::bigint
+			WHERE t.version + $2::bigint < %d
+		RETURNING version - $2::bigint`, ml.table, 1<<32), label, int64(count))
 
 	var prev int64
 	if err := row.Scan(&prev); errors.Is(err, sql.ErrNoRows) {
