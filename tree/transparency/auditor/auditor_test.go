@@ -46,7 +46,7 @@ func makeAuditor(t *testing.T) (
 			}
 		}
 
-		// Add to tree, check for
+		// Add to tree, check for TODO
 		update, err := tree.Mutate(added, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -137,5 +137,84 @@ func TestAuditorPersistent(t *testing.T) {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(auditor.state, auditor2.state) {
 		t.Fatal("loaded state is different than persisted state")
+	}
+}
+
+// TestAuditorRetainsRecentInsertions checks that the auditor remembers every
+// VRF output that was inserted after the previous rightmost distinguished log
+// entry, including the ones from earlier log entries.
+//
+// Process relies on this to reject the removal of a prefix tree leaf that was
+// added too recently. If the auditor forgets an insertion, addedSince reports
+// that the leaf was not added recently and the premature removal is accepted.
+func TestAuditorRetainsRecentInsertions(t *testing.T) {
+	config, auditorKey := test.ConfigWithAuditor(t)
+	store := db.NewTransparencyStore(context.Background(), db.NewMemoryKeyValueStore(), false)
+
+	tree, err := transparency.NewTree(config, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auditor, err := NewAuditor(config.Public(), auditorKey, db.NewMemoryAuditorStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// insertedAt records the log entry that each VRF output was added in.
+	insertedAt := make(map[string]uint64)
+	checked := 0
+
+	for range 10 {
+		added := make([]transparency.LabelValue, 2)
+		for j := range added {
+			label := make([]byte, 16)
+			rand.Read(label)
+
+			added[j] = transparency.LabelValue{
+				Label: label,
+				Value: structs.UpdateValue{Value: []byte("value")},
+			}
+		}
+
+		// The new log entry is appended to the end of the tree as it stands.
+		pos := uint64(0)
+		if auditor.state != nil {
+			pos = auditor.state.TreeHead.TreeSize
+		}
+
+		update, err := tree.Mutate(added, nil)
+		if err != nil {
+			t.Fatal(err)
+		} else if err := auditor.Process(update); err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range update.Added {
+			insertedAt[string(entry.VrfOutput)] = pos
+		}
+
+		// A prefix tree leaf is only eligible for removal once it predates the
+		// previous rightmost distinguished log entry. Everything inserted after
+		// that point has to still be known to the auditor.
+		prevDLE, _, err := auditor.previousRightmost(update.Timestamp)
+		if err != nil {
+			t.Fatal(err)
+		} else if prevDLE == nil {
+			continue
+		}
+		for vrfOutput, at := range insertedAt {
+			if at <= *prevDLE {
+				continue
+			} else if !auditor.state.addedSince(*prevDLE, []byte(vrfOutput)) {
+				t.Fatalf(
+					"auditor forgot a vrf output inserted in log entry %v, so it would accept its removal before log entry %v",
+					at, *prevDLE,
+				)
+			}
+			checked++
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("test did not exercise any retained insertions")
 	}
 }

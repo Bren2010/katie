@@ -107,6 +107,7 @@ func (a *Auditor) updateState(
 	if a.state != nil {
 		n = a.state.TreeHead.TreeSize
 		fullSubtrees = a.state.FullSubtrees
+		inserted = a.state.Inserted
 	}
 
 	// Compute the new set of full subtrees of the log tree.
