@@ -28,7 +28,7 @@ func makeAuditor(t *testing.T) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	auditor, err := NewAuditor(config.Public(), auditorKey, db.NewMemoryAuditorStore())
+	auditor, err := NewAuditor(config.Public(), auditorKey, db.NewMemoryAuditorStore(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,16 +88,16 @@ func TestAuditorState(t *testing.T) {
 	// Verify tree head
 	frontier := getFrontier(t, &config, store, expectedTreeSize)
 
-	if state.TreeHead.Timestamp != frontier[len(frontier)-1] {
+	if state.treeHead.Timestamp != frontier[len(frontier)-1] {
 		t.Fatal("unexpected timestamp")
-	} else if state.TreeHead.TreeSize != expectedTreeSize {
+	} else if state.treeHead.TreeSize != expectedTreeSize {
 		t.Fatal("unexpected tree size")
-	} else if state.TreeHead.Signature != nil {
+	} else if state.treeHead.Signature != nil {
 		t.Fatal("unexpected signature")
 	}
 
 	// Verify full subtrees
-	root, err := log.Root(config.Suite, state.TreeHead.TreeSize, state.FullSubtrees)
+	root, err := log.Root(config.Suite, state.treeHead.TreeSize, state.fullSubtrees)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,10 +115,10 @@ func TestAuditorState(t *testing.T) {
 	}
 
 	// Verify frontier timestamps
-	if len(state.Timestamps) != len(frontier) {
+	if len(state.timestamps) != len(frontier) {
 		t.Fatal("unexpected number of timestamps")
 	}
-	for i, timestamp := range state.Timestamps {
+	for i, timestamp := range state.timestamps {
 		if timestamp != frontier[i] {
 			t.Fatal("unexpected timestamp")
 		}
@@ -132,7 +132,7 @@ func TestAuditorPersistent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	auditor2, err := NewAuditor(auditor.config, auditor.auditorKey, auditor.tx)
+	auditor2, err := NewAuditor(auditor.config, auditor.auditorKey, auditor.tx, true)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(auditor.state, auditor2.state) {
@@ -155,7 +155,7 @@ func TestAuditorRetainsRecentInsertions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auditor, err := NewAuditor(config.Public(), auditorKey, db.NewMemoryAuditorStore())
+	auditor, err := NewAuditor(config.Public(), auditorKey, db.NewMemoryAuditorStore(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestAuditorRetainsRecentInsertions(t *testing.T) {
 		// The new log entry is appended to the end of the tree as it stands.
 		pos := uint64(0)
 		if auditor.state != nil {
-			pos = auditor.state.TreeHead.TreeSize
+			pos = auditor.state.treeHead.TreeSize
 		}
 
 		update, err := tree.Mutate(added, nil)

@@ -84,7 +84,7 @@ type sizeParam interface {
 	uint8 | uint16 | uint32
 }
 
-func max[S sizeParam]() int { return int(^S(0)) }
+func max[S sizeParam]() int64 { return int64(^S(0)) }
 
 func readBytes[S sizeParam](buf *bytes.Buffer) ([]byte, error) {
 	size, err := readNumeric[S](buf)
@@ -99,7 +99,7 @@ func readBytes[S sizeParam](buf *bytes.Buffer) ([]byte, error) {
 }
 
 func writeBytes[S sizeParam](buf *bytes.Buffer, out []byte, name string) error {
-	if len(out) > max[S]() {
+	if int64(len(out)) > max[S]() {
 		return errors.New(name + " is too long to marshal")
 	}
 	writeNumeric(buf, S(len(out)))
@@ -124,7 +124,7 @@ func readByteSlice[S sizeParam](buf *bytes.Buffer, n int) ([][]byte, error) {
 }
 
 func writeByteSlice[S sizeParam](buf *bytes.Buffer, out [][]byte, name string) error {
-	if len(out) > max[S]() {
+	if int64(len(out)) > max[S]() {
 		return errors.New(name + " list is too long to marshal")
 	}
 	writeNumeric(buf, S(len(out)))
@@ -155,7 +155,7 @@ func writeNumericSlice[S sizeParam, T numeric](
 	out []T,
 	name string,
 ) error {
-	if len(out) > max[S]() {
+	if int64(len(out)) > max[S]() {
 		return errors.New(name + " list is too long to marshal")
 	}
 	writeNumeric(buf, S(len(out)))
@@ -190,7 +190,7 @@ func writeFuncSlice[S sizeParam, T any](
 	name string,
 	marshalF func(*T, *bytes.Buffer) error,
 ) error {
-	if len(out) > max[S]() {
+	if int64(len(out)) > max[S]() {
 		return errors.New(name + " list is too long to marshal")
 	}
 	writeNumeric(buf, S(len(out)))
@@ -206,7 +206,7 @@ func writeMarshalSlice[S sizeParam, T any, PT interface {
 	*T
 	Marshaller
 }](buf *bytes.Buffer, out []T, name string) error {
-	if len(out) > max[S]() {
+	if int64(len(out)) > max[S]() {
 		return errors.New(name + " list is too long to marshal")
 	}
 	writeNumeric(buf, S(len(out)))

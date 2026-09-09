@@ -15,22 +15,30 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
-// Auditor represents a third-party auditor of a transparency log.
+// Auditor represents a Third-Party Auditor of a Transparency Log.
 type Auditor struct {
-	config     *structs.PublicConfig
-	auditorKey suites.SigningPrivateKey
-	tx         db.AuditorStore
+	config       *structs.PublicConfig
+	auditorKey   suites.SigningPrivateKey
+	tx           db.AuditorStore
+	allowPruning bool
 
-	state *AuditorState
+	state *auditorState
 }
 
-// NewAuditor returns a new Third-Party Auditor for a Transparency Log. `config`
-// is the transparency log's public configuration, `auditorKey` is the auditor's
-// private signing key, and `tx` is the auditor's persistent storage.
+// NewAuditor returns a new Third-Party Auditor for a Transparency Log.
+//
+// `config` is the Transparency Log's public configuration, `auditorKey` is the
+// auditor's private signing key, and `tx` is the auditor's persistent storage.
+//
+// `allowPruning` is set to true if the auditor should allow the Transparency
+// Log to prune Prefix Tree entries. If true, the auditor retains all VRF
+// outputs added since the last distinguished log entry. If false, the auditor's
+// state is much smaller but any deletions from the Prefix Tree are rejected.
 func NewAuditor(
 	config *structs.PublicConfig,
 	auditorKey suites.SigningPrivateKey,
 	tx db.AuditorStore,
+	allowPruning bool,
 ) (*Auditor, error) {
 	if config.Mode != structs.ThirdPartyAuditing {
 		return nil, errors.New("transparency log is not configured with third party auditor")
@@ -42,10 +50,10 @@ func NewAuditor(
 	if err != nil {
 		return nil, err
 	}
-	var state *AuditorState
+	var state *auditorState
 	if raw != nil {
 		buf := bytes.NewBuffer(raw)
-		state, err = NewAuditorState(config.Suite, buf)
+		state, err = newAuditorState(config.Suite, buf)
 		if err != nil {
 			return nil, err
 		} else if buf.Len() != 0 {
@@ -54,9 +62,10 @@ func NewAuditor(
 	}
 
 	return &Auditor{
-		config:     config,
-		auditorKey: auditorKey,
-		tx:         tx,
+		config:       config,
+		auditorKey:   auditorKey,
+		tx:           tx,
+		allowPruning: allowPruning,
 
 		state: state,
 	}, nil
@@ -69,17 +78,11 @@ func (a *Auditor) previousRightmost(added uint64) (*uint64, *algorithms.DataProv
 	logEntries := make(map[uint64]structs.LogEntry)
 
 	if a.state != nil {
-		n = a.state.TreeHead.TreeSize
-
-		frontier := math.Frontier(n)
-		if len(frontier) != len(a.state.Timestamps) {
-			return nil, nil, errors.New("unexpected number of timestamps in auditor state")
-		}
-		for i, x := range frontier {
-			logEntries[x] = structs.LogEntry{Timestamp: a.state.Timestamps[i]}
+		n = a.state.treeHead.TreeSize
+		for i, x := range math.Frontier(n) {
+			logEntries[x] = structs.LogEntry{Timestamp: a.state.timestamps[i]}
 		}
 	}
-
 	logEntries[n] = structs.LogEntry{Timestamp: added}
 
 	// Pass the log entries into a DataProvider as retained state and compute
@@ -102,12 +105,12 @@ func (a *Auditor) updateState(
 	var (
 		n            uint64 = 0
 		fullSubtrees [][]byte
-		inserted     []InsertedVrfOutput
+		inserted     []insertedVrfOutput
 	)
 	if a.state != nil {
-		n = a.state.TreeHead.TreeSize
-		fullSubtrees = a.state.FullSubtrees
-		inserted = a.state.Inserted
+		n = a.state.treeHead.TreeSize
+		fullSubtrees = a.state.fullSubtrees
+		inserted = a.state.inserted
 	}
 
 	// Compute the new set of full subtrees of the log tree.
@@ -135,23 +138,23 @@ func (a *Auditor) updateState(
 	if err != nil {
 		return err
 	}
-	insertedNow := make([]InsertedVrfOutput, len(added))
+	insertedNow := make([]insertedVrfOutput, len(added))
 	for i, entry := range added {
-		insertedNow[i] = InsertedVrfOutput{Pos: n, VrfOutput: entry.VrfOutput}
+		insertedNow[i] = insertedVrfOutput{pos: n, vrfOutput: entry.VrfOutput}
 	}
 	inserted = mergeInserted(inserted, insertedNow, rightmost)
 
-	a.state = &AuditorState{
-		TreeHead: structs.AuditorTreeHead{
+	a.state = &auditorState{
+		treeHead: structs.AuditorTreeHead{
 			Timestamp: entry.Timestamp,
 			TreeSize:  n + 1,
 			Signature: nil,
 		},
-		FullSubtrees: fullSubtrees,
-		Timestamps:   timestamps,
-		PrefixTree:   entry.PrefixTree,
+		fullSubtrees: fullSubtrees,
+		timestamps:   timestamps,
+		prefixTree:   entry.PrefixTree,
 
-		Inserted: inserted,
+		inserted: inserted,
 	}
 	return nil
 }
@@ -163,7 +166,7 @@ func (a *Auditor) updateState(
 func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 	// Verify that `timestamp` is greater than or equal to the rightmost log
 	// entry's timestamp.
-	if a.state != nil && update.Timestamp < a.state.TreeHead.Timestamp {
+	if a.state != nil && update.Timestamp < a.state.treeHead.Timestamp {
 		return errors.New("update timestamp is less than rightmost timestamp")
 	}
 
@@ -231,7 +234,7 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 	before, after, err := prefix.EvaluateBeforeAfter(a.config.Suite, update.Added, update.Removed, &update.Proof)
 	if err != nil {
 		return err
-	} else if a.state != nil && !bytes.Equal(before, a.state.PrefixTree) {
+	} else if a.state != nil && !bytes.Equal(before, a.state.prefixTree) {
 		return errors.New("prefix tree root does not match expected")
 	}
 
@@ -245,25 +248,25 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 func (a *Auditor) Commit() (*structs.AuditorTreeHead, error) {
 	if a.state == nil {
 		return nil, errors.New("can not commit empty state")
-	} else if a.state.TreeHead.Signature != nil {
-		return &a.state.TreeHead, nil
+	} else if a.state.treeHead.Signature != nil {
+		return &a.state.treeHead, nil
 	}
 
 	// Sign the new auditor tree head.
-	root, err := log.Root(a.config.Suite, a.state.TreeHead.TreeSize, a.state.FullSubtrees)
+	root, err := log.Root(a.config.Suite, a.state.treeHead.TreeSize, a.state.fullSubtrees)
 	if err != nil {
 		return nil, err
 	}
 	tbs, err := structs.Marshal(&structs.AuditorTreeHeadTBS{
 		Config:    a.config,
-		Timestamp: a.state.TreeHead.Timestamp,
-		TreeSize:  a.state.TreeHead.TreeSize,
+		Timestamp: a.state.treeHead.Timestamp,
+		TreeSize:  a.state.treeHead.TreeSize,
 		Root:      root,
 	})
 	if err != nil {
 		return nil, err
 	}
-	a.state.TreeHead.Signature, err = a.auditorKey.Sign(tbs)
+	a.state.treeHead.Signature, err = a.auditorKey.Sign(tbs)
 	if err != nil {
 		return nil, err
 	}
@@ -276,5 +279,5 @@ func (a *Auditor) Commit() (*structs.AuditorTreeHead, error) {
 		return nil, err
 	}
 
-	return &a.state.TreeHead, nil
+	return &a.state.treeHead, nil
 }

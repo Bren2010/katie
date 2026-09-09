@@ -37,6 +37,15 @@ type AuditorStore interface {
 	PutState(raw []byte) error
 }
 
+// I considered refactoring the AuditorStore interface to not store everything
+// in a single blob, but even a very very bad case for the auditor doesn't
+// require much memory:
+//
+//     100 VRF outputs added per second
+//     X 7 day Reasonable Monitoring Window
+//     X 40 bytes per VRF output
+//     = 2.4 GB of auditor state
+
 // ManagedLogStore is the interface that a Service Operator with a Third-Party
 // Manager uses to communicate with its database.
 type ManagedLogStore interface {
