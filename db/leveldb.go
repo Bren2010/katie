@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"encoding/binary"
+	"sync"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -54,4 +56,63 @@ func (kv ldbKeyValue) Commit(ctx context.Context, batch map[string][]byte, treeH
 	b.Put([]byte(treeHeadKey), treeHead)
 
 	return kv.conn.Write(b, &opt.WriteOptions{Sync: true})
+}
+
+type ldbManagedLog struct {
+	conn *leveldb.DB
+	mu   *sync.Mutex
+}
+
+// NewLDBManagedLogStore returns an implementation of the ManagedLogStore
+// interface that's backed by a LevelDB file.
+//
+// Only one process may have the file open at a time, so this is not suitable
+// for a Service Operator that runs more than one server instance.
+func NewLDBManagedLogStore(file string) (ManagedLogStore, error) {
+	conn, err := leveldb.OpenFile(file, nil)
+	if errors.IsCorrupted(err) {
+		conn, err = leveldb.RecoverFile(file, nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ldbManagedLog{conn: conn, mu: &sync.Mutex{}}, nil
+}
+
+func (ml ldbManagedLog) IncrementGreatestVersion(ctx context.Context, label []byte, count int) (int, error) {
+	if count < 1 {
+		return 0, errors.New("count must be greater than or equal to 1")
+	} else if int64(count) > maxVersion {
+		return 0, errors.New("count is greater than the maximum version")
+	} else if len(label) == 0 {
+		return 0, errors.New("label must not be empty")
+	}
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
+
+	prev := int64(-1)
+	raw, err := ml.conn.Get(label, nil)
+	if err == nil {
+		if len(raw) != 4 {
+			return 0, errors.New("stored version is malformed")
+		}
+		prev = int64(binary.BigEndian.Uint32(raw))
+	} else if err != leveldb.ErrNotFound {
+		return 0, err
+	}
+
+	ver := prev + int64(count)
+	if ver > maxVersion {
+		return 0, errors.New("increasing label version would exceed maximum")
+	}
+	next := make([]byte, 4)
+	binary.BigEndian.PutUint32(next, uint32(ver))
+
+	// Losing a counter would let the Service Operator sign two different values
+	// under the same version, so the write is synced before returning.
+	if err := ml.conn.Put(label, next, &opt.WriteOptions{Sync: true}); err != nil {
+		return 0, err
+	}
+
+	return int(prev), nil
 }
