@@ -56,13 +56,22 @@ func NewMemoryManagedLogStore() ManagedLogStore {
 func (mls memManagedLog) IncrementGreatestVersion(ctx context.Context, label []byte, count int) (int, error) {
 	if count < 1 {
 		return 0, errors.New("count must be greater than or equal to 1")
+	} else if int64(count) > maxVersion {
+		return 0, errors.New("count is greater than the maximum version")
+	} else if len(label) == 0 {
+		return 0, errors.New("label must not be empty")
 	}
+
 	labelStr := fmt.Sprintf("%x", label)
 	ver, ok := mls.data[labelStr]
 	if !ok {
 		ver = -1
 	}
+	if int64(ver)+int64(count) > maxVersion {
+		return 0, errors.New("increasing label version would exceed maximum")
+	}
 	mls.data[labelStr] = ver + count
+
 	return ver, nil
 }
 

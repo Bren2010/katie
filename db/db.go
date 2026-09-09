@@ -3,6 +3,8 @@ package db
 
 import "context"
 
+const maxVersion = (int64(1) << 32) - 1
+
 func dup(in []byte) []byte {
 	if in == nil {
 		return nil

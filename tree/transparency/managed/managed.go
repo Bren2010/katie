@@ -86,7 +86,7 @@ func (ml *ManagedLog) Update(
 			SignedVersion: 0,
 		})
 	}
-	prev, err := ml.tx.IncrementGreatestVersion(req.Label, len(req.Values))
+	prev, err := ml.tx.IncrementGreatestVersion(ctx, req.Label, len(req.Values))
 	if err != nil {
 		return nil, err
 	}
