@@ -1,83 +1,20 @@
 package db
 
 import (
-	"fmt"
+	"context"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-const leveldbTreeHeadKey = "tree-head"
-
-// ldbConn is a wrapper around a base LevelDB database that handles batching
-// writes between commits transparently.
-type ldbConn struct {
-	conn     *leveldb.DB
-	readonly bool
-	batch    map[string][]byte
+type leveldbKeyValueStore struct {
+	conn *leveldb.DB
 }
 
-func newLDBConn(conn *leveldb.DB, readonly bool) *ldbConn {
-	return &ldbConn{conn, readonly, make(map[string][]byte)}
-}
-
-func (c *ldbConn) Get(key string) ([]byte, error) {
-	if value, ok := c.batch[key]; ok {
-		if value == nil {
-			return nil, leveldb.ErrNotFound
-		}
-		return dup(value), nil
-	}
-	return c.conn.Get([]byte(key), nil)
-}
-
-func (c *ldbConn) Put(key string, value []byte) error {
-	if c.readonly {
-		panic("connection is readonly")
-	} else if value == nil {
-		return errors.New("leveldb: unable to store nil value")
-	}
-	c.batch[key] = dup(value)
-	return nil
-}
-
-func (c *ldbConn) Delete(key string) error {
-	if c.readonly {
-		panic("connection is readonly")
-	}
-	c.batch[key] = nil
-	return nil
-}
-
-func (c *ldbConn) Commit() error {
-	if c.readonly {
-		panic("connection is readonly")
-	}
-
-	b := new(leveldb.Batch)
-	for key, value := range c.batch {
-		if value == nil {
-			b.Delete([]byte(key))
-		} else {
-			b.Put([]byte(key), value)
-		}
-	}
-	if err := c.conn.Write(b, &opt.WriteOptions{Sync: true}); err != nil {
-		return err
-	}
-
-	c.batch = make(map[string][]byte)
-	return nil
-}
-
-// ldbTransparencyStore implements the TransparencyStore interface over a
-// LevelDB database.
-type ldbTransparencyStore struct {
-	conn *ldbConn
-}
-
-func NewLDBTransparencyStore(file string) (TransparencyStore, error) {
+// NewLDBKeyValueStore returns an implementation of the KeyValueStore interface
+// that's backed by a LevelDB file.
+func NewLDBKeyValueStore(file string) (KeyValueStore, error) {
 	conn, err := leveldb.OpenFile(file, nil)
 	if errors.IsCorrupted(err) {
 		conn, err = leveldb.RecoverFile(file, nil)
@@ -85,167 +22,35 @@ func NewLDBTransparencyStore(file string) (TransparencyStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ldbTransparencyStore{newLDBConn(conn, false)}, nil
+	return leveldbKeyValueStore{conn: conn}, nil
 }
 
-func (ldb *ldbTransparencyStore) Clone() TransparencyStore {
-	return &ldbTransparencyStore{newLDBConn(ldb.conn.conn, true)}
-}
+func (kv leveldbKeyValueStore) BatchGet(ctx context.Context, keys []string) ([][]byte, error) {
+	out := make([][]byte, len(keys))
 
-func (ldb *ldbTransparencyStore) GetTreeHead() ([]byte, []byte, error) {
-	treeHead, err := ldb.conn.Get(leveldbTreeHeadKey)
-	if err == leveldb.ErrNotFound {
-		return nil, nil, nil
-	} else if err != nil {
-		return nil, nil, err
-	}
-	auditor, err := ldb.conn.Get("auditor-tree-head")
-	if err != leveldb.ErrNotFound && err != nil {
-		return nil, nil, err
-	}
-	return treeHead, auditor, nil
-}
-
-func (ldb *ldbTransparencyStore) PutTreeHead(raw []byte) error {
-	return ldb.conn.Put(leveldbTreeHeadKey, raw)
-}
-
-func (ldb *ldbTransparencyStore) PutAuditorTreeHead(raw []byte) error {
-	return ldb.conn.Put("auditor-tree-head", raw)
-}
-
-func (ldb *ldbTransparencyStore) BatchGetIndex(labels [][]byte) ([][]byte, error) {
-	out := make([][]byte, len(labels))
-
-	for i, label := range labels {
-		raw, err := ldb.conn.Get("i" + fmt.Sprintf("%x", label))
+	for i, key := range keys {
+		res, err := kv.conn.Get([]byte(key), nil)
 		if err == leveldb.ErrNotFound {
-			continue
+			out[i] = nil
 		} else if err != nil {
 			return nil, err
 		}
-		out[i] = raw
+		out[i] = res
 	}
 
 	return out, nil
 }
 
-func (ldb *ldbTransparencyStore) PutIndex(label, index []byte) error {
-	return ldb.conn.Put("i"+fmt.Sprintf("%x", label), index)
-}
-
-func (ldb *ldbTransparencyStore) DeleteIndex(label []byte) error {
-	return ldb.conn.Delete("i" + fmt.Sprintf("%x", label))
-}
-
-func (ldb *ldbTransparencyStore) GetVersion(label []byte, ver uint32) ([]byte, error) {
-	raw, err := ldb.conn.Get("v" + fmt.Sprintf("%x:%v", label, ver))
-	if err == leveldb.ErrNotFound {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-func (ldb *ldbTransparencyStore) PutVersion(label []byte, ver uint32, data []byte) error {
-	return ldb.conn.Put("v"+fmt.Sprintf("%x:%v", label, ver), data)
-}
-
-func (ldb *ldbTransparencyStore) DeleteVersion(label []byte, ver uint32) error {
-	return ldb.conn.Delete("v" + fmt.Sprintf("%x:%v", label, ver))
-}
-
-func (ldb *ldbTransparencyStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
-	out := make(map[uint64][]byte)
-
-	for _, key := range keys {
-		value, err := ldb.conn.Get("t" + fmt.Sprint(key))
-		if err == leveldb.ErrNotFound {
-			continue
-		} else if err != nil {
-			return nil, err
+func (kv leveldbKeyValueStore) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
+	b := new(leveldb.Batch)
+	for key, value := range batch {
+		if value == nil {
+			b.Delete([]byte(key))
+		} else {
+			b.Put([]byte(key), value)
 		}
-		out[key] = value
 	}
+	b.Put([]byte(treeHeadKey), treeHead)
 
-	return out, nil
-}
-
-func (ldb *ldbTransparencyStore) Put(key uint64, data []byte) error {
-	return ldb.conn.Put("t"+fmt.Sprint(key), data)
-}
-
-func (ldb *ldbTransparencyStore) Delete(key uint64) error {
-	return ldb.conn.Delete("t" + fmt.Sprint(key))
-}
-
-func (ldb *ldbTransparencyStore) LogStore() LogStore {
-	return &ldbLogStore{ldb.conn}
-}
-
-func (ldb *ldbTransparencyStore) PrefixStore() PrefixStore {
-	return &ldbPrefixStore{ldb.conn}
-}
-
-func (ldb *ldbTransparencyStore) Commit() error {
-	return ldb.conn.Commit()
-}
-
-// ldbLogStore implements the LogStore interface over LevelDB.
-type ldbLogStore struct {
-	conn *ldbConn
-}
-
-func (ls *ldbLogStore) BatchGet(keys []uint64) (map[uint64][]byte, error) {
-	out := make(map[uint64][]byte)
-
-	for _, key := range keys {
-		value, err := ls.conn.Get("l" + fmt.Sprint(key))
-		if err == leveldb.ErrNotFound {
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		out[key] = value
-	}
-
-	return out, nil
-}
-
-func (ls *ldbLogStore) Put(key uint64, value []byte) error {
-	return ls.conn.Put("l"+fmt.Sprint(key), value)
-}
-
-func (ls *ldbLogStore) Delete(key uint64) error {
-	return ls.conn.Delete("l" + fmt.Sprint(key))
-}
-
-// ldbPrefixStore implements the PrefixStore interface over LevelDB.
-type ldbPrefixStore struct {
-	conn *ldbConn
-}
-
-func (ps *ldbPrefixStore) BatchGet(keys []string) (map[string][]byte, error) {
-	out := make(map[string][]byte)
-
-	for _, key := range keys {
-		value, err := ps.conn.Get("p" + key)
-		if err == leveldb.ErrNotFound {
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		out[key] = value
-	}
-
-	return out, nil
-}
-
-func (ps *ldbPrefixStore) Put(key string, value []byte) error {
-	return ps.conn.Put("p"+key, value)
-}
-
-func (ps *ldbPrefixStore) Delete(key string) error {
-	return ps.conn.Delete("p" + key)
+	return kv.conn.Write(b, &opt.WriteOptions{Sync: true})
 }
