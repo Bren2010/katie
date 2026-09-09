@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Bren2010/katie/db/memory"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 	"github.com/Bren2010/katie/tree/transparency/test"
 )
 
 func TestAddLabel(t *testing.T) {
-	store := memory.NewTransparencyStore()
+	store, kv := memStoreCounting()
 
 	var (
 		label1 = []byte("label")
@@ -33,13 +32,13 @@ func TestAddLabel(t *testing.T) {
 	}
 
 	// Check that all expected database entries are present.
-	if store.TreeHead == nil {
+	if kv.TreeHead() == nil {
 		t.Fatal("no tree head written")
-	} else if len(store.Indices) != 2 {
+	} else if kv.Count("i") != 2 {
 		t.Fatal("unexpected number of indices")
-	} else if len(store.Versions) != 3 {
+	} else if kv.Count("v") != 3 {
 		t.Fatal("unexpected number of label versions")
-	} else if len(store.LogEntries) != 1 {
+	} else if kv.Count("t") != 1 {
 		t.Fatal("unexpected number of log entries written")
 	}
 
@@ -61,12 +60,11 @@ func TestAddLabel(t *testing.T) {
 	}
 
 	// Check stored data.
-	if len(store.Indices) != 2 {
+	if kv.Count("i") != 2 {
 		t.Fatal("unexpected number of indices")
-	} else if len(store.Versions) != 4 {
+	} else if kv.Count("v") != 4 {
 		t.Fatal("unexpected number of label versions")
-	} else if len(store.LogEntries) != 2 {
-		t.Log(store.LogEntries)
+	} else if kv.Count("t") != 2 {
 		t.Fatal("unexpected number of log entries written")
 	}
 
@@ -81,7 +79,7 @@ func TestAddLabel(t *testing.T) {
 }
 
 func TestRemoveLabel(t *testing.T) {
-	store := memory.NewTransparencyStore()
+	store, kv := memStoreCounting()
 
 	var label = []byte("label")
 
@@ -106,17 +104,17 @@ func TestRemoveLabel(t *testing.T) {
 	}
 
 	// Check that index and label versions were removed.
-	if len(store.Indices) != 0 {
+	if kv.Count("i") != 0 {
 		t.Fatal("unexpected number of indices")
-	} else if len(store.Versions) != 0 {
+	} else if kv.Count("v") != 0 {
 		t.Fatal("unexpected number of label versions")
-	} else if len(store.LogEntries) != 2 {
+	} else if kv.Count("t") != 2 {
 		t.Fatal("unexpected number of log entries written")
 	}
 }
 
 func TestRemoveLabelTooSoon(t *testing.T) {
-	store := memory.NewTransparencyStore()
+	store := memStore()
 
 	var label = []byte("label")
 
@@ -143,7 +141,7 @@ func TestRemoveLabelTooSoon(t *testing.T) {
 }
 
 func TestAddRemoveSameLabel(t *testing.T) {
-	store := memory.NewTransparencyStore()
+	store, kv := memStoreCounting()
 
 	var label = []byte("label")
 
@@ -170,11 +168,11 @@ func TestAddRemoveSameLabel(t *testing.T) {
 	}
 
 	// Check that index and label versions were removed.
-	if len(store.Indices) != 1 {
+	if kv.Count("i") != 1 {
 		t.Fatal("unexpected number of indices")
-	} else if len(store.Versions) != 1 {
+	} else if kv.Count("v") != 1 {
 		t.Fatal("unexpected number of label versions")
-	} else if len(store.LogEntries) != 2 {
+	} else if kv.Count("t") != 2 {
 		t.Fatal("unexpected number of log entries written")
 	}
 

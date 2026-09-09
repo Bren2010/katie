@@ -42,14 +42,16 @@ func (t *Tree) fetch(nodes []uint64) (*chunkSet, error) {
 		ids = append(ids, id)
 	}
 
-	data, err := t.tx.BatchGet(ids)
+	values, err := t.tx.BatchGet(ids)
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range ids {
-		if _, ok := data[id]; !ok {
+	data := make(map[uint64][]byte, len(ids))
+	for i, id := range ids {
+		if values[i] == nil {
 			return nil, errors.New("not all expected data was found in the database")
 		}
+		data[id] = values[i]
 	}
 
 	return newChunkSet(t.cs, data)
@@ -148,9 +150,7 @@ func (t *Tree) Append(n uint64, value []byte) ([][]byte, error) {
 
 	// Commit modifications to database.
 	for key, value := range set.marshal() {
-		if err := t.tx.Put(key, value); err != nil {
-			return nil, err
-		}
+		t.tx.Put(key, value)
 	}
 
 	// Get full subtree values and return.

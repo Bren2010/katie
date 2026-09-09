@@ -108,12 +108,11 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 		return nil, err
 	}
 
-	for key, id := range dedup {
-		val, ok := data[key]
-		if !ok {
+	for i, key := range keys {
+		if data[i] == nil {
 			return nil, errors.New("not all expected data was found")
 		}
-		t, err := unmarshalTile(b.cs, id, val)
+		t, err := unmarshalTile(b.cs, dedup[key], data[i])
 		if err != nil {
 			return nil, err
 		}

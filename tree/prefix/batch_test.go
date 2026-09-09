@@ -2,14 +2,36 @@ package prefix
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
-	"github.com/Bren2010/katie/db/memory"
+	"github.com/Bren2010/katie/db"
 )
 
-func batchTestSetup() (suites.CipherSuite, *memory.PrefixStore, node, node) {
+// recordingStore wraps an in-memory key-value store and records the keys of
+// every lookup that reaches it, so that tests can assert on which tiles were
+// actually fetched from the database.
+type recordingStore struct {
+	inner   db.KeyValueStore
+	Lookups [][]string
+}
+
+func newRecordingStore() *recordingStore {
+	return &recordingStore{inner: db.NewMemoryKeyValueStore()}
+}
+
+func (kv *recordingStore) BatchGet(ctx context.Context, keys []string) ([][]byte, error) {
+	kv.Lookups = append(kv.Lookups, keys)
+	return kv.inner.BatchGet(ctx, keys)
+}
+
+func (kv *recordingStore) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
+	return kv.inner.Commit(ctx, batch, treeHead)
+}
+
+func batchTestSetup() (suites.CipherSuite, *recordingStore, db.PrefixStore, node, node) {
 	cs := suites.KTSha256P256{}
 
 	// Build up two versions of the same tree.
@@ -65,24 +87,37 @@ func batchTestSetup() (suites.CipherSuite, *memory.PrefixStore, node, node) {
 		panic(err)
 	}
 
-	store := memory.NewPrefixStore()
-	store.Put(tile0.id.String(), bytes0)
-	store.Put(tile1.id.String(), bytes1)
-	store.Put(tile2.id.String(), bytes2)
-	store.Put(tile3.id.String(), bytes3)
+	// Write the tiles through a writable store and commit them, so that the
+	// searches under test read from the key-value store instead of being served
+	// out of an uncommitted write batch.
+	kv := newRecordingStore()
+	writer := db.NewTransparencyStore(context.Background(), kv, false)
+	ps := writer.PrefixStore()
+	ps.Put(tile0.id.String(), bytes0)
+	ps.Put(tile1.id.String(), bytes1)
+	ps.Put(tile2.id.String(), bytes2)
+	ps.Put(tile3.id.String(), bytes3)
+	writer.PutTreeHead([]byte("tree head"))
+	if err := writer.Commit(); err != nil {
+		panic(err)
+	}
+	kv.Lookups = nil // Ignore the lookups made while setting up.
 
-	return cs, store, tree1, tree2
+	// Reads go through a read-only store, which has no write batch of its own.
+	store := db.NewTransparencyStore(context.Background(), kv, true).PrefixStore()
+
+	return cs, kv, store, tree1, tree2
 }
 
 func TestSearchDepth0(t *testing.T) {
-	cs, store, tree1, _ := batchTestSetup()
+	cs, kv, store, tree1, _ := batchTestSetup()
 	want := tree1.Hash(cs)
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b00000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.Lookups) != "[[1:0]]" {
+	} else if fmt.Sprint(kv.Lookups) != "[[p1:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -97,14 +132,14 @@ func TestSearchDepth0(t *testing.T) {
 }
 
 func TestSearchDepth1(t *testing.T) {
-	cs, store, tree1, _ := batchTestSetup()
+	cs, kv, store, tree1, _ := batchTestSetup()
 	want := tree1.Hash(cs)
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{1: {makeBytes(0b01000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.Lookups) != "[[1:0] [0:0]]" {
+	} else if fmt.Sprint(kv.Lookups) != "[[p1:0] [p0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -120,14 +155,14 @@ func TestSearchDepth1(t *testing.T) {
 }
 
 func TestSearchDepth2(t *testing.T) {
-	cs, store, _, tree2 := batchTestSetup()
+	cs, kv, store, _, tree2 := batchTestSetup()
 	want := tree2.Hash(cs)
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b01000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.Lookups) != "[[2:0] [1:0] [0:0]]" {
+	} else if fmt.Sprint(kv.Lookups) != "[[p2:0] [p1:0] [p0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -143,14 +178,14 @@ func TestSearchDepth2(t *testing.T) {
 }
 
 func TestBrokenTile(t *testing.T) {
-	cs, store, _, tree2 := batchTestSetup()
+	cs, kv, store, _, tree2 := batchTestSetup()
 	want := tree2.Hash(cs)
 
 	b := newBatch(cs, store)
 	res, state := b.initialize(map[uint64][][]byte{2: {makeBytes(0b11000000)}})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if fmt.Sprint(store.Lookups) != "[[2:0] [2:1]]" {
+	} else if fmt.Sprint(kv.Lookups) != "[[p2:0] [p2:1]]" {
 		t.Fatal("unexpected database lookups")
 	}
 
@@ -165,7 +200,7 @@ func TestBrokenTile(t *testing.T) {
 }
 
 func TestMultiVersionSearch(t *testing.T) {
-	cs, store, tree1, tree2 := batchTestSetup()
+	cs, kv, store, tree1, tree2 := batchTestSetup()
 	want := tree2.Hash(cs)
 
 	b := newBatch(cs, store)
@@ -176,7 +211,7 @@ func TestMultiVersionSearch(t *testing.T) {
 	})
 	if err := b.search(state); err != nil {
 		t.Fatal(err)
-	} else if lookups := fmt.Sprint(store.Lookups); lookups != "[[0:0 2:0]]" && lookups != "[[2:0 0:0]]" {
+	} else if lookups := fmt.Sprint(kv.Lookups); lookups != "[[p0:0 p2:0]]" && lookups != "[[p2:0 p0:0]]" {
 		t.Fatal("unexpected database lookups")
 	}
 

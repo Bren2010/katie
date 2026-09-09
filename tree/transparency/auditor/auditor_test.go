@@ -1,12 +1,12 @@
 package auditor
 
 import (
+	"context"
 	"crypto/rand"
 	"reflect"
 	"testing"
 
 	"github.com/Bren2010/katie/db"
-	"github.com/Bren2010/katie/db/memory"
 	"github.com/Bren2010/katie/tree/log"
 	"github.com/Bren2010/katie/tree/transparency"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
@@ -22,13 +22,13 @@ func makeAuditor(t *testing.T) (
 	*Auditor,
 ) {
 	config, auditorKey := test.ConfigWithAuditor(t)
-	store := memory.NewTransparencyStore()
+	store := db.NewTransparencyStore(context.Background(), db.NewMemoryKeyValueStore(), false)
 
 	tree, err := transparency.NewTree(config, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	auditor, err := NewAuditor(config.Public(), auditorKey, memory.NewAuditorStore())
+	auditor, err := NewAuditor(config.Public(), auditorKey, db.NewMemoryAuditorStore())
 	if err != nil {
 		t.Fatal(err)
 	}

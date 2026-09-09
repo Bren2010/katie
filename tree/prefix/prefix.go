@@ -124,9 +124,8 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 		raw, err := tile.Marshal(t.cs)
 		if err != nil {
 			return nil, nil, nil, err
-		} else if err := t.tx.Put(tile.id.String(), raw); err != nil {
-			return nil, nil, nil, err
 		}
+		t.tx.Put(tile.id.String(), raw)
 	}
 
 	return rootHash, proof, commitments, nil

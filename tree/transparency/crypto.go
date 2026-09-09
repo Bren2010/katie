@@ -65,7 +65,9 @@ func (t *Tree) putIndex(label []byte, index []uint64) error {
 		buf.Write(temp[:n])
 	}
 
-	return t.tx.PutIndex(label, buf.Bytes())
+	t.tx.PutIndex(label, buf.Bytes())
+
+	return nil
 }
 
 // getVersion returns the commitment opening and the value of the requested
@@ -100,9 +102,8 @@ func (t *Tree) putVersion(label []byte, ver uint32, value structs.UpdateValue) (
 	labelValue, err := structs.Marshal(&structs.OpeningAndValue{Opening: opening, Value: value})
 	if err != nil {
 		return nil, err
-	} else if err := t.tx.PutVersion(label, ver, labelValue); err != nil {
-		return nil, err
 	}
+	t.tx.PutVersion(label, ver, labelValue)
 
 	// Serialize the data that will be committed to and compute the commitment.
 	commitmentValue, err := structs.Marshal(&structs.CommitmentValue{

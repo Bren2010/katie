@@ -139,9 +139,9 @@ func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error
 		}
 
 		logEntries := make(map[uint64]structs.LogEntry)
-		for _, pos := range frontier {
-			raw, ok := results[pos]
-			if !ok {
+		for i, pos := range frontier {
+			raw := results[i]
+			if raw == nil {
 				return errors.New("expected frontier log entry not found")
 			}
 			buf := bytes.NewBuffer(raw)

@@ -5,12 +5,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Bren2010/katie/db/memory"
 	"github.com/Bren2010/katie/tree/transparency/test"
 )
 
 func TestIndexEncoding(t *testing.T) {
-	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore(), nil)
+	tree, err := NewTree(test.Config(t), memStore(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +28,7 @@ func TestIndexEncoding(t *testing.T) {
 }
 
 func TestPutIndexRejectsNonMonotonic(t *testing.T) {
-	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore(), nil)
+	tree, err := NewTree(test.Config(t), memStore(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +39,7 @@ func TestPutIndexRejectsNonMonotonic(t *testing.T) {
 }
 
 func TestComputeVrfOutput(t *testing.T) {
-	tree, err := NewTree(test.Config(t), memory.NewTransparencyStore(), nil)
+	tree, err := NewTree(test.Config(t), memStore(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

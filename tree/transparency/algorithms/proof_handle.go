@@ -334,8 +334,8 @@ func (pph *ProducedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error)
 	if err != nil {
 		return nil, err
 	}
-	raw, ok := res[x]
-	if !ok {
+	raw := res[0]
+	if raw == nil {
 		return nil, errors.New("requested log entry not found")
 	}
 

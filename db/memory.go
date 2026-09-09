@@ -7,7 +7,7 @@ import (
 )
 
 type memKeyValue struct {
-	Data map[string][]byte
+	data map[string][]byte
 }
 
 // NewMemoryKeyValueStore returns an in-memory implementation of the
@@ -19,16 +19,16 @@ func NewMemoryKeyValueStore() KeyValueStore {
 func (kv memKeyValue) BatchGet(ctx context.Context, keys []string) ([][]byte, error) {
 	out := make([][]byte, len(keys))
 	for i, key := range keys {
-		out[i] = dup(kv.Data[key])
+		out[i] = dup(kv.data[key])
 	}
 	return out, nil
 }
 
 func (kv memKeyValue) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
 	for key, value := range batch {
-		kv.Data[key] = dup(value)
+		kv.data[key] = dup(value)
 	}
-	kv.Data[treeHeadKey] = dup(treeHead)
+	kv.data[treeHeadKey] = dup(treeHead)
 	return nil
 }
 
@@ -46,11 +46,11 @@ func (as *memAuditor) PutState(raw []byte) error {
 }
 
 type memManagedLog struct {
-	Data map[string]int
+	data map[string]int
 }
 
 func NewMemoryManagedLogStore() ManagedLogStore {
-	return memManagedLog{Data: make(map[string]int)}
+	return memManagedLog{data: make(map[string]int)}
 }
 
 func (mls memManagedLog) IncrementGreatestVersion(label []byte, count int) (int, error) {
@@ -58,11 +58,11 @@ func (mls memManagedLog) IncrementGreatestVersion(label []byte, count int) (int,
 		return 0, errors.New("count must be greater than or equal to 1")
 	}
 	labelStr := fmt.Sprintf("%x", label)
-	ver, ok := mls.Data[labelStr]
+	ver, ok := mls.data[labelStr]
 	if !ok {
 		ver = -1
 	}
-	mls.Data[labelStr] = ver + count
+	mls.data[labelStr] = ver + count
 	return ver, nil
 }
 

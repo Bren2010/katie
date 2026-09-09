@@ -174,15 +174,12 @@ func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]pref
 		}
 
 		// Delete the label's index.
-		if err := t.tx.DeleteIndex(label); err != nil {
-			return nil, nil, err
-		}
+		t.tx.DeleteIndex(label)
 
 		// Delete the value and VRF output of each version.
 		for ver := range index {
-			if err := t.tx.DeleteVersion(label, uint32(ver)); err != nil {
-				return nil, nil, err
-			}
+			t.tx.DeleteVersion(label, uint32(ver))
+
 			vrfOutput, _, err := t.computeVrfOutput(label, uint32(ver))
 			if err != nil {
 				return nil, nil, err
@@ -230,9 +227,8 @@ func (t *Tree) issueTreeHead(n, timestamp uint64, prefixRoot []byte) error {
 	raw, err := structs.Marshal(&logEntry)
 	if err != nil {
 		return err
-	} else if err := t.tx.Put(n, raw); err != nil {
-		return err
 	}
+	t.tx.Put(n, raw)
 
 	// Compute the new log entry leaf hash and append it to the log tree.
 	leaf, err := logEntry.Hash(t.config.Suite)
@@ -265,13 +261,12 @@ func (t *Tree) issueTreeHead(n, timestamp uint64, prefixRoot []byte) error {
 	rawTreeHead, err := structs.Marshal(treeHead)
 	if err != nil {
 		return err
-	} else if err := t.tx.PutTreeHead(rawTreeHead); err != nil {
-		return err
-	} else if err := t.tx.Commit(); err != nil {
+	}
+	t.tx.PutTreeHead(rawTreeHead)
+	if err := t.tx.Commit(); err != nil {
 		return err
 	}
 
 	t.treeHead = treeHead
-
 	return nil
 }

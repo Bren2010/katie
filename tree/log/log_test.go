@@ -2,6 +2,7 @@ package log
 
 import (
 	"bytes"
+	"context"
 	"slices"
 	"testing"
 
@@ -9,8 +10,14 @@ import (
 	mrand "math/rand"
 
 	"github.com/Bren2010/katie/crypto/suites"
-	"github.com/Bren2010/katie/db/memory"
+	"github.com/Bren2010/katie/db"
 )
+
+// memLogStore returns a LogStore backed by an in-memory key-value store.
+func memLogStore() db.LogStore {
+	kv := db.NewMemoryKeyValueStore()
+	return db.NewTransparencyStore(context.Background(), kv, false).LogStore()
+}
 
 func random() []byte {
 	out := make([]byte, 32)
@@ -28,7 +35,7 @@ func dup(in []byte) []byte {
 
 func TestGetBatch(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	tree := NewTree(cs, memory.NewLogStore())
+	tree := NewTree(cs, memLogStore())
 
 	// Populate tree with random leaves. Retain leaf and full subtree values
 	// after each append.
@@ -103,7 +110,7 @@ func TestGetBatch(t *testing.T) {
 
 func TestAdditional(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	tree := NewTree(cs, memory.NewLogStore())
+	tree := NewTree(cs, memLogStore())
 
 	var (
 		n, m     uint64 = 2000, 1000
@@ -156,7 +163,7 @@ func TestAdditional(t *testing.T) {
 
 func TestAppend(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	tree := NewTree(cs, memory.NewLogStore())
+	tree := NewTree(cs, memLogStore())
 
 	leaf := random()
 	fullSubtrees, err := tree.Append(0, leaf)

@@ -2,13 +2,20 @@ package prefix
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	mrand "math/rand"
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
-	"github.com/Bren2010/katie/db/memory"
+	"github.com/Bren2010/katie/db"
 )
+
+// memPrefixStore returns a PrefixStore backed by an in-memory key-value store.
+func memPrefixStore() db.PrefixStore {
+	kv := db.NewMemoryKeyValueStore()
+	return db.NewTransparencyStore(context.Background(), kv, false).PrefixStore()
+}
 
 func randomBytes() [32]byte {
 	out := [32]byte{}
@@ -18,7 +25,7 @@ func randomBytes() [32]byte {
 
 func TestTree(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := memory.NewPrefixStore()
+	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
 	roots := [][]byte{make([]byte, cs.HashSize())}
@@ -73,7 +80,7 @@ func TestTree(t *testing.T) {
 
 func TestUnableToInsertSameTwice(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := memory.NewPrefixStore()
+	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
@@ -92,7 +99,7 @@ func TestUnableToInsertSameTwice(t *testing.T) {
 
 func TestUnableToAddAndRemoveSame(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := memory.NewPrefixStore()
+	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, _, err := tree.Mutate(
@@ -107,7 +114,7 @@ func TestUnableToAddAndRemoveSame(t *testing.T) {
 
 func TestRemove(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := memory.NewPrefixStore()
+	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, commitments, err := tree.Mutate(0, []Entry{
@@ -146,7 +153,7 @@ func TestRemove(t *testing.T) {
 
 func TestReplace(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	store := memory.NewPrefixStore()
+	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
 	_, _, commitments, err := tree.Mutate(0, []Entry{
@@ -184,7 +191,7 @@ func TestReplace(t *testing.T) {
 }
 
 func buildRandomTree(t *testing.T, cs suites.CipherSuite) (*Tree, [][]byte, [][]Entry) {
-	store := memory.NewPrefixStore()
+	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
 	roots := make([][]byte, 0)
