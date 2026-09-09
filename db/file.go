@@ -13,12 +13,8 @@ type fileAuditor struct {
 }
 
 // NewFileAuditorStore returns an implementation of the AuditorStore interface
-// that keeps the auditor's state in a single file on disk.
-//
-// Each write replaces the file atomically and is synced to stable storage
-// before PutState returns. An auditor that loses or half-writes its state can
-// be rolled back to an earlier tree head and made to sign a second, conflicting
-// one, so durability matters here more than write throughput does.
+// that keeps the auditor's state in a single file on disk. Writes are atomic
+// and synced to disk before PutState returns.
 func NewFileAuditorStore(file string) (AuditorStore, error) {
 	if file == "" {
 		return nil, errors.New("no file name provided")

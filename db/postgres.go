@@ -17,10 +17,8 @@ type psqlKeyValue struct {
 }
 
 // NewPSQLKeyValueStore returns an implementation of the KeyValueStore interface
-// backed by the given `conn` to a PostgreSQL database.
-//
-// `table` is the name of the table to use, which will be created if it does not
-// exist already.
+// backed by the given `conn` to a PostgreSQL database. `table` is the name of
+// the table to use, which will be created if it does not exist already.
 func NewPSQLKeyValueStore(conn *sql.DB, table string) (KeyValueStore, error) {
 	if conn == nil {
 		return nil, errors.New("no database connection provided")
@@ -130,10 +128,8 @@ type psqlManagedLog struct {
 }
 
 // NewPSQLManagedLogStore returns an implementation of the ManagedLogStore
-// interface backed by the given `conn` to a PostgreSQL database.
-//
-// `table` is the name of the table to use, which will be created if it does not
-// exist already.
+// interface backed by the given `conn` to a PostgreSQL database. `table` is the
+// name of the table to use, which will be created if it does not exist already.
 func NewPSQLManagedLogStore(conn *sql.DB, table string) (ManagedLogStore, error) {
 	if conn == nil {
 		return nil, errors.New("no database connection provided")

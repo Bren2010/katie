@@ -95,10 +95,8 @@ type ddbKeyValue struct {
 // NewDynamoDBKeyValueStore returns an implementation of the KeyValueStore
 // interface backed by Amazon DynamoDB. It connects with the default AWS
 // configuration, which is read from the usual environment variables, shared
-// config files, and instance credentials.
-//
-// `table` is the name of the table to use, which will be created if it does not
-// exist already.
+// config files, and instance credentials. `table` is the name of the table to
+// use, which will be created if it does not exist already.
 func NewDynamoDBKeyValueStore(ctx context.Context, table string) (KeyValueStore, error) {
 	client, err := newDynamoDBTable(ctx, table, keyAttribute, types.ScalarAttributeTypeS)
 	if err != nil {
@@ -227,10 +225,8 @@ type ddbManagedLog struct {
 // NewDynamoDBManagedLogStore returns an implementation of the ManagedLogStore
 // interface backed by Amazon DynamoDB. It connects with the default AWS
 // configuration, which is read from the usual environment variables, shared
-// config files, and instance credentials.
-//
-// `table` is the name of the table to use, which will be created if it does not
-// exist already.
+// config files, and instance credentials. `table` is the name of the table to
+// use, which will be created if it does not exist already.
 func NewDynamoDBManagedLogStore(ctx context.Context, table string) (ManagedLogStore, error) {
 	client, err := newDynamoDBTable(ctx, table, labelAttribute, types.ScalarAttributeTypeB)
 	if err != nil {

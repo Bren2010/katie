@@ -36,6 +36,8 @@ type memAuditor struct {
 	Data []byte
 }
 
+// NewMemoryAuditorStore returns an in-memory implementation of the AuditorStore
+// interface.
 func NewMemoryAuditorStore() AuditorStore { return &memAuditor{} }
 
 func (as *memAuditor) GetState() ([]byte, error) { return dup(as.Data), nil }
@@ -49,6 +51,8 @@ type memManagedLog struct {
 	data map[string]int
 }
 
+// NewMemoryManagedLogStore returns an in-memory implementation of the
+// ManagedLogStore interface.
 func NewMemoryManagedLogStore() ManagedLogStore {
 	return memManagedLog{data: make(map[string]int)}
 }

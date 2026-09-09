@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"encoding/binary"
-	"sync"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -60,14 +59,10 @@ func (kv ldbKeyValue) Commit(ctx context.Context, batch map[string][]byte, treeH
 
 type ldbManagedLog struct {
 	conn *leveldb.DB
-	mu   *sync.Mutex
 }
 
 // NewLDBManagedLogStore returns an implementation of the ManagedLogStore
 // interface that's backed by a LevelDB file.
-//
-// Only one process may have the file open at a time, so this is not suitable
-// for a Service Operator that runs more than one server instance.
 func NewLDBManagedLogStore(file string) (ManagedLogStore, error) {
 	conn, err := leveldb.OpenFile(file, nil)
 	if errors.IsCorrupted(err) {
@@ -76,7 +71,7 @@ func NewLDBManagedLogStore(file string) (ManagedLogStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ldbManagedLog{conn: conn, mu: &sync.Mutex{}}, nil
+	return ldbManagedLog{conn: conn}, nil
 }
 
 func (ml ldbManagedLog) IncrementGreatestVersion(ctx context.Context, label []byte, count int) (int, error) {
@@ -87,8 +82,6 @@ func (ml ldbManagedLog) IncrementGreatestVersion(ctx context.Context, label []by
 	} else if len(label) == 0 {
 		return 0, errors.New("label must not be empty")
 	}
-	ml.mu.Lock()
-	defer ml.mu.Unlock()
 
 	prev := int64(-1)
 	raw, err := ml.conn.Get(label, nil)
