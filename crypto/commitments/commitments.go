@@ -23,8 +23,8 @@ func Commit(cs suites.CipherSuite, opening, body []byte) []byte {
 	return mac.Sum(nil)
 }
 
-// Verify returns an error if `commitment` does not correspond to a commitment
-// to `body` with the given `opening.`
+// Verify returns true if `commitment` corresponds to a commitment to `body`
+// with the given `opening.`
 func Verify(cs suites.CipherSuite, opening, body, commitment []byte) bool {
 	cand := Commit(cs, opening, body)
 	return hmac.Equal(commitment, cand)

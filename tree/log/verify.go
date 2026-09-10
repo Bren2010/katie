@@ -50,8 +50,8 @@ func (v *Verifier) Retain(prev uint64, fullSubtrees [][]byte) error {
 	return nil
 }
 
-// Evaluate returns the full subtrees of the tree at sizes `n` and `nP` that
-// would result in `proof` being valid.
+// Evaluate returns the full subtrees of the tree at sizes `n` and `nP`
+// (respectively) that would result in `proof` being valid.
 func (v *Verifier) Evaluate(entries []uint64, n uint64, nP *uint64, values [][]byte, proof [][]byte) ([][]byte, [][]byte, error) {
 	// Input validation.
 	if n == 0 || n > math.MaxTreeSize {

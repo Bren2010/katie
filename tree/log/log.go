@@ -70,7 +70,9 @@ func (t *Tree) fetchSpecific(nodes []uint64) ([][]byte, error) {
 	return out, nil
 }
 
-// GetBatch returns a batch proof for the given set of log entries.
+// GetBatch returns a batch inclusion proof for the given set of log entries.
+// `n` is the current tree size, and `nP` and `m` are secondary tree sizes to
+// prove consistency with.
 func (t *Tree) GetBatch(entries []uint64, n uint64, nP, m *uint64) ([][]byte, error) {
 	if n == 0 || n > math.MaxTreeSize {
 		return nil, errors.New("invalid value for current tree size")
