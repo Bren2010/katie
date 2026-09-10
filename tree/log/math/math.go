@@ -12,7 +12,7 @@ func IsLeaf(x uint64) bool {
 	return (x & 1) == 0
 }
 
-// log2 returns the exponent of the largest power of 2 less than x.
+// log2 returns the exponent of the largest power of 2 less than or equal to x.
 func log2(x uint64) uint64 {
 	if x == 0 {
 		return 0

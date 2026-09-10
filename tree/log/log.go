@@ -79,14 +79,19 @@ func (t *Tree) GetBatch(entries []uint64, n uint64, nP, m *uint64) ([][]byte, er
 	} else if m != nil && (*m == 0 || *m > n || *m > math.MaxTreeSize) {
 		return nil, errors.New("invalid value for previous tree size")
 	}
-	slices.Sort(entries)
-	for i, x := range entries {
+
+	sorted := make([]uint64, len(entries))
+	copy(sorted, entries)
+	slices.Sort(sorted)
+
+	for i, x := range sorted {
 		if x >= n {
 			return nil, errors.New("can not get leaf beyond right edge of tree")
-		} else if i > 0 && entries[i-1] == x {
+		} else if i > 0 && sorted[i-1] == x {
 			return nil, errors.New("duplicate leaf index found")
 		}
 	}
+
 	return t.fetchSpecific(math.BatchCopath(entries, n, nP, m))
 }
 
@@ -197,16 +202,32 @@ func Root(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte) ([]byte, error
 // Append returns the new `fullSubtrees` slice after a new leaf with value
 // `added` has been added as the rightmost log entry.
 func Append(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte, added []byte) ([][]byte, error) {
-	if n == 0 {
+	// Input validation.
+	if n > math.MaxTreeSize {
+		return nil, errors.New("invalid value for current tree size")
+	} else if len(added) != cs.HashSize() {
+		return nil, errors.New("added value is unexpected size")
+	} else if n == 0 {
 		return [][]byte{added}, nil
 	}
 	root := math.Root(n)
+	subtrees := math.FullSubtrees(root, n)
+	if len(fullSubtrees) != len(subtrees) {
+		return nil, errors.New("unexpected number of full subtree values provided")
+	}
+	for _, elem := range fullSubtrees {
+		if len(elem) != cs.HashSize() {
+			return nil, errors.New("full subtree value is unexpected size")
+		}
+	}
 
+	// Setup a slice where position i is the full subtree with height i.
 	chain := make([][]byte, math.Level(root)+2)
-	for i, x := range math.FullSubtrees(root, n) {
+	for i, x := range subtrees {
 		chain[math.Level(x)] = fullSubtrees[i]
 	}
 
+	// Merge the new leaf into the chain slice.
 	carry := &nodeData{leaf: true, value: added}
 	for i := range chain {
 		if chain[i] == nil {
@@ -218,9 +239,9 @@ func Append(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte, added []byte
 	}
 
 	out := make([][]byte, 0)
-	for i := len(chain) - 1; i >= 0; i-- {
-		if chain[i] != nil {
-			out = append(out, chain[i])
+	for _, c := range slices.Backward(chain) {
+		if c != nil {
+			out = append(out, c)
 		}
 	}
 	return out, nil

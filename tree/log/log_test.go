@@ -27,12 +27,6 @@ func random() []byte {
 	return out
 }
 
-func dup(in []byte) []byte {
-	out := make([]byte, len(in))
-	copy(out, in)
-	return out
-}
-
 func TestGetBatch(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, memLogStore())
