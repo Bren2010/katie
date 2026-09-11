@@ -276,7 +276,7 @@ type nodeAndDepth struct {
 }
 
 // makeTile performs a breadth-first search to produce the largest tile possible
-// without exceeing MaxTileWeight. The tile is stored in root and ejected nodes
+// without exceeding MaxTileWeight. The tile is stored in root and ejected nodes
 // are returned.
 func makeTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node, depth int) []nodeAndDepth {
 	// Queue for the breadth-first search through the tree.
@@ -304,7 +304,7 @@ func makeTile(cs suites.CipherSuite, ver, ctrOffset uint64, root *node, depth in
 			newWeight += cs.HashSize()
 		}
 
-		if newWeight <= MaxTileWeight {
+		if newWeight <= MaxTileWeight || elem.ptr == root {
 			queue = append(queue,
 				pointerAndDepth{ptr: &p.left, depth: elem.depth + 1},
 				pointerAndDepth{ptr: &p.right, depth: elem.depth + 1})

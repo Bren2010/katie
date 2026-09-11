@@ -87,6 +87,19 @@ func batchTestSetup() (suites.CipherSuite, *recordingStore, db.PrefixStore, node
 		panic(err)
 	}
 
+	// A version of the tree whose only tile is a reference to the previous
+	// version. Mutate doesn't produce tiles like this, but search should still
+	// handle them correctly.
+	tile4 := tile{
+		id:    tileId{ver: 3, ctr: 0},
+		depth: 0,
+		root:  externalNode{tree2.Hash(cs), tileId{ver: 2, ctr: 0}},
+	}
+	bytes4, err := tile4.Marshal(cs)
+	if err != nil {
+		panic(err)
+	}
+
 	// Write the tiles through a writable store and commit them, so that the
 	// searches under test read from the key-value store instead of being served
 	// out of an uncommitted write batch.
@@ -97,6 +110,7 @@ func batchTestSetup() (suites.CipherSuite, *recordingStore, db.PrefixStore, node
 	ps.Put(tile1.id.String(), bytes1)
 	ps.Put(tile2.id.String(), bytes2)
 	ps.Put(tile3.id.String(), bytes3)
+	ps.Put(tile4.id.String(), bytes4)
 	writer.PutTreeHead([]byte("tree head"))
 	if err := writer.Commit(); err != nil {
 		panic(err)
@@ -204,7 +218,7 @@ func TestMultiVersionSearch(t *testing.T) {
 	want := tree2.Hash(cs)
 
 	b := newBatch(cs, store)
-	b.cache["1:0"] = tile{id: tileId{ver: 1, ctr: 0}, depth: 0, root: tree1}
+	b.cache["1:0"] = &tile{id: tileId{ver: 1, ctr: 0}, depth: 0, root: tree1}
 	res, state := b.initialize(map[uint64][][]byte{
 		1: {makeBytes(0b01000000)},
 		2: {makeBytes(0b01000000)},
@@ -227,6 +241,31 @@ func TestMultiVersionSearch(t *testing.T) {
 	_ = root1.(*parentNode).right.(emptyNode)
 
 	if got := root2.Hash(cs); !bytes.Equal(want, got) {
+		t.Fatal("tree hashes do not match")
+	}
+}
+
+// TestSearchExternalRootedTile checks that a search descends correctly through
+// a tile whose root is an external node.
+func TestSearchExternalRootedTile(t *testing.T) {
+	cs, kv, store, _, tree2 := batchTestSetup()
+	want := tree2.Hash(cs)
+
+	b := newBatch(cs, store)
+	res, state := b.initialize(map[uint64][][]byte{3: {makeBytes(0b01000000)}})
+	if err := b.search(state); err != nil {
+		t.Fatal(err)
+	} else if fmt.Sprint(kv.Lookups) != "[[p3:0] [p2:0] [p1:0] [p0:0]]" {
+		t.Fatal("unexpected database lookups")
+	}
+
+	root := res[3].root
+	_ = root.(*parentNode).left.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).left.(leafNode)
+	_ = root.(*parentNode).left.(*parentNode).right.(*parentNode).right.(leafNode)
+	_ = root.(*parentNode).right.(externalNode)
+
+	if got := root.Hash(cs); !bytes.Equal(want, got) {
 		t.Fatal("tree hashes do not match")
 	}
 }

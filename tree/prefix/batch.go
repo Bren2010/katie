@@ -52,15 +52,16 @@ func (c *cursor) step(n *node) *nextStep {
 type batch struct {
 	cs    suites.CipherSuite
 	tx    db.PrefixStore
-	cache map[string]tile
+	cache map[string]*tile
 }
 
 func newBatch(cs suites.CipherSuite, tx db.PrefixStore) *batch {
-	return &batch{cs, tx, make(map[string]tile)}
+	return &batch{cs, tx, make(map[string]*tile)}
 }
 
 // initialize creates the initial state object to call search with, and creates
-// a slice of tiles where the results will be stored.
+// a map from each searched version of the Prefix Tree to a tile where the
+// result for that version will be stored.
 func (b *batch) initialize(searches map[uint64][][]byte) (map[uint64]*tile, map[*node][]cursor) {
 	tiles := make(map[uint64]*tile, len(searches))
 	state := make(map[*node][]cursor, len(searches))
@@ -70,9 +71,9 @@ func (b *batch) initialize(searches map[uint64][][]byte) (map[uint64]*tile, map[
 		out := &tile{id: id, depth: 0, root: externalNode{nil, id}}
 		tiles[ver] = out
 
-		cursors := make([]cursor, 0, len(vrfOutputs))
-		for _, vrfOutput := range vrfOutputs {
-			cursors = append(cursors, cursor{vrfOutput: vrfOutput, depth: 0})
+		cursors := make([]cursor, len(vrfOutputs))
+		for i, vrfOutput := range vrfOutputs {
+			cursors[i] = cursor{vrfOutput: vrfOutput, depth: 0}
 		}
 		state[&out.root] = cursors
 	}
@@ -82,8 +83,8 @@ func (b *batch) initialize(searches map[uint64][][]byte) (map[uint64]*tile, map[
 
 // get looks up the tiles that will be needed to execute the provided next
 // search steps. It returns a map from serialized tile id to parsed tile.
-func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
-	out := make(map[string]tile)
+func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]*tile, error) {
+	out := make(map[string]*tile)
 
 	dedup := make(map[string]tileId)
 	for _, step := range nextSteps {
@@ -116,7 +117,7 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 		if err != nil {
 			return nil, err
 		}
-		out[key], b.cache[key] = t, t
+		out[key], b.cache[key] = &t, &t
 	}
 	return out, nil
 }
@@ -128,9 +129,9 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]tile, error) {
 func (b *batch) search(state map[*node][]cursor) error {
 	nextSteps := make(map[*cursor]nextStep)
 	for nd, cursors := range state {
-		for _, cursor := range cursors {
-			if res := cursor.step(nd); res != nil {
-				nextSteps[&cursor] = *res
+		for i := range cursors {
+			if res := cursors[i].step(nd); res != nil {
+				nextSteps[&cursors[i]] = *res
 			}
 		}
 	}
@@ -154,6 +155,9 @@ func (b *batch) search(state map[*node][]cursor) error {
 		}
 
 		// Recurse down within the tile until we reach the desired depth.
+		if t.depth > cursor.depth {
+			return errors.New("tile does not fit into search as expected")
+		}
 		n := &t.root
 		for i := range cursor.depth - t.depth {
 			switch m := (*n).(type) {
@@ -171,7 +175,7 @@ func (b *batch) search(state map[*node][]cursor) error {
 		// Replace the node where the search terminated with the new subtree
 		// that was just looked up. Setup cursor for next iteration.
 		*step.ptr = *n
-		nextState[n] = append(nextState[n], *cursor)
+		nextState[step.ptr] = append(nextState[step.ptr], *cursor)
 	}
 
 	return b.search(nextState)

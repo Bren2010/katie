@@ -294,3 +294,64 @@ func TestSearchMultipleVersion(t *testing.T) {
 		}
 	}
 }
+
+// TestEmptyMutateFails checks that a mutation must add or remove something.
+func TestEmptyMutateFails(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, memPrefixStore())
+
+	if _, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0x00), makeBytes(0x11)}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := tree.Mutate(1, nil, nil); err == nil {
+		t.Fatal("mutate did not return error when it should have")
+	}
+}
+
+// TestEmptySearchFails checks that a search must look for at least one vrf
+// output.
+func TestEmptySearchFails(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, memPrefixStore())
+
+	if _, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0x00), makeBytes(0x11)}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree.Search([]PrefixSearch{{1, nil}}); err == nil {
+		t.Fatal("search did not return error when it should have")
+	}
+}
+
+// TestEvaluateBeforeAfterMatchesMutation checks that the proof returned by
+// Mutate evaluates to the root hash of the tree both before and after the
+// mutation is applied.
+func TestEvaluateBeforeAfterMatchesMutation(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, memPrefixStore())
+
+	root0, _, _, err := tree.Mutate(0, []Entry{
+		{makeBytes(0x00), makeBytes(0x11)},
+		{makeBytes(0x80), makeBytes(0x22)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	add := []Entry{{makeBytes(0xc0), makeBytes(0x33)}}
+	root1, proof, commitments, err := tree.Mutate(1, add, [][]byte{makeBytes(0x00)})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(commitments) != 1 {
+		t.Fatal("unexpected number of commitments returned")
+	}
+	removed := []Entry{{makeBytes(0x00), commitments[0]}}
+
+	before, after, err := EvaluateBeforeAfter(cs, add, removed, proof)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(before, root0) {
+		t.Fatal("unexpected root hash computed for the tree before the mutation")
+	} else if !bytes.Equal(after, root1) {
+		t.Fatal("unexpected root hash computed for the tree after the mutation")
+	}
+}

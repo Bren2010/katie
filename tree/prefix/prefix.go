@@ -15,13 +15,19 @@ func compareEntries(a, b Entry) int {
 	return bytes.Compare(a.VrfOutput, b.VrfOutput)
 }
 
+// PrefixSearch represents a search for multiple VRF outputs in a single version
+// of the Prefix Tree.
 type PrefixSearch struct {
-	Version    uint64
-	VrfOutputs [][]byte
+	Version    uint64   // The version of the tree to search.
+	VrfOutputs [][]byte // The VRF outputs to search for.
 }
 
+// SearchResult contains the result of searching a single version of the Prefix
+// Tree for multiple VRF outputs.
 type SearchResult struct {
-	Proof       PrefixProof
+	Proof PrefixProof
+	// Commitments contains the commitment corresponding to each VRF output in
+	// the order requested, or nil if the VRF output doesn't exist.
 	Commitments [][]byte
 }
 
@@ -35,14 +41,16 @@ func NewTree(cs suites.CipherSuite, tx db.PrefixStore) *Tree {
 	return &Tree{cs, tx}
 }
 
-// Search takes as input a map from each version of the tree to search, to the
-// list of VRF outputs to search for in that version of the tree. It returns a
-// map from the searched versions of the tree to a batch PrefixProof.
+// Search takes as input a slice, where each element identifies a version of the
+// tree to search and one or more VRF outputs to search for in that version. It
+// returns a same-sized slice with the result of each search in the same order.
 func (t *Tree) Search(searches []PrefixSearch) ([]SearchResult, error) {
 	combined := make(map[uint64][][]byte)
 	for _, search := range searches {
 		if search.Version == 0 {
 			return nil, errors.New("unable to search in version 0 of the tree")
+		} else if len(search.VrfOutputs) == 0 {
+			return nil, errors.New("no vrf outputs requested for search")
 		}
 		for _, vrfOutput := range search.VrfOutputs {
 			if len(vrfOutput) != t.cs.HashSize() {
@@ -83,6 +91,10 @@ type Entry struct {
 // The current tree version is given in `ver`, which is 0 if the tree is empty.
 // After this, version `ver+1` of the tree will exist.
 func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *PrefixProof, [][]byte, error) {
+	if len(add) == 0 && len(remove) == 0 {
+		return nil, nil, nil, errors.New("no mutations requested")
+	}
+
 	// Sort the list of new entries to add and verify that they're well formed.
 	sortedAdd := make([]Entry, len(add))
 	copy(sortedAdd, add)
@@ -145,8 +157,8 @@ func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, 
 			return nil, nil, nil, errors.New("can not remove vrf output that does not exist")
 		}
 		root := emptyNode{}
-		proof, _ := runProofBuilder(t.cs, root, vrfOutputs)
-		return root, &proof, nil, nil
+		proof, commitments := runProofBuilder(t.cs, root, vrfOutputs)
+		return root, &proof, commitments, nil
 	}
 
 	b := newBatch(t.cs, t.tx)
