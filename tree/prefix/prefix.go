@@ -157,8 +157,8 @@ func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, 
 			return nil, nil, nil, errors.New("can not remove vrf output that does not exist")
 		}
 		root := emptyNode{}
-		proof, commitments := runProofBuilder(t.cs, root, vrfOutputs)
-		return root, &proof, commitments, nil
+		proof, _ := runProofBuilder(t.cs, root, vrfOutputs)
+		return root, &proof, nil, nil
 	}
 
 	b := newBatch(t.cs, t.tx)
@@ -326,15 +326,23 @@ func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]by
 
 		// If this node has two children that are emptyNodes, or one child
 		// that's a leaf and one child that's an emptyNode, then simplify the
-		// tree a bit.
+		// tree a bit. This is only done in cases where a verifier evaluating
+		// the proof of this mutation can do the same. A verifier can always
+		// tell when a child is an emptyNode: either the child is on a search
+		// path, or its hash is all zeros. But a verifier only knows that a
+		// child is a leaf if the child is on a search path, meaning there were
+		// additions or removals below it.
+		leftTouched := len(leftAdd) > 0 || len(leftRemove) > 0
+		rightTouched := len(rightAdd) > 0 || len(rightRemove) > 0
+
 		_, leftLeaf := m.left.(leafNode)
 		_, leftEmpty := m.left.(emptyNode)
 		_, rightLeaf := m.right.(leafNode)
 		_, rightEmpty := m.right.(emptyNode)
 
-		if leftLeaf && rightEmpty {
+		if leftLeaf && leftTouched && rightEmpty {
 			*n = m.left
-		} else if leftEmpty && rightLeaf {
+		} else if leftEmpty && rightLeaf && rightTouched {
 			*n = m.right
 		} else if leftEmpty && rightEmpty {
 			*n = emptyNode{}
