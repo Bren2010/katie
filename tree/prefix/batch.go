@@ -69,6 +69,11 @@ func (b *batch) initialize(searches map[uint64][][]byte) (map[uint64]*tile, map[
 	for ver, vrfOutputs := range searches {
 		id := tileId{ver: ver, ctr: 0}
 		out := &tile{id: id, depth: 0, root: externalNode{nil, id}}
+		if ver == 0 {
+			// Version 0 of the tree is empty and isn't stored in the database,
+			// so searches of it terminate immediately.
+			out.root = emptyNode{}
+		}
 		tiles[ver] = out
 
 		cursors := make([]cursor, len(vrfOutputs))

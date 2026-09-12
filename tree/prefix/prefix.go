@@ -47,9 +47,7 @@ func NewTree(cs suites.CipherSuite, tx db.PrefixStore) *Tree {
 func (t *Tree) Search(searches []PrefixSearch) ([]SearchResult, error) {
 	combined := make(map[uint64][][]byte)
 	for _, search := range searches {
-		if search.Version == 0 {
-			return nil, errors.New("unable to search in version 0 of the tree")
-		} else if len(search.VrfOutputs) == 0 {
+		if len(search.VrfOutputs) == 0 {
 			return nil, errors.New("no vrf outputs requested for search")
 		}
 		for _, vrfOutput := range search.VrfOutputs {
