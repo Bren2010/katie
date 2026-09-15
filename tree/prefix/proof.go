@@ -22,8 +22,8 @@ type PrefixProof struct {
 }
 
 func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, error) {
-	numResults, err := buf.ReadByte()
-	if err != nil {
+	var numResults uint32
+	if err := binary.Read(buf, binary.BigEndian, &numResults); err != nil {
 		return nil, err
 	}
 	results := make([]PrefixSearchResult, numResults)
@@ -35,7 +35,7 @@ func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, err
 		results[i] = result
 	}
 
-	var numElements uint16
+	var numElements uint32
 	if err := binary.Read(buf, binary.BigEndian, &numElements); err != nil {
 		return nil, err
 	}
@@ -52,18 +52,18 @@ func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, err
 }
 
 func (pp *PrefixProof) Marshal(buf *bytes.Buffer) error {
-	if len(pp.Results) > 255 {
+	if len(pp.Results) > (1<<32)-1 {
 		return errors.New("results too long to marshal")
 	}
-	buf.WriteByte(byte(len(pp.Results)))
+	binary.Write(buf, binary.BigEndian, uint32(len(pp.Results)))
 	for _, res := range pp.Results {
 		res.Marshal(buf)
 	}
 
-	if len(pp.Elements) > 65535 {
+	if len(pp.Elements) > (1<<32)-1 {
 		return errors.New("elements too long to marshal")
 	}
-	binary.Write(buf, binary.BigEndian, uint16(len(pp.Elements)))
+	binary.Write(buf, binary.BigEndian, uint32(len(pp.Elements)))
 	for _, elem := range pp.Elements {
 		buf.Write(elem)
 	}

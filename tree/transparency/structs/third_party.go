@@ -39,15 +39,15 @@ func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate,
 	}
 
 	newF := func(buf *bytes.Buffer) (*prefix.Entry, error) { return newPrefixEntry(cs, buf) }
-	added, err := readFuncSlice[uint16](buf, newF)
+	added, err := readFuncSlice[uint32](buf, newF)
 	if err != nil {
 		return nil, err
 	}
-	removed, err := readFuncSlice[uint16](buf, newF)
+	removed, err := readFuncSlice[uint32](buf, newF)
 	if err != nil {
 		return nil, err
 	}
-	leaves, err := readFuncSlice[uint16](buf, newF)
+	leaves, err := readFuncSlice[uint32](buf, newF)
 	if err != nil {
 		return nil, err
 	}
@@ -69,13 +69,13 @@ func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate,
 func (au *AuditorUpdate) Marshal(buf *bytes.Buffer) error {
 	writeNumeric(buf, au.Timestamp)
 
-	if err := writeFuncSlice[uint16](buf, au.Added, "added prefix entry", marshalPrefixEntry); err != nil {
+	if err := writeFuncSlice[uint32](buf, au.Added, "added prefix entry", marshalPrefixEntry); err != nil {
 		return err
 	}
-	if err := writeFuncSlice[uint16](buf, au.Removed, "removed prefix entry", marshalPrefixEntry); err != nil {
+	if err := writeFuncSlice[uint32](buf, au.Removed, "removed prefix entry", marshalPrefixEntry); err != nil {
 		return err
 	}
-	if err := writeFuncSlice[uint16](buf, au.Leaves, "moved prefix entry", marshalPrefixEntry); err != nil {
+	if err := writeFuncSlice[uint32](buf, au.Leaves, "moved prefix entry", marshalPrefixEntry); err != nil {
 		return err
 	}
 
