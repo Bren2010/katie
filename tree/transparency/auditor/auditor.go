@@ -170,7 +170,8 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 		return errors.New("update timestamp is less than rightmost timestamp")
 	}
 
-	// Verify that `added` and `removed` are sorted and contain no duplicates.
+	// Verify that `added`, `removed`, and `leaves` are sorted and contain no
+	// duplicates.
 	for i := 1; i < len(update.Added); i++ {
 		if compareEntry(update.Added[i-1], update.Added[i]) != -1 {
 			return errors.New("list of added prefix tree entries is invalid")
@@ -181,6 +182,12 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 			return errors.New("list of removed prefix tree entries is invalid")
 		}
 	}
+	for i := 1; i < len(update.Leaves); i++ {
+		if compareEntry(update.Leaves[i-1], update.Leaves[i]) != -1 {
+			return errors.New("list of moved prefix tree leaves is invalid")
+		} // TODO: Verify no overlap with `added` or `removed`.
+	}
+	// TODO: All this input validation should move into EvaluateBeforeAfter
 
 	// Verify that the result provided in `proof` for each element of `added`
 	// shows non-inclusion.
@@ -231,7 +238,7 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 	// Compute the root value of the previous prefix tree. Verify that it
 	// matches the auditor's state. Compute the new root value for the prefix
 	// tree.
-	before, after, err := prefix.EvaluateBeforeAfter(a.config.Suite, update.Added, update.Removed, &update.Proof)
+	before, after, err := prefix.EvaluateBeforeAfter(a.config.Suite, update.Added, update.Removed, update.Leaves, &update.Proof)
 	if err != nil {
 		return err
 	} else if a.state != nil && !bytes.Equal(before, a.state.prefixTree) {

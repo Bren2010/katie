@@ -136,6 +136,44 @@ func fillInCopath(cs suites.CipherSuite, n *node, elements [][]byte) ([][]byte, 
 	}
 }
 
+// addMovedLeaf replaces the copath node in `n` where the leaf in `entry` is
+// stored with a leafNode, which allows EvaluateBeforeAfter to move the leaf up.
+// It returns an error if the leaf is not at that position.
+func addMovedLeaf(cs suites.CipherSuite, n *node, entry Entry) error {
+	if len(entry.VrfOutput) != cs.HashSize() {
+		return errors.New("unexpected vrf output length")
+	} else if len(entry.Commitment) != cs.HashSize() {
+		return errors.New("unexpected commitment length")
+	}
+	leaf := leafNode{entry.VrfOutput, entry.Commitment}
+	depth := 0
+
+	for {
+		switch m := (*n).(type) {
+		case emptyNode, leafNode:
+			return errors.New("moved leaf is not on the copath")
+
+		case *parentNode:
+			if getBit(entry.VrfOutput, depth) {
+				n = &m.right
+			} else {
+				n = &m.left
+			}
+			depth++
+
+		case externalNode:
+			if !bytes.Equal(m.hash, leaf.Hash(cs)) {
+				return errors.New("moved leaf does not match copath node")
+			}
+			*n = leaf
+			return nil
+
+		default:
+			panic("unexpected node type found")
+		}
+	}
+}
+
 func evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) (node, error) {
 	sortedEntries := make([]Entry, len(entries))
 	copy(sortedEntries, entries)
@@ -190,13 +228,16 @@ func Verify(cs suites.CipherSuite, entries []Entry, proof *PrefixProof, root []b
 }
 
 // EvaluateBeforeAfter evaluates `proof` before and after making the requested
-// additions and removals.
-func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove []Entry, proof *PrefixProof) ([]byte, []byte, error) {
+// additions and removals. The leaves that move up in the tree as a result of
+// the mutation, but that aren't on the search path of any added or removed
+// entry, must be provided in `leaves`.
+func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove, leaves []Entry, proof *PrefixProof) ([]byte, []byte, error) {
 	// Combine the `add` and `remove` slices and compute the prefix tree root
 	// hash in the straightforward way.
-	allEntries := make([]Entry, len(add)+len(remove))
+	allEntries := make([]Entry, len(add)+len(remove)+len(leaves))
 	copy(allEntries, add)
 	copy(allEntries[len(add):], remove)
+	copy(allEntries[len(add)+len(remove):], leaves)
 
 	root, err := evaluate(cs, allEntries, proof)
 	if err != nil {

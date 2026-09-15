@@ -228,7 +228,7 @@ func TestEvaluateBeforeAfterRejectsIncludedAdd(t *testing.T) {
 	add := []Entry{{makeBytes(0x00), makeBytes(0x11)}}
 	proof := &PrefixProof{Results: []PrefixSearchResult{inclusionProof{depth: 0}}}
 
-	if _, _, err := EvaluateBeforeAfter(cs, add, nil, proof); err == nil {
+	if _, _, err := EvaluateBeforeAfter(cs, add, nil, nil, proof); err == nil {
 		t.Fatal("accepted an addition of an entry that is already in the tree")
 	}
 }
@@ -241,7 +241,43 @@ func TestEvaluateBeforeAfterRejectsAbsentRemove(t *testing.T) {
 	remove := []Entry{{makeBytes(0x00), makeBytes(0x11)}}
 	proof := &PrefixProof{Results: []PrefixSearchResult{nonInclusionParentProof{depth: 0}}}
 
-	if _, _, err := EvaluateBeforeAfter(cs, nil, remove, proof); err == nil {
+	if _, _, err := EvaluateBeforeAfter(cs, nil, remove, nil, proof); err == nil {
 		t.Fatal("accepted a removal of an entry that is not in the tree")
+	}
+}
+
+// TestEvaluateBeforeAfterMovedLeaf checks that a moved leaf provided to
+// EvaluateBeforeAfter is moved up after a removal, and that it must match the
+// copath node at its position.
+func TestEvaluateBeforeAfterMovedLeaf(t *testing.T) {
+	cs := suites.KTSha256P256{}
+
+	removed := leafNode{makeBytes(0x00), makeBytes(0x11)}
+	sibling := leafNode{makeBytes(0x80), makeBytes(0x22)}
+	root := &parentNode{left: removed, right: sibling}
+
+	remove := []Entry{{removed.vrfOutput, removed.commitment}}
+	proof := &PrefixProof{
+		Results:  []PrefixSearchResult{inclusionProof{depth: 1}},
+		Elements: [][]byte{sibling.Hash(cs)},
+	}
+
+	leaves := []Entry{{sibling.vrfOutput, sibling.commitment}}
+	before, after, err := EvaluateBeforeAfter(cs, nil, remove, leaves, proof)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(before, root.Hash(cs)) {
+		t.Fatal("unexpected root hash computed for the tree before the mutation")
+	} else if !bytes.Equal(after, sibling.Hash(cs)) {
+		t.Fatal("moved leaf was not moved up")
+	}
+
+	wrong := []Entry{{sibling.vrfOutput, makeBytes(0x33)}}
+	if _, _, err := EvaluateBeforeAfter(cs, nil, remove, wrong, proof); err == nil {
+		t.Fatal("accepted a moved leaf that does not match the copath")
+	}
+	onPath := []Entry{{removed.vrfOutput, removed.commitment}}
+	if _, _, err := EvaluateBeforeAfter(cs, nil, remove, onPath, proof); err == nil {
+		t.Fatal("accepted a moved leaf that is on a search path")
 	}
 }

@@ -40,7 +40,7 @@ func TestTree(t *testing.T) {
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 			data[vrfOutput] = commitment
 		}
-		root, proof, commitments, err := tree.Mutate(ver, entries, nil)
+		root, proof, commitments, _, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(commitments) > 0 {
@@ -83,15 +83,15 @@ func TestUnableToInsertSameTwice(t *testing.T) {
 	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
+	_, _, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err = tree.Mutate(1, []Entry{{makeBytes(1), makeBytes(1)}, {makeBytes(1), makeBytes(1)}}, nil)
+	_, _, _, _, err = tree.Mutate(1, []Entry{{makeBytes(1), makeBytes(1)}, {makeBytes(1), makeBytes(1)}}, nil)
 	if err == nil {
 		t.Fatal("mutate did not return error when it should have")
 	}
-	_, _, _, err = tree.Mutate(1, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
+	_, _, _, _, err = tree.Mutate(1, []Entry{{makeBytes(0), makeBytes(0)}}, nil)
 	if err == nil {
 		t.Fatal("mutate did not return error when it should have")
 	}
@@ -102,7 +102,7 @@ func TestUnableToAddAndRemoveSame(t *testing.T) {
 	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, _, err := tree.Mutate(
+	_, _, _, _, err := tree.Mutate(
 		0,
 		[]Entry{{makeBytes(0), makeBytes(0)}, {makeBytes(1), makeBytes(1)}},
 		[][]byte{makeBytes(1)},
@@ -117,7 +117,7 @@ func TestRemove(t *testing.T) {
 	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, commitments, err := tree.Mutate(0, []Entry{
+	_, _, commitments, _, err := tree.Mutate(0, []Entry{
 		{makeBytes(0), makeBytes(0)},
 		{makeBytes(1), makeBytes(1)},
 	}, nil)
@@ -126,7 +126,7 @@ func TestRemove(t *testing.T) {
 	} else if len(commitments) > 0 {
 		t.Fatal("unexpected number of commitments returned")
 	}
-	root, _, commitments, err := tree.Mutate(1, nil, [][]byte{makeBytes(0)})
+	root, _, commitments, _, err := tree.Mutate(1, nil, [][]byte{makeBytes(0)})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(commitments) != 1 || !bytes.Equal(commitments[0], makeBytes(0)) {
@@ -158,7 +158,7 @@ func TestReplace(t *testing.T) {
 	store := memPrefixStore()
 
 	tree := NewTree(cs, store)
-	_, _, commitments, err := tree.Mutate(0, []Entry{
+	_, _, commitments, _, err := tree.Mutate(0, []Entry{
 		{makeBytes(0), makeBytes(0)},
 		{makeBytes(1), makeBytes(1)},
 	}, nil)
@@ -167,7 +167,7 @@ func TestReplace(t *testing.T) {
 	} else if len(commitments) > 0 {
 		t.Fatal("unexpected number of commitments returned")
 	}
-	_, _, commitments, err = tree.Mutate(1, []Entry{
+	_, _, commitments, _, err = tree.Mutate(1, []Entry{
 		{makeBytes(0), makeBytes(2)},
 	}, [][]byte{makeBytes(0)})
 	if err != nil {
@@ -205,7 +205,7 @@ func buildRandomTree(t *testing.T, cs suites.CipherSuite) (*Tree, [][]byte, [][]
 			vrfOutput, commitment := randomBytes(), randomBytes()
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 		}
-		root, _, commitments, err := tree.Mutate(ver, entries, nil)
+		root, _, commitments, _, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(commitments) > 0 {
@@ -302,10 +302,10 @@ func TestEmptyMutateFails(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, memPrefixStore())
 
-	if _, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0x00), makeBytes(0x11)}}, nil); err != nil {
+	if _, _, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0x00), makeBytes(0x11)}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := tree.Mutate(1, nil, nil); err == nil {
+	if _, _, _, _, err := tree.Mutate(1, nil, nil); err == nil {
 		t.Fatal("mutate did not return error when it should have")
 	}
 }
@@ -316,7 +316,7 @@ func TestEmptySearchFails(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, memPrefixStore())
 
-	if _, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0x00), makeBytes(0x11)}}, nil); err != nil {
+	if _, _, _, _, err := tree.Mutate(0, []Entry{{makeBytes(0x00), makeBytes(0x11)}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tree.Search([]PrefixSearch{{1, nil}}); err == nil {
@@ -331,7 +331,7 @@ func TestEvaluateBeforeAfterMatchesMutation(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, memPrefixStore())
 
-	root0, _, _, err := tree.Mutate(0, []Entry{
+	root0, _, _, _, err := tree.Mutate(0, []Entry{
 		{makeBytes(0x00), makeBytes(0x11)},
 		{makeBytes(0x80), makeBytes(0x22)},
 	}, nil)
@@ -340,7 +340,7 @@ func TestEvaluateBeforeAfterMatchesMutation(t *testing.T) {
 	}
 
 	add := []Entry{{makeBytes(0xc0), makeBytes(0x33)}}
-	root1, proof, commitments, err := tree.Mutate(1, add, [][]byte{makeBytes(0x00)})
+	root1, proof, commitments, leaves, err := tree.Mutate(1, add, [][]byte{makeBytes(0x00)})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(commitments) != 1 {
@@ -348,7 +348,7 @@ func TestEvaluateBeforeAfterMatchesMutation(t *testing.T) {
 	}
 	removed := []Entry{{makeBytes(0x00), commitments[0]}}
 
-	before, after, err := EvaluateBeforeAfter(cs, add, removed, proof)
+	before, after, err := EvaluateBeforeAfter(cs, add, removed, leaves, proof)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(before, root0) {
@@ -368,6 +368,7 @@ func checkMutationProof(
 	remove [][]byte,
 	proof *PrefixProof,
 	commitments [][]byte,
+	leaves []Entry,
 ) {
 	t.Helper()
 
@@ -375,7 +376,7 @@ func checkMutationProof(
 	for i, vrfOutput := range remove {
 		removed[i] = Entry{vrfOutput, commitments[i]}
 	}
-	before, after, err := EvaluateBeforeAfter(cs, add, removed, proof)
+	before, after, err := EvaluateBeforeAfter(cs, add, removed, leaves, proof)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(before, prev) {
@@ -386,14 +387,14 @@ func checkMutationProof(
 }
 
 // TestRemoveUntouchedLeaf checks that when a leaf is removed, a sibling leaf
-// that the mutation doesn't otherwise touch stays where it is. A verifier only
-// knows the sibling's hash, so it can't move the sibling up either.
+// that the mutation doesn't otherwise touch moves up, and that the sibling is
+// returned as a moved leaf so that a verifier can move it up too.
 func TestRemoveUntouchedLeaf(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, memPrefixStore())
 
 	sibling := leafNode{makeBytes(0x80), makeBytes(0x22)}
-	root0, _, _, err := tree.Mutate(0, []Entry{
+	root0, _, _, _, err := tree.Mutate(0, []Entry{
 		{makeBytes(0x00), makeBytes(0x11)},
 		{sibling.vrfOutput, sibling.commitment},
 	}, nil)
@@ -402,25 +403,28 @@ func TestRemoveUntouchedLeaf(t *testing.T) {
 	}
 
 	remove := [][]byte{makeBytes(0x00)}
-	root1, proof, commitments, err := tree.Mutate(1, nil, remove)
+	root1, proof, commitments, leaves, err := tree.Mutate(1, nil, remove)
 	if err != nil {
 		t.Fatal(err)
+	} else if !bytes.Equal(root1, sibling.Hash(cs)) {
+		t.Fatal("untouched sibling leaf was not moved up")
+	} else if len(leaves) != 1 ||
+		!bytes.Equal(leaves[0].VrfOutput, sibling.vrfOutput) ||
+		!bytes.Equal(leaves[0].Commitment, sibling.commitment) {
+		t.Fatal("unexpected moved leaves returned")
 	}
-	want := (&parentNode{left: emptyNode{}, right: sibling}).Hash(cs)
-	if !bytes.Equal(root1, want) {
-		t.Fatal("untouched sibling leaf was moved")
-	}
-	checkMutationProof(t, cs, root0, root1, nil, remove, proof, commitments)
+	checkMutationProof(t, cs, root0, root1, nil, remove, proof, commitments, leaves)
 }
 
-// TestRemoveTouchedLeaf checks that the tree is still simplified when the leaf
-// that would move up is on a search path, since a verifier can move it too.
+// TestRemoveTouchedLeaf checks that the tree is simplified when the leaf that
+// would move up is on a search path, and that it's not returned as a moved leaf
+// since a verifier can already see it.
 func TestRemoveTouchedLeaf(t *testing.T) {
 	cs := suites.KTSha256P256{}
 	tree := NewTree(cs, memPrefixStore())
 
 	// These share their first bit, so they're stored two levels deep.
-	root0, _, _, err := tree.Mutate(0, []Entry{
+	root0, _, _, _, err := tree.Mutate(0, []Entry{
 		{makeBytes(0x00), makeBytes(0x11)},
 		{makeBytes(0x40), makeBytes(0x22)},
 	}, nil)
@@ -433,13 +437,15 @@ func TestRemoveTouchedLeaf(t *testing.T) {
 	added := leafNode{makeBytes(0x20), makeBytes(0x33)}
 	add := []Entry{{added.vrfOutput, added.commitment}}
 	remove := [][]byte{makeBytes(0x00), makeBytes(0x40)}
-	root1, proof, commitments, err := tree.Mutate(1, add, remove)
+	root1, proof, commitments, leaves, err := tree.Mutate(1, add, remove)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(root1, added.Hash(cs)) {
 		t.Fatal("tree not properly reduced after removal")
+	} else if len(leaves) != 0 {
+		t.Fatal("unexpected leaves returned")
 	}
-	checkMutationProof(t, cs, root0, root1, add, remove, proof, commitments)
+	checkMutationProof(t, cs, root0, root1, add, remove, proof, commitments, leaves)
 }
 
 // TestEvaluateBeforeAfterRandom checks that EvaluateBeforeAfter computes the
@@ -471,11 +477,11 @@ func TestEvaluateBeforeAfterRandom(t *testing.T) {
 			add = append(add, Entry{vrfOutput[:], commitment[:]})
 		}
 
-		root, proof, commitments, err := tree.Mutate(ver, add, remove)
+		root, proof, commitments, leaves, err := tree.Mutate(ver, add, remove)
 		if err != nil {
 			t.Fatal(err)
 		}
-		checkMutationProof(t, cs, roots[ver], root, add, remove, proof, commitments)
+		checkMutationProof(t, cs, roots[ver], root, add, remove, proof, commitments, leaves)
 		roots = append(roots, root)
 
 		for _, vrfOutput := range remove {
@@ -484,5 +490,92 @@ func TestEvaluateBeforeAfterRandom(t *testing.T) {
 		for _, entry := range add {
 			live[string(entry.VrfOutput)] = struct{}{}
 		}
+	}
+}
+
+// TestHistoryIndependence checks that the structure of the tree depends only
+// on the entries it currently contains: adding entries and then removing them
+// restores the previous root hash, and a tree built through a series of
+// mutations has the same root hash as one built with a single mutation.
+func TestHistoryIndependence(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, memPrefixStore())
+
+	// Build a tree that's large enough to be split into many tiles.
+	live := make(map[string][]byte)
+	base := make([]Entry, 0)
+	for range 500 {
+		vrfOutput, commitment := randomBytes(), randomBytes()
+		base = append(base, Entry{vrfOutput[:], commitment[:]})
+		live[string(vrfOutput[:])] = commitment[:]
+	}
+	root, _, _, _, err := tree.Mutate(0, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ver := uint64(1)
+
+	for range 20 {
+		// Add some new entries. Some share a long prefix with an existing
+		// entry, so that removing them moves the existing entry up several
+		// levels.
+		add := make([]Entry, 0)
+		for range 1 + mrand.Intn(10) {
+			vrfOutput, commitment := randomBytes(), randomBytes()
+			if mrand.Intn(2) == 0 {
+				existing := base[mrand.Intn(len(base))].VrfOutput
+				copy(vrfOutput[:3], existing)
+			}
+			add = append(add, Entry{vrfOutput[:], commitment[:]})
+		}
+		added, proof, commitments, leaves, err := tree.Mutate(ver, add, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkMutationProof(t, cs, root, added, add, nil, proof, commitments, leaves)
+		ver++
+
+		// Remove the entries that were just added, and check that the tree
+		// looks like they were never added.
+		remove := make([][]byte, len(add))
+		for i, entry := range add {
+			remove[i] = entry.VrfOutput
+		}
+		removed, proof, commitments, leaves, err := tree.Mutate(ver, nil, remove)
+		if err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(removed, root) {
+			t.Fatal("root hash changed after adding and removing the same entries")
+		}
+		checkMutationProof(t, cs, added, removed, nil, remove, proof, commitments, leaves)
+		ver++
+
+		// Remove a random existing entry.
+		var victim []byte
+		for vrfOutput := range live {
+			victim = []byte(vrfOutput)
+			break
+		}
+		delete(live, string(victim))
+		next, proof, commitments, leaves, err := tree.Mutate(ver, nil, [][]byte{victim})
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkMutationProof(t, cs, root, next, nil, [][]byte{victim}, proof, commitments, leaves)
+		root = next
+		ver++
+	}
+
+	// Build a new tree containing only the remaining entries, and check that it
+	// has the same root hash.
+	entries := make([]Entry, 0, len(live))
+	for vrfOutput, commitment := range live {
+		entries = append(entries, Entry{[]byte(vrfOutput), commitment})
+	}
+	fresh, _, _, _, err := NewTree(cs, memPrefixStore()).Mutate(0, entries, nil)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(fresh, root) {
+		t.Fatal("root hash depends on the order of mutations")
 	}
 }

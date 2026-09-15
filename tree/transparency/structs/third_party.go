@@ -27,9 +27,9 @@ func marshalPrefixEntry(entry *prefix.Entry, buf *bytes.Buffer) error {
 }
 
 type AuditorUpdate struct {
-	Timestamp      uint64
-	Added, Removed []prefix.Entry
-	Proof          prefix.PrefixProof
+	Timestamp              uint64
+	Added, Removed, Leaves []prefix.Entry
+	Proof                  prefix.PrefixProof
 }
 
 func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate, error) {
@@ -47,6 +47,10 @@ func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate,
 	if err != nil {
 		return nil, err
 	}
+	leaves, err := readFuncSlice[uint16](buf, newF)
+	if err != nil {
+		return nil, err
+	}
 
 	proof, err := prefix.NewPrefixProof(cs, buf)
 	if err != nil {
@@ -57,6 +61,7 @@ func NewAuditorUpdate(cs suites.CipherSuite, buf *bytes.Buffer) (*AuditorUpdate,
 		Timestamp: timestamp,
 		Added:     added,
 		Removed:   removed,
+		Leaves:    leaves,
 		Proof:     *proof,
 	}, nil
 }
@@ -68,6 +73,9 @@ func (au *AuditorUpdate) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	if err := writeFuncSlice[uint16](buf, au.Removed, "removed prefix entry", marshalPrefixEntry); err != nil {
+		return err
+	}
+	if err := writeFuncSlice[uint16](buf, au.Leaves, "moved prefix entry", marshalPrefixEntry); err != nil {
 		return err
 	}
 

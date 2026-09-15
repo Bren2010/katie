@@ -83,14 +83,19 @@ type Entry struct {
 
 // Mutate adds a set of new entries to the tree, removes the requested entries,
 // and increments the version counter. It returns the new root hash, a batch
-// proof from just before the additions and removals were applied, and the
-// removed commitments.
+// proof from just before the additions and removals were applied, the removed
+// commitments, and the moved leaves.
+//
+// The moved leaves are the leaves that are not on the search path of any added
+// or removed entry, but that move up in the tree as a result of the mutation.
+// The proof would otherwise only contain the hash of these leaves, and
+// verifiers wouldn't know that they were supposed to move up.
 //
 // The current tree version is given in `ver`, which is 0 if the tree is empty.
 // After this, version `ver+1` of the tree will exist.
-func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *PrefixProof, [][]byte, error) {
+func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *PrefixProof, [][]byte, []Entry, error) {
 	if len(add) == 0 && len(remove) == 0 {
-		return nil, nil, nil, errors.New("no mutations requested")
+		return nil, nil, nil, nil, errors.New("no mutations requested")
 	}
 
 	// Sort the list of new entries to add and verify that they're well formed.
@@ -99,11 +104,11 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	slices.SortFunc(sortedAdd, compareEntries)
 	for i, entry := range sortedAdd {
 		if len(entry.VrfOutput) != t.cs.HashSize() {
-			return nil, nil, nil, errors.New("unexpected vrf output length")
+			return nil, nil, nil, nil, errors.New("unexpected vrf output length")
 		} else if len(entry.Commitment) != t.cs.HashSize() {
-			return nil, nil, nil, errors.New("unexpected commitment length")
+			return nil, nil, nil, nil, errors.New("unexpected commitment length")
 		} else if i > 0 && bytes.Equal(sortedAdd[i-1].VrfOutput, entry.VrfOutput) {
-			return nil, nil, nil, errors.New("unable to insert same vrf output multiple times")
+			return nil, nil, nil, nil, errors.New("unable to insert same vrf output multiple times")
 		}
 	}
 
@@ -113,18 +118,18 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	slices.SortFunc(sortedRemove, bytes.Compare)
 	for i, vrfOutput := range sortedRemove {
 		if len(vrfOutput) != t.cs.HashSize() {
-			return nil, nil, nil, errors.New("unexpected vrf output length")
+			return nil, nil, nil, nil, errors.New("unexpected vrf output length")
 		} else if i > 0 && bytes.Equal(sortedRemove[i-1], vrfOutput) {
-			return nil, nil, nil, errors.New("unable to remove the same vrf output multiple times")
+			return nil, nil, nil, nil, errors.New("unable to remove the same vrf output multiple times")
 		}
 	}
 
 	// Load necessary tiles into memory. Add new entries. Create tiles.
 	root, proof, commitments, err := t.getMutationRoot(ver, add, remove)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	addRemoveEntries(t.cs, &root, sortedAdd, sortedRemove, 0)
+	leaves := addRemoveEntries(t.cs, &root, sortedAdd, sortedRemove, 0)
 
 	rootHash := root.Hash(t.cs)
 	tiles := splitIntoTiles(t.cs, ver+1, root)
@@ -133,12 +138,12 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *Prefix
 	for _, tile := range tiles {
 		raw, err := tile.Marshal(t.cs)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		t.tx.Put(tile.id.String(), raw)
 	}
 
-	return rootHash, proof, commitments, nil
+	return rootHash, proof, commitments, leaves, nil
 }
 
 // getMutationRoot returns the node to operate on for our mutation. It also
@@ -264,7 +269,10 @@ func (pb *proofBuilder) build(n node, vrfOutputs []indexedVrfOutput, depth int) 
 	}
 }
 
-func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]byte, depth int) {
+// addRemoveEntries adds and removes the requested entries from the subtree in
+// `n`. It returns the leaves that moved up in the tree without being on the
+// search path of any added or removed entry.
+func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]byte, depth int) []Entry {
 	if len(add) == 0 && len(remove) == 0 {
 		// Replace parent nodes that are unnecessary with external nodes. Other
 		// node types are allowed to move into the new tile unchanged.
@@ -274,7 +282,7 @@ func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]by
 				id:   *p.id,
 			}
 		}
-		return
+		return nil
 	}
 
 	switch m := (*n).(type) {
@@ -283,8 +291,9 @@ func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]by
 			*n = leafNode{vrfOutput: add[0].VrfOutput, commitment: add[0].Commitment}
 		} else if len(add) > 1 {
 			*n = &parentNode{left: emptyNode{}, right: emptyNode{}}
-			addRemoveEntries(cs, n, add, nil, depth)
+			return addRemoveEntries(cs, n, add, nil, depth)
 		}
+		return nil
 
 	case leafNode:
 		shouldRemove := false
@@ -300,7 +309,7 @@ func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]by
 			// recurse to handle any additions that need to happen post-removal.
 			*n = emptyNode{}
 			if len(add) > 0 {
-				addRemoveEntries(cs, n, add, nil, depth)
+				return addRemoveEntries(cs, n, add, nil, depth)
 			}
 		} else if len(add) > 0 {
 			// We're keeping this leaf but it's in the way of other leaves we
@@ -310,8 +319,9 @@ func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]by
 			} else {
 				*n = &parentNode{left: m, right: emptyNode{}}
 			}
-			addRemoveEntries(cs, n, add, nil, depth)
+			return addRemoveEntries(cs, n, add, nil, depth)
 		}
+		return nil
 
 	case *parentNode:
 		m.hash, m.id = nil, nil
@@ -319,32 +329,43 @@ func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]by
 		// Handle any additions / removals below this parent.
 		leftAdd, rightAdd := splitEntries(add, depth)
 		leftRemove, rightRemove := splitVrfOutputs(remove, depth)
-		addRemoveEntries(cs, &m.left, leftAdd, leftRemove, depth+1)
-		addRemoveEntries(cs, &m.right, rightAdd, rightRemove, depth+1)
+		leaves := addRemoveEntries(cs, &m.left, leftAdd, leftRemove, depth+1)
+		leaves = append(leaves, addRemoveEntries(cs, &m.right, rightAdd, rightRemove, depth+1)...)
 
 		// If this node has two children that are emptyNodes, or one child
 		// that's a leaf and one child that's an emptyNode, then simplify the
-		// tree a bit. This is only done in cases where a verifier evaluating
-		// the proof of this mutation can do the same. A verifier can always
-		// tell when a child is an emptyNode: either the child is on a search
-		// path, or its hash is all zeros. But a verifier only knows that a
-		// child is a leaf if the child is on a search path, meaning there were
-		// additions or removals below it.
+		// tree a bit. This is always done, regardless of which entries were
+		// added or removed, so that the structure of the tree depends only on
+		// the entries it currently contains.
+		//
+		// A verifier evaluating the proof of this mutation can always tell
+		// when a child is an emptyNode: either the child is on a search path,
+		// or its hash is all zeros. But a verifier only knows that a child is
+		// a leaf if the child is on a search path, meaning there were additions
+		// or removals below it. Otherwise, the leaf is added to the list of
+		// moved leaves so that it can be provided to the verifier.
 		leftTouched := len(leftAdd) > 0 || len(leftRemove) > 0
 		rightTouched := len(rightAdd) > 0 || len(rightRemove) > 0
 
-		_, leftLeaf := m.left.(leafNode)
+		leftLeaf, leftIsLeaf := m.left.(leafNode)
 		_, leftEmpty := m.left.(emptyNode)
-		_, rightLeaf := m.right.(leafNode)
+		rightLeaf, rightIsLeaf := m.right.(leafNode)
 		_, rightEmpty := m.right.(emptyNode)
 
-		if leftLeaf && leftTouched && rightEmpty {
+		if leftIsLeaf && rightEmpty {
+			if !leftTouched {
+				leaves = append(leaves, Entry{leftLeaf.vrfOutput, leftLeaf.commitment})
+			}
 			*n = m.left
-		} else if leftEmpty && rightLeaf && rightTouched {
+		} else if leftEmpty && rightIsLeaf {
+			if !rightTouched {
+				leaves = append(leaves, Entry{rightLeaf.vrfOutput, rightLeaf.commitment})
+			}
 			*n = m.right
 		} else if leftEmpty && rightEmpty {
 			*n = emptyNode{}
 		}
+		return leaves
 
 	default:
 		panic("unexpected node type found")
