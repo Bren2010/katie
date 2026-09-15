@@ -1,19 +1,14 @@
 // Package prefix implements a Prefix Tree that supports versioning and batch
-// searches and insertions.
+// searches, insertions, and deletions.
 package prefix
 
 import (
 	"bytes"
 	"errors"
-	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
 )
-
-func compareEntries(a, b Entry) int {
-	return bytes.Compare(a.VrfOutput, b.VrfOutput)
-}
 
 // PrefixSearch represents a search for multiple VRF outputs in a single version
 // of the Prefix Tree.
@@ -70,7 +65,7 @@ func (t *Tree) Search(searches []PrefixSearch) ([]SearchResult, error) {
 		if !ok {
 			return nil, errors.New("expected tile not found")
 		}
-		proof, commitments := runProofBuilder(t.cs, tile.root, search.VrfOutputs)
+		proof, commitments := runProofBuilder(t.cs, tile.root, sortVrfOutputs(search.VrfOutputs))
 		out[i] = SearchResult{proof, commitments}
 	}
 	return out, nil
@@ -81,319 +76,100 @@ type Entry struct {
 	VrfOutput, Commitment []byte
 }
 
-// Mutate adds a set of new entries to the tree, removes the requested entries,
-// and increments the version counter. It returns the new root hash, a batch
-// proof from just before the additions and removals were applied, the removed
-// commitments, and the moved leaves.
+// MutateResult is the result of a single mutation to the tree.
+type MutateResult struct {
+	Root        []byte       // The new root value of the tree.
+	Proof       *PrefixProof // A batch proof from just before the mutation was applied.
+	Commitments [][]byte     // The commitment of each removed leaf.
+	Leaves      []Entry      // Leaves that were moved as a result of the mutation.
+}
+
+// Mutate adds and removes the requested entries from the tree and increments
+// the version counter. The current tree version is given in `ver`, which is 0
+// if the tree is empty. After this, version `ver+1` of the tree will exist.
 //
-// The moved leaves are the leaves that are not on the search path of any added
-// or removed entry, but that move up in the tree as a result of the mutation.
-// The proof would otherwise only contain the hash of these leaves, and
-// verifiers wouldn't know that they were supposed to move up.
-//
-// The current tree version is given in `ver`, which is 0 if the tree is empty.
-// After this, version `ver+1` of the tree will exist.
-func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) ([]byte, *PrefixProof, [][]byte, []Entry, error) {
+// The inputs `add` and `remove` must not both be empty, must not have any
+// duplicate VRF outputs (although a VRF output in one may also be in the
+// other), and must be sorted by VRF output.
+func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) (*MutateResult, error) {
+	// Verify that the entries to add and remove are well formed.
 	if len(add) == 0 && len(remove) == 0 {
-		return nil, nil, nil, nil, errors.New("no mutations requested")
+		return nil, errors.New("no mutations requested")
 	}
 
-	// Sort the list of new entries to add and verify that they're well formed.
-	sortedAdd := make([]Entry, len(add))
-	copy(sortedAdd, add)
-	slices.SortFunc(sortedAdd, compareEntries)
-	for i, entry := range sortedAdd {
+	vrfOutputs := make([][]byte, 0, len(add)+len(remove))
+	for i, entry := range add {
 		if len(entry.VrfOutput) != t.cs.HashSize() {
-			return nil, nil, nil, nil, errors.New("unexpected vrf output length")
+			return nil, errors.New("unexpected vrf output length")
 		} else if len(entry.Commitment) != t.cs.HashSize() {
-			return nil, nil, nil, nil, errors.New("unexpected commitment length")
-		} else if i > 0 && bytes.Equal(sortedAdd[i-1].VrfOutput, entry.VrfOutput) {
-			return nil, nil, nil, nil, errors.New("unable to insert same vrf output multiple times")
+			return nil, errors.New("unexpected commitment length")
+		} else if i > 0 && bytes.Compare(add[i-1].VrfOutput, entry.VrfOutput) != -1 {
+			return nil, errors.New("duplicate or unsorted vrf output given")
 		}
+		vrfOutputs = append(vrfOutputs, entry.VrfOutput)
 	}
-
-	// Sort the list of entries to remove and verify that they're well formed.
-	sortedRemove := make([][]byte, len(remove))
-	copy(sortedRemove, remove)
-	slices.SortFunc(sortedRemove, bytes.Compare)
-	for i, vrfOutput := range sortedRemove {
+	for i, vrfOutput := range remove {
 		if len(vrfOutput) != t.cs.HashSize() {
-			return nil, nil, nil, nil, errors.New("unexpected vrf output length")
-		} else if i > 0 && bytes.Equal(sortedRemove[i-1], vrfOutput) {
-			return nil, nil, nil, nil, errors.New("unable to remove the same vrf output multiple times")
+			return nil, errors.New("unexpected vrf output length")
+		} else if i > 0 && bytes.Compare(remove[i-1], vrfOutput) != -1 {
+			return nil, errors.New("duplicate or unsorted vrf output given")
+		}
+		vrfOutputs = append(vrfOutputs, vrfOutput)
+	}
+
+	// Load necessary tiles into memory and mutate as requested.
+	root, err := t.getMutationRoot(ver, vrfOutputs)
+	if err != nil {
+		return nil, err
+	}
+	newRoot, leaves := addRemoveEntries(t.cs, root, add, remove, 0)
+
+	// Compute the proof from before the mutation. Check that the commitments
+	// are as expected.
+	merged := mergeVrfOutputs(add, remove, leaves)
+	proof, commitments := runProofBuilder(t.cs, root, merged)
+	for i, m := range merged {
+		if m.index < len(add) {
+			if commitments[m.index] != nil && !bytes.Equal(m.vrfOutput, merged[i+1].vrfOutput) {
+				return nil, errors.New("can not insert same vrf output twice")
+			}
+		} else if m.index < len(add)+len(remove) {
+			if commitments[m.index] == nil {
+				return nil, errors.New("can not remove vrf output that does not exist")
+			}
+		} else {
+			if commitments[m.index] == nil {
+				panic("unexpected error occurred")
+			}
 		}
 	}
 
-	// Load necessary tiles into memory. Add new entries. Create tiles.
-	root, proof, commitments, err := t.getMutationRoot(ver, add, remove)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	leaves := addRemoveEntries(t.cs, &root, sortedAdd, sortedRemove, 0)
-
-	rootHash := root.Hash(t.cs)
-	tiles := splitIntoTiles(t.cs, ver+1, root)
-
-	// Write tiles to database.
+	// Create the new tiles and write them to the database.
+	tiles := splitIntoTiles(t.cs, ver+1, newRoot)
 	for _, tile := range tiles {
 		raw, err := tile.Marshal(t.cs)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, err
 		}
 		t.tx.Put(tile.id.String(), raw)
 	}
 
-	return rootHash, proof, commitments, leaves, nil
+	return &MutateResult{
+		Root:        newRoot.Hash(t.cs),
+		Proof:       &proof,
+		Commitments: commitments[len(add) : len(add)+len(remove)],
+		Leaves:      leaves,
+	}, nil
 }
 
-// getMutationRoot returns the node to operate on for our mutation. It also
-// returns the prior-version PrefixProof.
-func (t *Tree) getMutationRoot(ver uint64, add []Entry, remove [][]byte) (node, *PrefixProof, [][]byte, error) {
-	vrfOutputs := make([][]byte, 0, len(add)+len(remove))
-	for _, entry := range add {
-		vrfOutputs = append(vrfOutputs, entry.VrfOutput)
-	}
-	vrfOutputs = append(vrfOutputs, remove...)
-
+func (t *Tree) getMutationRoot(ver uint64, vrfOutputs [][]byte) (node, error) {
 	if ver == 0 {
-		if len(remove) > 0 {
-			return nil, nil, nil, errors.New("can not remove vrf output that does not exist")
-		}
-		root := emptyNode{}
-		proof, _ := runProofBuilder(t.cs, root, vrfOutputs)
-		return root, &proof, nil, nil
+		return emptyNode{}, nil
 	}
-
 	b := newBatch(t.cs, t.tx)
 	res, state := b.initialize(map[uint64][][]byte{ver: vrfOutputs})
 	if err := b.search(state); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	root := res[ver].root
-
-	proof, commitments := runProofBuilder(t.cs, root, vrfOutputs)
-	for i, commitment := range commitments[:len(add)] {
-		if commitment != nil {
-			// This VRF output already exists in the prefix tree. Check if it's
-			// being removed in this same request, otherwise return an error.
-			found := false
-			for _, vrfOutput := range vrfOutputs[len(add):] {
-				if bytes.Equal(vrfOutputs[i], vrfOutput) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			return nil, nil, nil, errors.New("can not insert same vrf output twice")
-		}
-	}
-	for _, commitment := range commitments[len(add):] {
-		if commitment == nil {
-			return nil, nil, nil, errors.New("can not remove vrf output that does not exist")
-		}
-	}
-
-	return root, &proof, commitments[len(add):], nil
-}
-
-type indexedVrfOutput struct {
-	index     int
-	vrfOutput []byte
-}
-
-type proofBuilder struct {
-	cs suites.CipherSuite
-
-	proof       PrefixProof
-	commitments [][]byte
-}
-
-func runProofBuilder(cs suites.CipherSuite, root node, vrfOutputs [][]byte) (PrefixProof, [][]byte) {
-	// Sorts the given VRF outputs to make proof building efficient, but retains
-	// the original positions so that we can give results in the same order.
-	indexed := make([]indexedVrfOutput, len(vrfOutputs))
-	for i, vrfOutput := range vrfOutputs {
-		indexed[i] = indexedVrfOutput{index: i, vrfOutput: vrfOutput}
-	}
-	slices.SortFunc(indexed, func(a, b indexedVrfOutput) int {
-		return bytes.Compare(a.vrfOutput, b.vrfOutput)
-	})
-
-	pb := proofBuilder{
-		cs: cs,
-
-		proof:       PrefixProof{Results: make([]PrefixSearchResult, len(indexed))},
-		commitments: make([][]byte, len(indexed)),
-	}
-	pb.build(root, indexed, 0)
-
-	return pb.proof, pb.commitments
-}
-
-func (pb *proofBuilder) build(n node, vrfOutputs []indexedVrfOutput, depth int) {
-	if len(vrfOutputs) == 0 {
-		pb.proof.Elements = append(pb.proof.Elements, n.Hash(pb.cs))
-		return
-	}
-
-	switch n := n.(type) {
-	case emptyNode:
-		for _, out := range vrfOutputs {
-			pb.proof.Results[out.index] = nonInclusionParentProof{depth: depth}
-		}
-
-	case leafNode:
-		for _, out := range vrfOutputs {
-			if bytes.Equal(out.vrfOutput, n.vrfOutput) {
-				pb.proof.Results[out.index] = inclusionProof{depth: depth}
-				pb.commitments[out.index] = n.commitment
-			} else {
-				pb.proof.Results[out.index] = nonInclusionLeafProof{leaf: n, depth: depth}
-			}
-		}
-
-	case *parentNode:
-		split, _ := slices.BinarySearchFunc(vrfOutputs, true, func(out indexedVrfOutput, _ bool) int {
-			if getBit(out.vrfOutput, depth) {
-				return 0
-			}
-			return -1
-		})
-		pb.build(n.left, vrfOutputs[:split], depth+1)
-		pb.build(n.right, vrfOutputs[split:], depth+1)
-
-	default:
-		panic("unexpected node type found")
-	}
-}
-
-// addRemoveEntries adds and removes the requested entries from the subtree in
-// `n`. It returns the leaves that moved up in the tree without being on the
-// search path of any added or removed entry.
-func addRemoveEntries(cs suites.CipherSuite, n *node, add []Entry, remove [][]byte, depth int) []Entry {
-	if len(add) == 0 && len(remove) == 0 {
-		// Replace parent nodes that are unnecessary with external nodes. Other
-		// node types are allowed to move into the new tile unchanged.
-		if p, ok := (*n).(*parentNode); ok {
-			*n = externalNode{
-				hash: p.Hash(cs),
-				id:   *p.id,
-			}
-		}
-		return nil
-	}
-
-	switch m := (*n).(type) {
-	case emptyNode:
-		if len(add) == 1 {
-			*n = leafNode{vrfOutput: add[0].VrfOutput, commitment: add[0].Commitment}
-		} else if len(add) > 1 {
-			*n = &parentNode{left: emptyNode{}, right: emptyNode{}}
-			return addRemoveEntries(cs, n, add, nil, depth)
-		}
-		return nil
-
-	case leafNode:
-		shouldRemove := false
-		for _, vrfOutput := range remove {
-			if bytes.Equal(m.vrfOutput, vrfOutput) {
-				shouldRemove = true
-				break
-			}
-		}
-
-		if shouldRemove {
-			// We're removing this leaf. Replace it with an emptyNode and
-			// recurse to handle any additions that need to happen post-removal.
-			*n = emptyNode{}
-			if len(add) > 0 {
-				return addRemoveEntries(cs, n, add, nil, depth)
-			}
-		} else if len(add) > 0 {
-			// We're keeping this leaf but it's in the way of other leaves we
-			// want to add, so push it down one level and recurse.
-			if getBit(m.vrfOutput, depth) {
-				*n = &parentNode{left: emptyNode{}, right: m}
-			} else {
-				*n = &parentNode{left: m, right: emptyNode{}}
-			}
-			return addRemoveEntries(cs, n, add, nil, depth)
-		}
-		return nil
-
-	case *parentNode:
-		m.hash, m.id = nil, nil
-
-		// Handle any additions / removals below this parent.
-		leftAdd, rightAdd := splitEntries(add, depth)
-		leftRemove, rightRemove := splitVrfOutputs(remove, depth)
-		leaves := addRemoveEntries(cs, &m.left, leftAdd, leftRemove, depth+1)
-		leaves = append(leaves, addRemoveEntries(cs, &m.right, rightAdd, rightRemove, depth+1)...)
-
-		// If this node has two children that are emptyNodes, or one child
-		// that's a leaf and one child that's an emptyNode, then simplify the
-		// tree a bit. This is always done, regardless of which entries were
-		// added or removed, so that the structure of the tree depends only on
-		// the entries it currently contains.
-		//
-		// A verifier evaluating the proof of this mutation can always tell
-		// when a child is an emptyNode: either the child is on a search path,
-		// or its hash is all zeros. But a verifier only knows that a child is
-		// a leaf if the child is on a search path, meaning there were additions
-		// or removals below it. Otherwise, the leaf is added to the list of
-		// moved leaves so that it can be provided to the verifier.
-		leftTouched := len(leftAdd) > 0 || len(leftRemove) > 0
-		rightTouched := len(rightAdd) > 0 || len(rightRemove) > 0
-
-		leftLeaf, leftIsLeaf := m.left.(leafNode)
-		_, leftEmpty := m.left.(emptyNode)
-		rightLeaf, rightIsLeaf := m.right.(leafNode)
-		_, rightEmpty := m.right.(emptyNode)
-
-		if leftIsLeaf && rightEmpty {
-			if !leftTouched {
-				leaves = append(leaves, Entry{leftLeaf.vrfOutput, leftLeaf.commitment})
-			}
-			*n = m.left
-		} else if leftEmpty && rightIsLeaf {
-			if !rightTouched {
-				leaves = append(leaves, Entry{rightLeaf.vrfOutput, rightLeaf.commitment})
-			}
-			*n = m.right
-		} else if leftEmpty && rightEmpty {
-			*n = emptyNode{}
-		}
-		return leaves
-
-	default:
-		panic("unexpected node type found")
-	}
-}
-
-func splitEntries(entries []Entry, depth int) ([]Entry, []Entry) {
-	if len(entries) == 0 {
-		return nil, nil
-	}
-	split, _ := slices.BinarySearchFunc(entries, true, func(entry Entry, _ bool) int {
-		if getBit(entry.VrfOutput, depth) {
-			return 0
-		}
-		return -1
-	})
-	return entries[:split], entries[split:]
-}
-
-func splitVrfOutputs(vrfOutputs [][]byte, depth int) ([][]byte, [][]byte) {
-	if len(vrfOutputs) == 0 {
-		return nil, nil
-	}
-	split, _ := slices.BinarySearchFunc(vrfOutputs, true, func(vrfOutput []byte, _ bool) int {
-		if getBit(vrfOutput, depth) {
-			return 0
-		}
-		return -1
-	})
-	return vrfOutputs[:split], vrfOutputs[split:]
+	return res[ver].root, nil
 }

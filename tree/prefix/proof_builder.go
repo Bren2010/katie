@@ -29,6 +29,37 @@ func sortVrfOutputs(vrfOutputs [][]byte) []indexedVrfOutput {
 	return indexed
 }
 
+// mergeVrfOutputs combines the VRF outputs of `add`, `remove`, and `leaves`,
+// which must each already be sorted, into a single sorted list. Indices are
+// assigned as if the three were concatenated in that order. A VRF output that's
+// in both `add` and `remove` is sorted with the addition first, consistent with
+// sortVrfOutputs. `leaves` must not share any VRF outputs with the others.
+func mergeVrfOutputs(add []Entry, remove [][]byte, leaves []Entry) []indexedVrfOutput {
+	out := make([]indexedVrfOutput, 0, len(add)+len(remove)+len(leaves))
+
+	i, j, k := 0, 0, 0
+	for i < len(add) || j < len(remove) || k < len(leaves) {
+		switch {
+		case i < len(add) &&
+			(j == len(remove) || bytes.Compare(add[i].VrfOutput, remove[j]) <= 0) &&
+			(k == len(leaves) || bytes.Compare(add[i].VrfOutput, leaves[k].VrfOutput) < 0):
+			out = append(out, indexedVrfOutput{index: i, vrfOutput: add[i].VrfOutput})
+			i++
+
+		case j < len(remove) &&
+			(k == len(leaves) || bytes.Compare(remove[j], leaves[k].VrfOutput) < 0):
+			out = append(out, indexedVrfOutput{index: len(add) + j, vrfOutput: remove[j]})
+			j++
+
+		default:
+			out = append(out, indexedVrfOutput{index: len(add) + len(remove) + k, vrfOutput: leaves[k].VrfOutput})
+			k++
+		}
+	}
+
+	return out
+}
+
 func splitVrfOutputs(vrfOutputs [][]byte, depth int) ([][]byte, [][]byte) {
 	split, _ := slices.BinarySearchFunc(vrfOutputs, true, func(out []byte, _ bool) int {
 		if getBit(out, depth) {
@@ -113,14 +144,8 @@ func (pb *proofBuilder) build(n node, vrfOutputs []indexedVrfOutput, depth int) 
 	}
 }
 
-// addRemoveEntries adds and removes the requested entries from the subtree in
-// `n`.
-//
-
-// The VRF outputs of the entries are given in `vrfOutputs`, which must be
-// sorted with sortVrfOutputs. A VRF output with an index less than len(add) is
-// for an entry being added, whose commitment is taken from `add`. Otherwise,
-// it's for an entry being removed. It returns the leaves that moved up in the
+// addRemoveEntries returns a copy of the subtree `n` with the requested entries
+// added / removed. It additionally returns any leaves that were moved up in the
 // tree without being on the search path of any added or removed entry.
 func addRemoveEntries(
 	cs suites.CipherSuite,
