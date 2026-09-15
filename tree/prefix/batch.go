@@ -52,11 +52,11 @@ func (c *cursor) step(n *node) *nextStep {
 type batch struct {
 	cs    suites.CipherSuite
 	tx    db.PrefixStore
-	cache map[string]*tile
+	cache map[tileId]*tile
 }
 
 func newBatch(cs suites.CipherSuite, tx db.PrefixStore) *batch {
-	return &batch{cs, tx, make(map[string]*tile)}
+	return &batch{cs, tx, make(map[tileId]*tile)}
 }
 
 // initialize creates the initial state object to call search with, and creates
@@ -87,20 +87,20 @@ func (b *batch) initialize(searches map[uint64][][]byte) (map[uint64]*tile, map[
 }
 
 // get looks up the tiles that will be needed to execute the provided next
-// search steps. It returns a map from serialized tile id to parsed tile.
-func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]*tile, error) {
-	out := make(map[string]*tile)
+// search steps. It returns a map from tile id to parsed tile.
+func (b *batch) get(nextSteps map[*cursor]nextStep) (map[tileId]*tile, error) {
+	out := make(map[tileId]*tile)
 
-	dedup := make(map[string]tileId)
+	dedup := make(map[tileId]struct{})
 	for _, step := range nextSteps {
-		dedup[step.id.String()] = step.id
+		dedup[step.id] = struct{}{}
 	}
-	keys := make([]string, 0, len(dedup))
-	for key := range dedup {
-		if t, ok := b.cache[key]; ok {
-			out[key] = t
+	ids := make([]tileId, 0, len(dedup))
+	for id := range dedup {
+		if t, ok := b.cache[id]; ok {
+			out[id] = t
 		} else {
-			keys = append(keys, key)
+			ids = append(ids, id)
 		}
 	}
 	if len(out) > 0 {
@@ -109,20 +109,24 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[string]*tile, error) {
 		return out, nil
 	}
 
+	keys := make([]string, len(ids))
+	for i, id := range ids {
+		keys[i] = id.String()
+	}
 	data, err := b.tx.BatchGet(keys)
 	if err != nil {
 		return nil, err
 	}
 
-	for i, key := range keys {
+	for i, id := range ids {
 		if data[i] == nil {
 			return nil, errors.New("not all expected data was found")
 		}
-		t, err := unmarshalTile(b.cs, dedup[key], data[i])
+		t, err := unmarshalTile(b.cs, id, data[i])
 		if err != nil {
 			return nil, err
 		}
-		out[key], b.cache[key] = &t, &t
+		out[id], b.cache[id] = &t, &t
 	}
 	return out, nil
 }
@@ -153,7 +157,7 @@ func (b *batch) search(state map[*node][]cursor) error {
 
 	nextState := make(map[*node][]cursor)
 	for cursor, step := range nextSteps {
-		t, ok := tiles[step.id.String()]
+		t, ok := tiles[step.id]
 		if !ok {
 			nextState[step.ptr] = append(nextState[step.ptr], *cursor)
 			continue

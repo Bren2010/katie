@@ -218,7 +218,7 @@ func TestMultiVersionSearch(t *testing.T) {
 	want := tree2.Hash(cs)
 
 	b := newBatch(cs, store)
-	b.cache["1:0"] = &tile{id: tileId{ver: 1, ctr: 0}, depth: 0, root: tree1}
+	b.cache[tileId{ver: 1, ctr: 0}] = &tile{id: tileId{ver: 1, ctr: 0}, depth: 0, root: tree1}
 	res, state := b.initialize(map[uint64][][]byte{
 		1: {makeBytes(0b01000000)},
 		2: {makeBytes(0b01000000)},
