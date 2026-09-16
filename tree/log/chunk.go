@@ -54,37 +54,37 @@ func newChunk(cs suites.CipherSuite, id uint64, data []byte) (*nodeChunk, error)
 	if level%4 != 3 {
 		return nil, errors.New("invalid chunk id")
 	}
-	c := &nodeChunk{cs: cs, id: id, shift: level - 3}
 
 	// Parse the serialized data.
 	hashSize := cs.HashSize()
 	leafChunk := level == 3
-	c.nodes = make([]*nodeData, 0, 15)
+	nodes := make([]*nodeData, 0, 15)
 
 	for len(data) > 0 {
 		if len(data) < hashSize {
 			return nil, errors.New("unable to parse chunk")
 		}
-		if len(c.nodes) > 0 {
-			c.nodes = append(c.nodes, &nodeData{leaf: false, value: nil})
+		if len(nodes) > 0 {
+			nodes = append(nodes, &nodeData{leaf: false, value: nil})
 		}
-		c.nodes = append(c.nodes, &nodeData{
+		nodes = append(nodes, &nodeData{
 			leaf:  leafChunk,
 			value: data[:hashSize],
 		})
 		data = data[hashSize:]
 	}
-	if len(c.nodes) > 15 {
+	if len(nodes) > 15 {
 		return nil, errors.New("unable to parse chunk")
 	}
-	for len(c.nodes) < 15 {
-		c.nodes = append(c.nodes, &nodeData{
-			leaf:  math.IsLeaf(c.nodeId(uint64(len(c.nodes)))),
-			value: nil,
-		})
+	for len(nodes) < 15 {
+		if len(nodes)%2 == 0 {
+			nodes = append(nodes, &nodeData{leaf: leafChunk, value: nil})
+		} else {
+			nodes = append(nodes, &nodeData{leaf: false, value: nil})
+		}
 	}
 
-	return c, nil
+	return &nodeChunk{cs: cs, id: id, shift: level - 3, nodes: nodes}, nil
 }
 
 // nodeId returns the id of the node held at index i of the chunk. The 15 nodes
@@ -156,22 +156,29 @@ type chunkSet struct {
 	modified map[uint64]struct{}
 }
 
-func newChunkSet(cs suites.CipherSuite, data map[uint64][]byte) (*chunkSet, error) {
-	chunks := make(map[uint64]*nodeChunk)
-	for id, raw := range data {
-		c, err := newChunk(cs, id, raw)
-		if err != nil {
-			return nil, err
-		}
-		chunks[id] = c
-	}
-
+func newChunkSet(cs suites.CipherSuite) *chunkSet {
 	return &chunkSet{
 		cs: cs,
 
-		chunks:   chunks,
+		chunks:   make(map[uint64]*nodeChunk),
 		modified: make(map[uint64]struct{}),
-	}, nil
+	}
+}
+
+func (s *chunkSet) parse(id uint64, raw []byte) error {
+	if len(raw) == 0 {
+		return errors.New("unable to parse empty chunk")
+	} else if _, ok := s.chunks[id]; ok {
+		return errors.New("unable to parse existing chunk")
+	}
+
+	c, err := newChunk(s.cs, id, raw)
+	if err != nil {
+		return err
+	}
+	s.chunks[id] = c
+
+	return nil
 }
 
 // get returns node x.

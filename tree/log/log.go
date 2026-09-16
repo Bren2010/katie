@@ -46,15 +46,14 @@ func (t *Tree) fetch(nodes []uint64) (*chunkSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	data := make(map[uint64][]byte, len(ids))
+	set := newChunkSet(t.cs)
 	for i, id := range ids {
-		if values[i] == nil {
-			return nil, errors.New("not all expected data was found in the database")
+		if err := set.parse(id, values[i]); err != nil {
+			return nil, err
 		}
-		data[id] = values[i]
 	}
 
-	return newChunkSet(t.cs, data)
+	return set, nil
 }
 
 // fetchSpecific returns the values for the requested nodes.
@@ -76,9 +75,9 @@ func (t *Tree) fetchSpecific(nodes []uint64) ([][]byte, error) {
 func (t *Tree) GetBatch(entries []uint64, n uint64, nP, m *uint64) ([][]byte, error) {
 	if n == 0 || n > math.MaxTreeSize {
 		return nil, errors.New("invalid value for current tree size")
-	} else if nP != nil && (*nP == 0 || *nP > n || *nP > math.MaxTreeSize) {
+	} else if nP != nil && (*nP == 0 || *nP > n) {
 		return nil, errors.New("invalid value for additional tree size")
-	} else if m != nil && (*m == 0 || *m > n || *m > math.MaxTreeSize) {
+	} else if m != nil && (*m == 0 || *m > n) {
 		return nil, errors.New("invalid value for previous tree size")
 	}
 	for _, x := range entries {
@@ -198,11 +197,14 @@ func Root(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte) ([]byte, error
 // `added` has been added as the rightmost log entry.
 func Append(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte, added []byte) ([][]byte, error) {
 	// Input validation.
-	if n > math.MaxTreeSize {
+	if n >= math.MaxTreeSize {
 		return nil, errors.New("invalid value for current tree size")
 	} else if len(added) != cs.HashSize() {
 		return nil, errors.New("added value is unexpected size")
 	} else if n == 0 {
+		if len(fullSubtrees) != 0 {
+			return nil, errors.New("unexpected number of full subtree values provided")
+		}
 		return [][]byte{added}, nil
 	}
 	root := math.Root(n)
@@ -233,7 +235,7 @@ func Append(cs suites.CipherSuite, n uint64, fullSubtrees [][]byte, added []byte
 		chain[i] = nil
 	}
 
-	out := make([][]byte, 0)
+	out := make([][]byte, 0, len(chain))
 	for _, c := range slices.Backward(chain) {
 		if c != nil {
 			out = append(out, c)
