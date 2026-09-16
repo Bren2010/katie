@@ -21,6 +21,10 @@ type nodeData struct {
 	value []byte
 }
 
+func (nd *nodeData) isEmpty() bool {
+	return len(nd.value) == 0
+}
+
 func (nd *nodeData) marshal() []byte {
 	if nd.isEmpty() {
 		panic("can not marshal empty node")
@@ -35,78 +39,67 @@ func (nd *nodeData) marshal() []byte {
 	return out
 }
 
-func (nd *nodeData) isEmpty() bool {
-	return len(nd.value) == 0
-}
-
 // nodeChunk is a helper struct that handles computing/caching the intermediate
 // nodes of a chunk.
 type nodeChunk struct {
 	cs suites.CipherSuite
 
-	ids   []uint64
+	id    uint64 // Id of the chunk's root node.
+	shift uint64 // Log2 of the spacing between adjacent nodes: Level(id)-3.
 	nodes []*nodeData
 }
 
 func newChunk(cs suites.CipherSuite, id uint64, data []byte) (*nodeChunk, error) {
-	// Create a map that shows the node id represented by each element of the
-	// nodes array. This code is a little bit verbose but I like that it's easy
-	// to check it's correct: run with id = 7 and the output is [0, 1, ..., 14].
-	ids := make([]uint64, 15)
-	ids[7] = id
-	ids[3] = math.Left(ids[7])
-	ids[1] = math.Left(ids[3])
-	ids[0] = math.Left(ids[1])
-	ids[2] = math.RightStep(ids[1])
-	ids[5] = math.RightStep(ids[3])
-	ids[4] = math.Left(ids[5])
-	ids[6] = math.RightStep(ids[5])
-	ids[11] = math.RightStep(ids[7])
-	ids[9] = math.Left(ids[11])
-	ids[8] = math.Left(ids[9])
-	ids[10] = math.RightStep(ids[9])
-	ids[13] = math.RightStep(ids[11])
-	ids[12] = math.Left(ids[13])
-	ids[14] = math.RightStep(ids[13])
+	level := math.Level(id)
+	if level%4 != 3 {
+		return nil, errors.New("invalid chunk id")
+	}
+	c := &nodeChunk{cs: cs, id: id, shift: level - 3}
 
 	// Parse the serialized data.
 	hashSize := cs.HashSize()
-	leafChunk := math.Level(id) == 3
-	nodes := make([]*nodeData, 0, 15)
+	leafChunk := level == 3
+	c.nodes = make([]*nodeData, 0, 15)
 
 	for len(data) > 0 {
 		if len(data) < hashSize {
 			return nil, errors.New("unable to parse chunk")
 		}
-		if len(nodes) > 0 {
-			nodes = append(nodes, &nodeData{leaf: false, value: nil})
+		if len(c.nodes) > 0 {
+			c.nodes = append(c.nodes, &nodeData{leaf: false, value: nil})
 		}
-		nodes = append(nodes, &nodeData{
+		c.nodes = append(c.nodes, &nodeData{
 			leaf:  leafChunk,
 			value: data[:hashSize],
 		})
 		data = data[hashSize:]
 	}
-	if len(nodes) > 15 {
+	if len(c.nodes) > 15 {
 		return nil, errors.New("unable to parse chunk")
 	}
-	for len(nodes) < 15 {
-		nodes = append(nodes, &nodeData{
-			leaf:  math.IsLeaf(ids[len(nodes)]),
+	for len(c.nodes) < 15 {
+		c.nodes = append(c.nodes, &nodeData{
+			leaf:  math.IsLeaf(c.nodeId(uint64(len(c.nodes)))),
 			value: nil,
 		})
 	}
 
-	return &nodeChunk{cs: cs, ids: ids, nodes: nodes}, nil
+	return c, nil
+}
+
+// nodeId returns the id of the node held at index i of the chunk. The 15 nodes
+// of a chunk are evenly spaced and centered on the chunk's root, so this is
+// just a scaled offset: with id = 7 the output is [0, 1, ..., 14].
+func (c *nodeChunk) nodeId(i uint64) uint64 {
+	return c.id + (i-7)<<c.shift // Underflow of i-7 is intentional.
 }
 
 func (c *nodeChunk) findIndex(x uint64) uint64 {
-	for i := range len(c.ids) {
-		if c.ids[i] == x {
-			return uint64(i)
-		}
+	i := (x - c.id + 7<<c.shift) >> c.shift
+	if i >= 15 || c.nodeId(i) != x {
+		panic("requested hash not available in this chunk")
 	}
-	panic("requested hash not available in this chunk")
+	return i
 }
 
 // get returns the data of node x with the value populated.

@@ -81,16 +81,9 @@ func (t *Tree) GetBatch(entries []uint64, n uint64, nP, m *uint64) ([][]byte, er
 	} else if m != nil && (*m == 0 || *m > n || *m > math.MaxTreeSize) {
 		return nil, errors.New("invalid value for previous tree size")
 	}
-
-	sorted := make([]uint64, len(entries))
-	copy(sorted, entries)
-	slices.Sort(sorted)
-
-	for i, x := range sorted {
+	for _, x := range entries {
 		if x >= n {
 			return nil, errors.New("can not get leaf beyond right edge of tree")
-		} else if i > 0 && sorted[i-1] == x {
-			return nil, errors.New("duplicate leaf index found")
 		}
 	}
 
