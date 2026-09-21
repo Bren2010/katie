@@ -108,8 +108,8 @@ func (ml *ManagedLog) Update(
 			return nil, err
 		}
 		values[i] = structs.UpdateValue{
-			Value:        val.Value,
-			UpdateSuffix: structs.UpdateSuffix{Signature: sig},
+			Value:     val.Value,
+			Signature: sig,
 		}
 	}
 

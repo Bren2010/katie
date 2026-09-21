@@ -35,15 +35,13 @@ func Config(t *testing.T) structs.PrivateConfig {
 		SignatureKey: sigKey,
 		VrfKey:       vrfKey,
 
-		Config: structs.Config{
-			Suite: cs,
-			Mode:  structs.ContactMonitoring,
+		Suite: cs,
+		Mode:  structs.ContactMonitoring,
 
-			MaxAhead:                   1000,
-			MaxBehind:                  1000,
-			ReasonableMonitoringWindow: 86400 * 1000,
-			MaximumLifetime:            0,
-		},
+		MaxAhead:                   1000,
+		MaxBehind:                  1000,
+		ReasonableMonitoringWindow: 86400 * 1000,
+		MaximumLifetime:            0,
 	}
 }
 

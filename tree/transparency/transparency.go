@@ -59,8 +59,9 @@ type Tree struct {
 }
 
 var (
-	_ wire.Interface        = &Tree{}
-	_ wire.ManagerInterface = &Tree{}
+	_ wire.Interface         = &Tree{}
+	_ wire.AuditingInterface = &Tree{}
+	_ wire.ManagerInterface  = &Tree{}
 )
 
 func NewTree(

@@ -19,6 +19,13 @@ type Interface interface {
 	Update(ctx context.Context, req *structs.UpdateRequest) (<-chan UpdateResponse, error)
 }
 
+// AuditingInterface is the interface implemented by a Service Operator that
+// supports Third-Party Auditing.
+type AuditingInterface interface {
+	GetAuditorUpdate(ctx context.Context, pos uint64) (*structs.AuditorUpdate, error)
+	PutAuditorTreeHead(ctx context.Context, head *structs.AuditorTreeHead) error
+}
+
 // ManagerInterface is the interface implemented by a Third-Party Manager.
 type ManagerInterface interface {
 	Interface
