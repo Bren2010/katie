@@ -286,3 +286,66 @@ func TestEvaluateBeforeAfterMovedLeaf(t *testing.T) {
 		t.Fatal("accepted a moved leaf that is on a search path")
 	}
 }
+
+// TestEvaluateBeforeAfterReplaceRoot checks that replacing the commitment of
+// the only leaf in the tree gives the expected root hashes.
+func TestEvaluateBeforeAfterReplaceRoot(t *testing.T) {
+	cs := suites.KTSha256P256{}
+
+	old := leafNode{makeBytes(0x00), makeBytes(0x11)}
+	new := leafNode{makeBytes(0x00), makeBytes(0x22)}
+
+	add := []Entry{{new.vrfOutput, new.commitment}}
+	remove := []Entry{{old.vrfOutput, old.commitment}}
+	proof := &PrefixProof{Results: []PrefixSearchResult{
+		inclusionProof{depth: 0},
+		inclusionProof{depth: 0},
+	}}
+
+	before, after, err := EvaluateBeforeAfter(cs, add, remove, nil, proof)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(before, old.Hash(cs)) {
+		t.Fatal("unexpected root hash computed for the tree before the mutation")
+	} else if !bytes.Equal(after, new.Hash(cs)) {
+		t.Fatal("unexpected root hash computed for the tree after the mutation")
+	}
+}
+
+// TestEvaluateBeforeAfterReplaceInconsistentFails checks that the two search
+// results for a replaced entry must both show inclusion at the same depth.
+func TestEvaluateBeforeAfterReplaceInconsistentFails(t *testing.T) {
+	cs := suites.KTSha256P256{}
+
+	add := []Entry{{makeBytes(0x00), makeBytes(0x22)}}
+	remove := []Entry{{makeBytes(0x00), makeBytes(0x11)}}
+
+	for _, results := range [][]PrefixSearchResult{
+		{nonInclusionParentProof{depth: 0}, inclusionProof{depth: 0}},
+		{inclusionProof{depth: 1}, inclusionProof{depth: 0}},
+	} {
+		proof := &PrefixProof{Results: results}
+		if _, _, err := EvaluateBeforeAfter(cs, add, remove, nil, proof); err == nil {
+			t.Fatal("accepted inconsistent search results for a replaced entry")
+		}
+	}
+}
+
+// TestEvaluateBeforeAfterDuplicateAddFails checks that the same entry can't be
+// added twice, even when it's also being removed. Applying such a mutation would
+// search for a free position for the second copy forever.
+func TestEvaluateBeforeAfterDuplicateAddFails(t *testing.T) {
+	cs := suites.KTSha256P256{}
+
+	add := []Entry{{makeBytes(0x00), makeBytes(0x22)}, {makeBytes(0x00), makeBytes(0x33)}}
+	remove := []Entry{{makeBytes(0x00), makeBytes(0x11)}}
+	proof := &PrefixProof{Results: []PrefixSearchResult{
+		inclusionProof{depth: 0},
+		inclusionProof{depth: 0},
+		inclusionProof{depth: 0},
+	}}
+
+	if _, _, err := EvaluateBeforeAfter(cs, add, remove, nil, proof); err == nil {
+		t.Fatal("accepted the same entry being added twice")
+	}
+}

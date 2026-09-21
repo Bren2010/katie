@@ -502,6 +502,36 @@ func TestEvaluateBeforeAfterRandom(t *testing.T) {
 	}
 }
 
+// TestEvaluateBeforeAfterReplace checks that EvaluateBeforeAfter computes the
+// same root hashes as the server for a mutation that replaces an entry's
+// commitment, alongside an ordinary addition and removal.
+func TestEvaluateBeforeAfterReplace(t *testing.T) {
+	cs := suites.KTSha256P256{}
+	tree := NewTree(cs, memPrefixStore())
+
+	mut0, err := tree.Mutate(0, []Entry{
+		{makeBytes(0x00), makeBytes(0x11)},
+		{makeBytes(0x80), makeBytes(0x22)},
+		{makeBytes(0xc0), makeBytes(0x33)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	add := []Entry{
+		{makeBytes(0x00), makeBytes(0x44)},
+		{makeBytes(0x40), makeBytes(0x55)},
+	}
+	remove := [][]byte{makeBytes(0x00), makeBytes(0x80)}
+	mut1, err := tree.Mutate(1, add, remove)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(mut1.Commitments[0], makeBytes(0x11)) {
+		t.Fatal("unexpected commitment returned for replaced entry")
+	}
+	checkMutationProof(t, cs, mut0.Root, add, remove, mut1)
+}
+
 // TestHistoryIndependence checks that the structure of the tree depends only
 // on the entries it currently contains: adding entries and then removing them
 // restores the previous root hash, and a tree built through a series of
