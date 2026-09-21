@@ -196,61 +196,61 @@ func Verify(cs suites.CipherSuite, entries []Entry, proof *PrefixProof, root []b
 // the mutation, but that aren't on the search path of any added or removed
 // entry, must be provided in `leaves`.
 func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove, leaves []Entry, proof *PrefixProof) ([]byte, []byte, error) {
-	// Verify that the provided entries are well formed.
+	// Verify that the provided entries are well-formed. Compute the added
+	// entries and removed VRF outputs to use to evaluate the "before" proof.
 	if len(add) == 0 && len(remove) == 0 {
 		return nil, nil, errors.New("no mutations requested")
 	}
+
+	var (
+		entries    = make([]Entry, 0, len(add)+len(remove)+len(leaves))
+		vrfOutputs = make([][]byte, len(remove))
+	)
 
 	for i, entry := range add {
 		if len(entry.Commitment) != cs.HashSize() {
 			return nil, nil, errors.New("unexpected commitment length")
 		} else if i > 0 && bytes.Compare(add[i-1].VrfOutput, entry.VrfOutput) != -1 {
 			return nil, nil, errors.New("duplicate or unsorted vrf output given")
-		}
-	}
-	vrfOutputs := make([][]byte, len(remove))
-	for i, entry := range remove {
-		if i > 0 && bytes.Compare(remove[i-1].VrfOutput, entry.VrfOutput) != -1 {
-			return nil, nil, errors.New("duplicate or unsorted vrf output given")
-		}
-		vrfOutputs[i] = entry.VrfOutput
-	}
-
-	// Compute the full combined slice of entries and evaluate the prefix proof.
-	allEntries := make([]Entry, len(add)+len(remove)+len(leaves))
-	copy(allEntries, add)
-	copy(allEntries[len(add):], remove)
-	copy(allEntries[len(add)+len(remove):], leaves)
-
-	root, err := evaluate(cs, allEntries, proof)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Every added entry should correspond to a non-inclusion proof, unless it's
-	// also in remove.
-	for i := range add {
-		if proof.Results[i].Inclusion() {
-			_, found := slices.BinarySearchFunc(remove, add[i], func(a, b Entry) int {
+		} else if proof.Results[i].Inclusion() {
+			j, found := slices.BinarySearchFunc(remove, entry, func(a, b Entry) int {
 				return bytes.Compare(a.VrfOutput, b.VrfOutput)
 			})
 			if !found {
 				return nil, nil, errors.New("unable to add leaf that already exists")
 			}
+			entries = append(entries, remove[j])
+		} else {
+			entries = append(entries, entry)
 		}
 	}
-	// Every removed entry should correspond to an inclusion proof.
-	for i := range remove {
-		if !proof.Results[len(add)+i].Inclusion() {
+
+	for i, entry := range remove {
+		if i > 0 && bytes.Compare(remove[i-1].VrfOutput, entry.VrfOutput) != -1 {
+			return nil, nil, errors.New("duplicate or unsorted vrf output given")
+		} else if !proof.Results[len(add)+i].Inclusion() {
 			return nil, nil, errors.New("entry being removed is not in the tree")
 		}
+		entries = append(entries, entry)
+		vrfOutputs[i] = entry.VrfOutput
 	}
 
-	// Perform the additions and removals.
+	for i, entry := range leaves {
+		if !proof.Results[len(add)+len(remove)+i].Inclusion() {
+			return nil, nil, errors.New("moved leaf is not in the tree")
+		}
+		entries = append(entries, entry)
+	}
+
+	// Evaluate "before" proof. Perform additions and removals and compute
+	// "after" version.
+	root, err := evaluate(cs, entries, proof)
+	if err != nil {
+		return nil, nil, err
+	}
 	newRoot, expectedLeaves := addRemoveEntries(cs, root, add, vrfOutputs, 0)
 
-	// The given set of moved leaves should exactly match what we computed
-	// ourselves.
+	// Check that the given set of moved leaves matches what we computed.
 	if len(leaves) != len(expectedLeaves) {
 		return nil, nil, errors.New("invalid set of moved leaves given")
 	}
@@ -260,8 +260,6 @@ func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove, leaves []Entry, pro
 			return nil, nil, errors.New("invalid set of moved leaves given")
 		} else if !bytes.Equal(entry.Commitment, expected.Commitment) {
 			return nil, nil, errors.New("invalid set of moved leaves given")
-		} else if !proof.Results[len(add)+len(remove)+i].Inclusion() {
-			return nil, nil, errors.New("moved leaf is not in the tree")
 		}
 	}
 
