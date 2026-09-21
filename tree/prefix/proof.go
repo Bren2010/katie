@@ -26,18 +26,20 @@ func NewPrefixProof(cs suites.CipherSuite, buf *bytes.Buffer) (*PrefixProof, err
 	if err := binary.Read(buf, binary.BigEndian, &numResults); err != nil {
 		return nil, err
 	}
-	results := make([]PrefixSearchResult, numResults)
-	for i := range int(numResults) {
+	results := make([]PrefixSearchResult, 0)
+	for range int(numResults) {
 		result, err := unmarshalSearchResult(cs, buf)
 		if err != nil {
 			return nil, err
 		}
-		results[i] = result
+		results = append(results, result)
 	}
 
 	var numElements uint32
 	if err := binary.Read(buf, binary.BigEndian, &numElements); err != nil {
 		return nil, err
+	} else if uint64(buf.Len()) < uint64(cs.HashSize())*uint64(numElements) {
+		return nil, io.ErrUnexpectedEOF
 	}
 	elements := make([][]byte, numElements)
 	for i := range int(numElements) {

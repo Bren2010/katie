@@ -64,6 +64,8 @@ func newAuditorState(cs suites.CipherSuite, buf *bytes.Buffer) (*auditorState, e
 	var size uint32
 	if err := binary.Read(buf, binary.BigEndian, &size); err != nil {
 		return nil, err
+	} else if uint64(buf.Len()) < uint64(8+cs.HashSize())*uint64(size) {
+		return nil, io.ErrUnexpectedEOF
 	}
 	inserted := make([]insertedVrfOutput, size)
 	for i := range size {

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"unsafe"
 )
 
 type Marshaller interface {
@@ -90,6 +91,8 @@ func readBytes[S sizeParam](buf *bytes.Buffer) ([]byte, error) {
 	size, err := readNumeric[S](buf)
 	if err != nil {
 		return nil, err
+	} else if uint64(buf.Len()) < uint64(size) {
+		return nil, io.ErrUnexpectedEOF
 	}
 	out := make([]byte, size)
 	if _, err := io.ReadFull(buf, out); err != nil {
@@ -111,6 +114,8 @@ func readByteSlice[S sizeParam](buf *bytes.Buffer, n int) ([][]byte, error) {
 	size, err := readNumeric[S](buf)
 	if err != nil {
 		return nil, err
+	} else if uint64(buf.Len()) < uint64(n)*uint64(size) {
+		return nil, io.ErrUnexpectedEOF
 	}
 	out := make([][]byte, size)
 	for i := range int(size) {
@@ -135,9 +140,12 @@ func writeByteSlice[S sizeParam](buf *bytes.Buffer, out [][]byte, name string) e
 }
 
 func readNumericSlice[S sizeParam, T numeric](buf *bytes.Buffer) ([]T, error) {
+	var zero T
 	size, err := readNumeric[S](buf)
 	if err != nil {
 		return nil, err
+	} else if uint64(buf.Len()) < uint64(unsafe.Sizeof(zero))*uint64(size) {
+		return nil, io.ErrUnexpectedEOF
 	}
 	out := make([]T, size)
 	for i := range int(size) {
@@ -173,13 +181,13 @@ func readFuncSlice[S sizeParam, T any](
 	if err != nil {
 		return nil, err
 	}
-	out := make([]T, size)
-	for i := range int(size) {
+	out := make([]T, 0)
+	for range int(size) {
 		elem, err := newF(buf)
 		if err != nil {
 			return nil, err
 		}
-		out[i] = *elem
+		out = append(out, *elem)
 	}
 	return out, nil
 }
