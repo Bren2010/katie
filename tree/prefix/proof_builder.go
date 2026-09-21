@@ -157,7 +157,7 @@ func addRemoveEntries(
 	if len(add) == 0 && len(remove) == 0 {
 		// Replace parent nodes that are unnecessary with external nodes. Other
 		// node types are allowed to move into the new tile unchanged.
-		if p, ok := n.(*parentNode); ok {
+		if p, ok := n.(*parentNode); ok && p.id != nil {
 			return externalNode{hash: p.Hash(cs), id: *p.id}, nil
 		}
 		return n, nil

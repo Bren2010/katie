@@ -22,10 +22,16 @@ func terminalNode(entry Entry, res PrefixSearchResult) (node, error) {
 		return leafNode{entry.VrfOutput, entry.Commitment}, nil
 
 	case nonInclusionLeafProof:
-		// The leaf presented must be different from the one that was searched
-		// for, otherwise this would be an inclusion proof.
+		// The leaf that supposedly shows non-inclusion should have the same
+		// prefix as the VRF output we searched for, but differ at some point.
+		depth := res.Depth()
+		for i := range depth {
+			if getBit(entry.VrfOutput, i) != getBit(res.leaf.vrfOutput, i) {
+				return nil, errors.New("non-inclusion proof not consistent with the vrf output searched for")
+			}
+		}
 		if bytes.Equal(entry.VrfOutput, res.leaf.vrfOutput) {
-			return nil, errors.New("non-inclusion proof presents the vrf output that was searched for")
+			return nil, errors.New("non-inclusion proof not consistent with the vrf output searched for")
 		}
 		return res.leaf, nil
 
