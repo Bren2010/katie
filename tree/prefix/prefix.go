@@ -78,10 +78,10 @@ type Entry struct {
 
 // MutateResult is the result of a single mutation to the tree.
 type MutateResult struct {
-	Root        []byte       // The new root value of the tree.
-	Proof       *PrefixProof // A batch proof from just before the mutation was applied.
-	Commitments [][]byte     // The commitment of each removed leaf.
-	Leaves      []Entry      // Leaves that were moved as a result of the mutation.
+	Root        []byte      // The new root value of the tree.
+	Proof       PrefixProof // A batch proof from just before the mutation was applied.
+	Commitments [][]byte    // The commitment of each removed leaf.
+	Leaves      []Entry     // Leaves that were moved as a result of the mutation.
 }
 
 // Mutate adds and removes the requested entries from the tree and increments
@@ -130,7 +130,8 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) (*MutateResult, 
 	proof, commitments := runProofBuilder(t.cs, root, merged)
 	for i, m := range merged {
 		if m.index < len(add) {
-			if commitments[m.index] != nil && !bytes.Equal(m.vrfOutput, merged[i+1].vrfOutput) {
+			valid := commitments[m.index] == nil || (i+1 < len(merged) && bytes.Equal(m.vrfOutput, merged[i+1].vrfOutput))
+			if !valid {
 				return nil, errors.New("can not insert same vrf output twice")
 			}
 		} else if m.index < len(add)+len(remove) {
@@ -156,7 +157,7 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) (*MutateResult, 
 
 	return &MutateResult{
 		Root:        newRoot.Hash(t.cs),
-		Proof:       &proof,
+		Proof:       proof,
 		Commitments: commitments[len(add) : len(add)+len(remove)],
 		Leaves:      leaves,
 	}, nil

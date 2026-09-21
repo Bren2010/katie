@@ -187,6 +187,20 @@ func addRemoveEntries(
 			// recurse to handle any additions that need to happen post-removal.
 			return addRemoveEntries(cs, emptyNode{}, add, nil, depth)
 		} else if len(add) > 0 {
+			// Gracefully handle the case where a duplicate VRF output has been
+			// inserted. This should always be rejected at a later stage in
+			// processing.
+			duplicate := true
+			for _, entry := range add {
+				if !bytes.Equal(m.vrfOutput, entry.VrfOutput) {
+					duplicate = false
+					break
+				}
+			}
+			if duplicate {
+				return leafNode{vrfOutput: add[0].VrfOutput, commitment: add[0].Commitment}, nil
+			}
+
 			// We're keeping this leaf but it's in the way of other leaves we
 			// want to add, so push it down one level and recurse.
 			temp := &parentNode{left: emptyNode{}, right: emptyNode{}}

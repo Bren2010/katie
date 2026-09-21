@@ -63,6 +63,8 @@ func newChunk(cs suites.CipherSuite, id uint64, data []byte) (*nodeChunk, error)
 	for len(data) > 0 {
 		if len(data) < hashSize {
 			return nil, errors.New("unable to parse chunk")
+		} else if len(nodes) >= 15 {
+			return nil, errors.New("unable to parse chunk")
 		}
 		if len(nodes) > 0 {
 			nodes = append(nodes, &nodeData{leaf: false, value: nil})
@@ -72,9 +74,6 @@ func newChunk(cs suites.CipherSuite, id uint64, data []byte) (*nodeChunk, error)
 			value: data[:hashSize],
 		})
 		data = data[hashSize:]
-	}
-	if len(nodes) > 15 {
-		return nil, errors.New("unable to parse chunk")
 	}
 	for len(nodes) < 15 {
 		if len(nodes)%2 == 0 {
@@ -196,7 +195,7 @@ func (s *chunkSet) add(x uint64) {
 	if _, ok := s.chunks[id]; ok {
 		panic("cannot add chunk that already exists in set")
 	}
-	c, err := newChunk(s.cs, id, make([]byte, 0))
+	c, err := newChunk(s.cs, id, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -13,7 +13,7 @@ func getBit(data []byte, bit int) bool {
 
 // nextStep represents the next step of a search.
 type nextStep struct {
-	id  tileId // The tile id that needs to be loaded to continue search.
+	id  tileId // The tile id that needs to be loaded to continue the search.
 	ptr *node  // Pointer to the node where the search terminated.
 }
 
@@ -59,9 +59,9 @@ func newBatch(cs suites.CipherSuite, tx db.PrefixStore) *batch {
 	return &batch{cs, tx, make(map[tileId]*tile)}
 }
 
-// initialize creates the initial state object to call search with, and creates
-// a map from each searched version of the Prefix Tree to a tile where the
-// result for that version will be stored.
+// initialize returns a map from each searched version of the tree to a tile
+// where the result for that version will be stored, and the initial state
+// object to call search with.
 func (b *batch) initialize(searches map[uint64][][]byte) (map[uint64]*tile, map[*node][]cursor) {
 	tiles := make(map[uint64]*tile, len(searches))
 	state := make(map[*node][]cursor, len(searches))
@@ -119,9 +119,6 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[tileId]*tile, error) {
 	}
 
 	for i, id := range ids {
-		if data[i] == nil {
-			return nil, errors.New("not all expected data was found")
-		}
 		t, err := unmarshalTile(b.cs, id, data[i])
 		if err != nil {
 			return nil, err
@@ -136,56 +133,57 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[tileId]*tile, error) {
 // within each node, identifies which tiles will be needed next, and initiates
 // looking them up for the next search iteration.
 func (b *batch) search(state map[*node][]cursor) error {
-	nextSteps := make(map[*cursor]nextStep)
-	for nd, cursors := range state {
-		for i := range cursors {
-			if res := cursors[i].step(nd); res != nil {
-				nextSteps[&cursors[i]] = *res
-			}
-		}
-	}
-	if len(nextSteps) == 0 {
-		return nil
-	}
-
-	tiles, err := b.get(nextSteps)
-	if err != nil {
-		return err
-	} else if len(tiles) == 0 {
-		return errors.New("no tiles were successfully fetched")
-	}
-
-	nextState := make(map[*node][]cursor)
-	for cursor, step := range nextSteps {
-		t, ok := tiles[step.id]
-		if !ok {
-			nextState[step.ptr] = append(nextState[step.ptr], *cursor)
-			continue
-		}
-
-		// Recurse down within the tile until we reach the desired depth.
-		if t.depth > cursor.depth {
-			return errors.New("tile does not fit into search as expected")
-		}
-		n := &t.root
-		for i := range cursor.depth - t.depth {
-			switch m := (*n).(type) {
-			case *parentNode:
-				if getBit(cursor.vrfOutput, t.depth+i) {
-					n = &m.right
-				} else {
-					n = &m.left
+	for {
+		nextSteps := make(map[*cursor]nextStep)
+		for nd, cursors := range state {
+			for i := range cursors {
+				if res := cursors[i].step(nd); res != nil {
+					nextSteps[&cursors[i]] = *res
 				}
-			default:
-				return errors.New("unexpected node found in search path")
 			}
 		}
+		if len(nextSteps) == 0 {
+			return nil
+		}
 
-		// Replace the node where the search terminated with the new subtree
-		// that was just looked up. Setup cursor for next iteration.
-		*step.ptr = *n
-		nextState[step.ptr] = append(nextState[step.ptr], *cursor)
+		tiles, err := b.get(nextSteps)
+		if err != nil {
+			return err
+		} else if len(tiles) == 0 {
+			return errors.New("no tiles were successfully fetched")
+		}
+
+		nextState := make(map[*node][]cursor)
+		for cursor, step := range nextSteps {
+			t, ok := tiles[step.id]
+			if !ok {
+				nextState[step.ptr] = append(nextState[step.ptr], *cursor)
+				continue
+			}
+
+			// Recurse down within the tile until we reach the desired depth.
+			if t.depth > cursor.depth {
+				return errors.New("tile does not fit into search as expected")
+			}
+			n := &t.root
+			for i := range cursor.depth - t.depth {
+				switch m := (*n).(type) {
+				case *parentNode:
+					if getBit(cursor.vrfOutput, t.depth+i) {
+						n = &m.right
+					} else {
+						n = &m.left
+					}
+				default:
+					return errors.New("unexpected node found in search path")
+				}
+			}
+
+			// Replace the node where the search terminated with the new subtree
+			// that was just looked up. Setup cursor for next iteration.
+			*step.ptr = *n
+			nextState[step.ptr] = append(nextState[step.ptr], *cursor)
+		}
+		state = nextState
 	}
-
-	return b.search(nextState)
 }

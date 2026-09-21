@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	mrand "math/rand"
+	"slices"
 	"testing"
 
 	"github.com/Bren2010/katie/crypto/suites"
@@ -21,6 +22,12 @@ func randomBytes() [32]byte {
 	out := [32]byte{}
 	rand.Read(out[:])
 	return out
+}
+
+func sortEntries(entries []Entry) {
+	slices.SortFunc(entries, func(a, b Entry) int {
+		return bytes.Compare(a.VrfOutput, b.VrfOutput)
+	})
 }
 
 func TestTree(t *testing.T) {
@@ -40,6 +47,7 @@ func TestTree(t *testing.T) {
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 			data[vrfOutput] = commitment
 		}
+		sortEntries(entries)
 		mut, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -49,7 +57,7 @@ func TestTree(t *testing.T) {
 		roots = append(roots, mut.Root)
 
 		// Verify prior-version lookup proof.
-		if err := Verify(cs, entries, mut.Proof, roots[ver]); err != nil {
+		if err := Verify(cs, entries, &mut.Proof, roots[ver]); err != nil {
 			t.Fatal(err)
 		}
 
@@ -205,6 +213,7 @@ func buildRandomTree(t *testing.T, cs suites.CipherSuite) (*Tree, [][]byte, [][]
 			vrfOutput, commitment := randomBytes(), randomBytes()
 			entries = append(entries, Entry{vrfOutput[:], commitment[:]})
 		}
+		sortEntries(entries)
 		mut, err := tree.Mutate(ver, entries, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -348,7 +357,7 @@ func TestEvaluateBeforeAfterMatchesMutation(t *testing.T) {
 	}
 	removed := []Entry{{makeBytes(0x00), mut1.Commitments[0]}}
 
-	before, after, err := EvaluateBeforeAfter(cs, add, removed, mut1.Leaves, mut1.Proof)
+	before, after, err := EvaluateBeforeAfter(cs, add, removed, mut1.Leaves, &mut1.Proof)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(before, mut0.Root) {
@@ -374,7 +383,7 @@ func checkMutationProof(
 	for i, vrfOutput := range remove {
 		removed[i] = Entry{vrfOutput, mut.Commitments[i]}
 	}
-	before, after, err := EvaluateBeforeAfter(cs, add, removed, mut.Leaves, mut.Proof)
+	before, after, err := EvaluateBeforeAfter(cs, add, removed, mut.Leaves, &mut.Proof)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(before, prev) {
@@ -463,6 +472,7 @@ func TestEvaluateBeforeAfterRandom(t *testing.T) {
 				remove = append(remove, []byte(vrfOutput))
 			}
 		}
+		slices.SortFunc(remove, bytes.Compare)
 
 		// Add some new entries. Some share a long prefix, so that the tree has
 		// deeper chains of parent nodes.
@@ -474,6 +484,7 @@ func TestEvaluateBeforeAfterRandom(t *testing.T) {
 			}
 			add = append(add, Entry{vrfOutput[:], commitment[:]})
 		}
+		sortEntries(add)
 
 		mut, err := tree.Mutate(ver, add, remove)
 		if err != nil {
@@ -507,6 +518,7 @@ func TestHistoryIndependence(t *testing.T) {
 		base = append(base, Entry{vrfOutput[:], commitment[:]})
 		live[string(vrfOutput[:])] = commitment[:]
 	}
+	sortEntries(base)
 	mut, err := tree.Mutate(0, base, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -526,6 +538,7 @@ func TestHistoryIndependence(t *testing.T) {
 			}
 			add = append(add, Entry{vrfOutput[:], commitment[:]})
 		}
+		sortEntries(add)
 		added, err := tree.Mutate(ver, add, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -570,6 +583,7 @@ func TestHistoryIndependence(t *testing.T) {
 	for vrfOutput, commitment := range live {
 		entries = append(entries, Entry{[]byte(vrfOutput), commitment})
 	}
+	sortEntries(entries)
 	fresh, err := NewTree(cs, memPrefixStore()).Mutate(0, entries, nil)
 	if err != nil {
 		t.Fatal(err)

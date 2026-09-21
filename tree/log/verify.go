@@ -93,7 +93,7 @@ func (v *Verifier) Evaluate(entries []uint64, n uint64, nP *uint64, values [][]b
 	// Build a sorted list of node indices. This is used to ensure that we know
 	// when we need to recurse further down and recompute a node value even
 	// though we may already know it.
-	sorted := make([]uint64, 0)
+	sorted := make([]uint64, 0, len(nodes))
 	for x := range nodes {
 		sorted = append(sorted, x)
 	}

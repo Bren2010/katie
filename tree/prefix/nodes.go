@@ -60,7 +60,7 @@ func (pn *parentNode) String() string {
 // for building tiles can incrementally include more nodes, rather than starting
 // with a tile that's too large and trying to figure out how to trim it down.
 func (pn *parentNode) Weight(cs suites.CipherSuite) int {
-	return 1 + cs.HashSize() + (2 * binary.MaxVarintLen64)
+	return externalNode{}.Weight(cs)
 }
 
 func (pn *parentNode) Hash(cs suites.CipherSuite) []byte {

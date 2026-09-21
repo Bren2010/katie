@@ -136,55 +136,13 @@ func fillInCopath(cs suites.CipherSuite, n *node, elements [][]byte) ([][]byte, 
 	}
 }
 
-// addMovedLeaf replaces the copath node in `n` where the leaf in `entry` is
-// stored with a leafNode, which allows EvaluateBeforeAfter to move the leaf up.
-// It returns an error if the leaf is not at that position.
-func addMovedLeaf(cs suites.CipherSuite, n *node, entry Entry) error {
-	if len(entry.VrfOutput) != cs.HashSize() {
-		return errors.New("unexpected vrf output length")
-	} else if len(entry.Commitment) != cs.HashSize() {
-		return errors.New("unexpected commitment length")
-	}
-	leaf := leafNode{entry.VrfOutput, entry.Commitment}
-	depth := 0
-
-	for {
-		switch m := (*n).(type) {
-		case emptyNode, leafNode:
-			return errors.New("moved leaf is not on the copath")
-
-		case *parentNode:
-			if getBit(entry.VrfOutput, depth) {
-				n = &m.right
-			} else {
-				n = &m.left
-			}
-			depth++
-
-		case externalNode:
-			if !bytes.Equal(m.hash, leaf.Hash(cs)) {
-				return errors.New("moved leaf does not match copath node")
-			}
-			*n = leaf
-			return nil
-
-		default:
-			panic("unexpected node type found")
-		}
-	}
-}
-
+// evaluate returns the in-memory tree that `proof` corresponds to.
 func evaluate(cs suites.CipherSuite, entries []Entry, proof *PrefixProof) (node, error) {
-	sortedEntries := make([]Entry, len(entries))
-	copy(sortedEntries, entries)
-	slices.SortFunc(sortedEntries, compareEntries)
-	for i, entry := range sortedEntries {
+	for _, entry := range entries {
 		if len(entry.VrfOutput) != cs.HashSize() {
 			return nil, errors.New("unexpected vrf output length")
 		} else if entry.Commitment != nil && len(entry.Commitment) != cs.HashSize() {
 			return nil, errors.New("unexpected commitment length")
-		} else if i > 0 && bytes.Equal(sortedEntries[i-1].VrfOutput, entry.VrfOutput) {
-			return nil, errors.New("same vrf output present multiple times")
 		}
 	}
 	if len(entries) != len(proof.Results) {
@@ -232,8 +190,27 @@ func Verify(cs suites.CipherSuite, entries []Entry, proof *PrefixProof, root []b
 // the mutation, but that aren't on the search path of any added or removed
 // entry, must be provided in `leaves`.
 func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove, leaves []Entry, proof *PrefixProof) ([]byte, []byte, error) {
-	// Combine the `add` and `remove` slices and compute the prefix tree root
-	// hash in the straightforward way.
+	// Verify that the provided entries are well formed.
+	if len(add) == 0 && len(remove) == 0 {
+		return nil, nil, errors.New("no mutations requested")
+	}
+
+	for i, entry := range add {
+		if len(entry.Commitment) != cs.HashSize() {
+			return nil, nil, errors.New("unexpected commitment length")
+		} else if i > 0 && bytes.Compare(add[i-1].VrfOutput, entry.VrfOutput) != -1 {
+			return nil, nil, errors.New("duplicate or unsorted vrf output given")
+		}
+	}
+	vrfOutputs := make([][]byte, len(remove))
+	for i, entry := range remove {
+		if i > 0 && bytes.Compare(remove[i-1].VrfOutput, entry.VrfOutput) != -1 {
+			return nil, nil, errors.New("duplicate or unsorted vrf output given")
+		}
+		vrfOutputs[i] = entry.VrfOutput
+	}
+
+	// Compute the full combined slice of entries and evaluate the prefix proof.
 	allEntries := make([]Entry, len(add)+len(remove)+len(leaves))
 	copy(allEntries, add)
 	copy(allEntries[len(add):], remove)
@@ -244,36 +221,43 @@ func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove, leaves []Entry, pro
 		return nil, nil, err
 	}
 
-	// Check that the search results are consistent with the mutation that's
-	// being made: entries that are being added must not be in the tree already,
-	// and entries that are being removed must be in the tree.
+	// Every added entry should correspond to a non-inclusion proof, unless it's
+	// also in remove.
 	for i := range add {
 		if proof.Results[i].Inclusion() {
-			return nil, nil, errors.New("entry being added is already in the tree")
+			_, found := slices.BinarySearchFunc(remove, add[i], func(a, b Entry) int {
+				return bytes.Compare(a.VrfOutput, b.VrfOutput)
+			})
+			if !found {
+				return nil, nil, errors.New("unable to add leaf that already exists")
+			}
 		}
 	}
+	// Every removed entry should correspond to an inclusion proof.
 	for i := range remove {
 		if !proof.Results[len(add)+i].Inclusion() {
 			return nil, nil, errors.New("entry being removed is not in the tree")
 		}
 	}
 
-	before := root.Hash(cs)
+	// Perform the additions and removals.
+	newRoot, expectedLeaves := addRemoveEntries(cs, root, add, vrfOutputs, 0)
 
-	// Perform the additions and removals and compute what the prefix tree root
-	// hash would be then.
-	sortedAdd := make([]Entry, len(add))
-	copy(sortedAdd, add)
-	slices.SortFunc(sortedAdd, compareEntries)
-
-	sortedRemove := make([][]byte, len(remove))
-	for i, entry := range remove {
-		sortedRemove[i] = entry.VrfOutput
+	// The given set of moved leaves should exactly match what we computed
+	// ourselves.
+	if len(leaves) != len(expectedLeaves) {
+		return nil, nil, errors.New("invalid set of moved leaves given")
 	}
-	slices.SortFunc(sortedRemove, bytes.Compare)
+	for i, entry := range leaves {
+		expected := expectedLeaves[i]
+		if !bytes.Equal(entry.VrfOutput, expected.VrfOutput) {
+			return nil, nil, errors.New("invalid set of moved leaves given")
+		} else if !bytes.Equal(entry.Commitment, expected.Commitment) {
+			return nil, nil, errors.New("invalid set of moved leaves given")
+		} else if !proof.Results[len(add)+len(remove)+i].Inclusion() {
+			return nil, nil, errors.New("moved leaf is not in the tree")
+		}
+	}
 
-	addRemoveEntries(cs, &root, sortedAdd, sortedRemove, 0)
-	after := root.Hash(cs)
-
-	return before, after, nil
+	return root.Hash(cs), newRoot.Hash(cs), nil
 }

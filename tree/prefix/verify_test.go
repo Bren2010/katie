@@ -258,8 +258,8 @@ func TestEvaluateBeforeAfterMovedLeaf(t *testing.T) {
 
 	remove := []Entry{{removed.vrfOutput, removed.commitment}}
 	proof := &PrefixProof{
-		Results:  []PrefixSearchResult{inclusionProof{depth: 1}},
-		Elements: [][]byte{sibling.Hash(cs)},
+		Results:  []PrefixSearchResult{inclusionProof{depth: 1}, inclusionProof{depth: 1}},
+		Elements: [][]byte{},
 	}
 
 	leaves := []Entry{{sibling.vrfOutput, sibling.commitment}}
@@ -273,8 +273,13 @@ func TestEvaluateBeforeAfterMovedLeaf(t *testing.T) {
 	}
 
 	wrong := []Entry{{sibling.vrfOutput, makeBytes(0x33)}}
-	if _, _, err := EvaluateBeforeAfter(cs, nil, remove, wrong, proof); err == nil {
-		t.Fatal("accepted a moved leaf that does not match the copath")
+	before, after, err = EvaluateBeforeAfter(cs, nil, remove, wrong, proof)
+	if err != nil {
+		t.Fatal(err)
+	} else if bytes.Equal(before, root.Hash(cs)) {
+		t.Fatal("correct root hash computed despite incorrect proof")
+	} else if bytes.Equal(after, sibling.Hash(cs)) {
+		t.Fatal("correct root hash computed despite incorrect proof")
 	}
 	onPath := []Entry{{removed.vrfOutput, removed.commitment}}
 	if _, _, err := EvaluateBeforeAfter(cs, nil, remove, onPath, proof); err == nil {
