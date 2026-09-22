@@ -1,10 +1,11 @@
-// Package auditor implements a stateful third-party auditor for a transparency
-// log.
+// Package auditor implements a stateful Third-Party Auditor for a Transparency
+// Log.
 package auditor
 
 import (
 	"bytes"
 	"errors"
+	"math/bits"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
@@ -71,6 +72,55 @@ func NewAuditor(
 	}, nil
 }
 
+// Initialize provides the initial state for the auditor. This must be called if
+// the auditor's starting position is greater than 0; otherwise, the auditor is
+// initialized on the first call to Process with default values.
+func (a *Auditor) Initialize(
+	fullSubtrees [][]byte,
+	timestamps []uint64,
+	prefixTree []byte,
+) error {
+	if a.state != nil {
+		return errors.New("auditor state is already initialized")
+	}
+
+	if len(fullSubtrees) != bits.OnesCount64(a.config.AuditorStartPos) {
+		return errors.New("unexpected number of full subtrees provided")
+	}
+	for _, subtree := range fullSubtrees {
+		if len(subtree) != a.config.Suite.HashSize() {
+			return errors.New("unexpected subtree hash size")
+		}
+	}
+
+	if len(timestamps) != len(math.Frontier(a.config.AuditorStartPos)) {
+		return errors.New("unexpected number of timestamps provided")
+	}
+	for i := 1; i < len(timestamps); i++ {
+		if timestamps[i-1] > timestamps[i] {
+			return errors.New("timestamps are not monotonically increasing")
+		}
+	}
+
+	if len(prefixTree) != a.config.Suite.HashSize() {
+		return errors.New("unexpected prefix tree hash size")
+	}
+
+	a.state = &auditorState{
+		treeHead: structs.AuditorTreeHead{
+			Timestamp: 0,
+			TreeSize:  a.config.AuditorStartPos,
+			Signature: nil,
+		},
+		fullSubtrees: fullSubtrees,
+		timestamps:   timestamps,
+		prefixTree:   prefixTree,
+
+		inserted: nil,
+	}
+	return nil
+}
+
 func (a *Auditor) previousRightmost(added uint64) (*uint64, *algorithms.DataProvider, error) {
 	// Build the set of relevant log entry timestamps (= the frontier timestamps
 	// we've retained + the new rightmost log entry timestamp).
@@ -124,25 +174,30 @@ func (a *Auditor) updateState(
 	}
 
 	// Compute the new set of retained timestamps.
-	timestamps := make([]uint64, 0)
-	for _, x := range math.Frontier(n + 1) {
+	frontier := math.Frontier(n + 1)
+	timestamps := make([]uint64, len(frontier))
+	for i, x := range frontier {
 		timestamp, err := provider.GetTimestamp(x)
 		if err != nil {
 			return err
 		}
-		timestamps = append(timestamps, timestamp)
+		timestamps[i] = timestamp
 	}
 
 	// Compute the new set of recently-inserted VRF outputs to retain.
-	rightmost, err := algorithms.RightmostDistinguished(a.config, n+1, provider)
-	if err != nil {
-		return err
+	if a.allowPruning {
+		rightmost, err := algorithms.RightmostDistinguished(a.config, n+1, provider)
+		if err != nil {
+			return err
+		}
+		insertedNow := make([]insertedVrfOutput, len(added))
+		for i, entry := range added {
+			insertedNow[i] = insertedVrfOutput{pos: n, vrfOutput: entry.VrfOutput}
+		}
+		inserted = mergeInserted(inserted, insertedNow, rightmost)
+	} else {
+		inserted = nil
 	}
-	insertedNow := make([]insertedVrfOutput, len(added))
-	for i, entry := range added {
-		insertedNow[i] = insertedVrfOutput{pos: n, vrfOutput: entry.VrfOutput}
-	}
-	inserted = mergeInserted(inserted, insertedNow, rightmost)
 
 	a.state = &auditorState{
 		treeHead: structs.AuditorTreeHead{
@@ -164,70 +219,33 @@ func (a *Auditor) updateState(
 // update fails to process, no auditor state is changed. Successfully processed
 // updates are not persisted until `Commit` is called.
 func (a *Auditor) Process(update *structs.AuditorUpdate) error {
-	// Verify that `timestamp` is greater than or equal to the rightmost log
-	// entry's timestamp.
-	if a.state != nil && update.Timestamp < a.state.treeHead.Timestamp {
+	if a.state == nil {
+		if a.config.AuditorStartPos > 0 {
+			return errors.New("auditor state is not initialized")
+		}
+		err := a.Initialize(nil, nil, make([]byte, a.config.Suite.HashSize()))
+		if err != nil {
+			return err
+		}
+	}
+	// Verify that `timestamp` is greater than or equal to the timestamp of the
+	// previous log entry.
+	if update.Timestamp < a.state.treeHead.Timestamp {
 		return errors.New("update timestamp is less than rightmost timestamp")
 	}
 
-	// Verify that `added`, `removed`, and `leaves` are sorted and contain no
-	// duplicates.
-	for i := 1; i < len(update.Added); i++ {
-		if compareEntry(update.Added[i-1], update.Added[i]) != -1 {
-			return errors.New("list of added prefix tree entries is invalid")
-		}
-	}
-	for i := 1; i < len(update.Removed); i++ {
-		if compareEntry(update.Removed[i-1], update.Removed[i]) != -1 {
-			return errors.New("list of removed prefix tree entries is invalid")
-		}
-	}
-	for i := 1; i < len(update.Leaves); i++ {
-		if compareEntry(update.Leaves[i-1], update.Leaves[i]) != -1 {
-			return errors.New("list of moved prefix tree leaves is invalid")
-		} // TODO: Verify no overlap with `added` or `removed`.
-	}
-	// TODO: All this input validation should move into EvaluateBeforeAfter
-
-	// Verify that the result provided in `proof` for each element of `added`
-	// shows non-inclusion.
-	if len(update.Proof.Results) != len(update.Added)+len(update.Removed) {
-		return errors.New("unexpected number of prefix proof results")
-	}
-	for i, entry := range update.Added {
-		res := update.Proof.Results[i]
-		if !res.Inclusion() {
-			continue
-		}
-		// Check if the same VRF output is in `removed`.
-		found := false
-		for _, removed := range update.Removed {
-			if bytes.Equal(entry.VrfOutput, removed.VrfOutput) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return errors.New("proof shows inclusion for added leaf")
-		}
-	}
-
-	// Verify that the result provided in `proof` for each element of `removed`
-	// shows inclusion.
-	for i := range update.Removed {
-		res := update.Proof.Results[len(update.Added)+i]
-		if !res.Inclusion() {
-			return errors.New("proof shows non-inclusion for removed leaf")
-		}
-	}
+	// Verification steps 2 through 4 happen in EvaluateBeforeAfter.
 
 	// For each element of `removed`, verify that the prefix leaf was published
 	// in at least one distinguished log entry.
 	prevDLE, provider, err := a.previousRightmost(update.Timestamp)
 	if err != nil {
 		return err
-	} else if prevDLE == nil && len(update.Removed) > 0 {
-		return errors.New("prefix tree leaf is not eligible for removal")
+	}
+	if len(update.Removed) > 0 {
+		if !a.allowPruning || prevDLE == nil || *prevDLE < a.config.AuditorStartPos {
+			return errors.New("prefix tree leaf is not eligible for removal")
+		}
 	}
 	for _, entry := range update.Removed {
 		if a.state.addedSince(*prevDLE, entry.VrfOutput) {
@@ -253,7 +271,7 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 // Commit signs the auditor's tree head, commits it to the database, and returns
 // it.
 func (a *Auditor) Commit() (*structs.AuditorTreeHead, error) {
-	if a.state == nil {
+	if a.state == nil || a.state.treeHead.TreeSize == 0 {
 		return nil, errors.New("can not commit empty state")
 	} else if a.state.treeHead.Signature != nil {
 		return &a.state.treeHead, nil

@@ -236,7 +236,9 @@ func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove, leaves []Entry, pro
 	}
 
 	for i, entry := range leaves {
-		if !proof.Results[len(add)+len(remove)+i].Inclusion() {
+		if i > 0 && bytes.Compare(leaves[i-1].VrfOutput, entry.VrfOutput) != -1 {
+			return nil, nil, errors.New("duplicate or unsorted vrf output given")
+		} else if !proof.Results[len(add)+len(remove)+i].Inclusion() {
 			return nil, nil, errors.New("moved leaf is not in the tree")
 		}
 		entries = append(entries, entry)

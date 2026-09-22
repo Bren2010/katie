@@ -81,6 +81,9 @@ func Parent(x, n uint64) uint64 {
 
 // Frontier returns the log entries on the frontier.
 func Frontier(n uint64) []uint64 {
+	if n == 0 {
+		return nil
+	}
 	out := []uint64{Root(n)}
 	for out[len(out)-1] != n-1 {
 		out = append(out, Right(out[len(out)-1], n))

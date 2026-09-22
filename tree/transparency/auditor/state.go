@@ -49,11 +49,9 @@ func newAuditorState(cs suites.CipherSuite, buf *bytes.Buffer) (*auditorState, e
 
 	timestamps := make([]uint64, len(math.Frontier(treeHead.TreeSize)))
 	for i := range timestamps {
-		var timestamp uint64
-		if err := binary.Read(buf, binary.BigEndian, &timestamp); err != nil {
+		if err := binary.Read(buf, binary.BigEndian, &timestamps[i]); err != nil {
 			return nil, err
 		}
-		timestamps[i] = timestamp
 	}
 
 	prefixTree := make([]byte, cs.HashSize())
@@ -104,7 +102,7 @@ func (as *auditorState) Marshal() ([]byte, error) {
 	}
 	buf.Write(as.prefixTree)
 
-	if int64(len(as.inserted)) >= int64(1)<<32 {
+	if uint64(len(as.inserted)) >= uint64(1)<<32 {
 		return nil, errors.New("inserted vrf outputs slice is too long to marshal")
 	}
 	binary.Write(buf, binary.BigEndian, uint32(len(as.inserted)))
@@ -119,9 +117,6 @@ func (as *auditorState) Marshal() ([]byte, error) {
 // addedSince returns true if `vrfOutput` was added to the prefix tree after the
 // log entry `x` was published.
 func (as *auditorState) addedSince(x uint64, vrfOutput []byte) bool {
-	if as == nil {
-		return true // TODO: Is this right?
-	}
 	target := insertedVrfOutput{vrfOutput: vrfOutput}
 	i, found := slices.BinarySearchFunc(as.inserted, target, compareInserted)
 	if !found {
