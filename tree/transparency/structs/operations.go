@@ -429,9 +429,10 @@ func (mur *ManagerUpdateRequest) Marshal(buf *bytes.Buffer) error {
 type UpdateResponse struct {
 	FullTreeHead FullTreeHead
 
-	Position uint64
-	Values   []LabelValue
-	Info     []UpdateInfo
+	Position        uint64
+	SkippedVersions uint32
+	Values          []LabelValue
+	Info            []UpdateInfo
 
 	BinaryLadder []BinaryLadderStep
 	Update       CombinedTreeProof
@@ -446,6 +447,13 @@ func NewUpdateResponse(config *PublicConfig, buf *bytes.Buffer) (*UpdateResponse
 	position, err := readNumeric[uint64](buf)
 	if err != nil {
 		return nil, err
+	}
+	var skippedVersions uint32
+	if config.Mode == ThirdPartyManagement {
+		skippedVersions, err = readNumeric[uint32](buf)
+		if err != nil {
+			return nil, err
+		}
 	}
 	values, err := readFuncSlice[uint8](buf, NewLabelValue)
 	if err != nil {
@@ -469,15 +477,18 @@ func NewUpdateResponse(config *PublicConfig, buf *bytes.Buffer) (*UpdateResponse
 		return nil, err
 	}
 
-	return &UpdateResponse{*fth, position, values, info, ladder, *update}, nil
+	return &UpdateResponse{*fth, position, skippedVersions, values, info, ladder, *update}, nil
 }
 
-func (ur *UpdateResponse) Marshal(buf *bytes.Buffer) error {
+func (ur *UpdateResponse) Marshal(config *PublicConfig, buf *bytes.Buffer) error {
 	if err := ur.FullTreeHead.Marshal(buf); err != nil {
 		return err
 	}
 
 	writeNumeric(buf, ur.Position)
+	if config.Mode == ThirdPartyManagement {
+		writeNumeric(buf, ur.SkippedVersions)
+	}
 	if err := writeMarshalSlice[uint8](buf, ur.Values, "label value"); err != nil {
 		return err
 	}

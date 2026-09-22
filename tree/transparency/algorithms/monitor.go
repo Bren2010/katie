@@ -54,17 +54,26 @@ type OwnerState struct {
 }
 
 func NewOwnerState(from *structs.LabelOwnerState) *OwnerState {
+	verAtStarting := -1
+	if from.VerAtStarting != nil {
+		verAtStarting = int(*from.VerAtStarting)
+	}
 	return &OwnerState{
 		Starting:      from.Starting,
-		VerAtStarting: from.VerAtStarting,
+		VerAtStarting: verAtStarting,
 		UpcomingVers:  from.UpcomingVers,
 	}
 }
 
 func (os *OwnerState) Struct() *structs.LabelOwnerState {
+	var verAtStarting *uint32
+	if os.VerAtStarting >= 0 {
+		ver := uint32(os.VerAtStarting)
+		verAtStarting = &ver
+	}
 	return &structs.LabelOwnerState{
 		Starting:      os.Starting,
-		VerAtStarting: os.VerAtStarting,
+		VerAtStarting: verAtStarting,
 		UpcomingVers:  os.UpcomingVers,
 	}
 }

@@ -267,12 +267,16 @@ func getDistinguished(config *structs.PublicConfig, state *structs.ClientState) 
 }
 
 func greatestVersion(owner *structs.LabelOwnerState) *uint32 {
-	greatest := owner.VerAtStarting + len(owner.UpcomingVers)
-	if greatest >= 0 {
-		greatest := uint32(greatest)
+	greatest := uint32(len(owner.UpcomingVers))
+	if owner.VerAtStarting == nil {
+		if greatest == 0 {
+			return nil
+		}
+		greatest -= 1
 		return &greatest
 	}
-	return nil
+	greatest += *owner.VerAtStarting
+	return &greatest
 }
 
 func parseLabelState(config *structs.PublicConfig, raw []byte) (*structs.ClientLabelState, error) {
@@ -407,13 +411,14 @@ func updateRetainedVersions(
 	}
 
 	if state.Owner != nil {
-		starting := state.Owner.VerAtStarting
 		ownedVersions := make([]uint32, 0)
-		if starting >= 0 {
-			ownedVersions = append(ownedVersions, uint32(starting))
+		next := uint32(0)
+		if starting := state.Owner.VerAtStarting; starting != nil {
+			ownedVersions = append(ownedVersions, *starting)
+			next = *starting + 1
 		}
 		for i := range len(state.Owner.UpcomingVers) {
-			ownedVersions = append(ownedVersions, uint32(starting+i+1))
+			ownedVersions = append(ownedVersions, next+uint32(i))
 		}
 
 		for _, ver := range allLadderVersions(ownedVersions) {

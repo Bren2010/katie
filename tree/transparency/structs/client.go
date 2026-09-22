@@ -98,7 +98,7 @@ func (cs *ClientState) Marshal(buf *bytes.Buffer) error {
 
 type LabelOwnerState struct {
 	Starting      uint64
-	VerAtStarting int
+	VerAtStarting *uint32
 	UpcomingVers  []uint64
 }
 
@@ -107,7 +107,7 @@ func NewLabelOwnerState(buf *bytes.Buffer) (*LabelOwnerState, error) {
 	if err != nil {
 		return nil, err
 	}
-	verAtStarting, err := readNumeric[int](buf)
+	verAtStarting, err := readOptionalNumeric[uint32](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func NewLabelOwnerState(buf *bytes.Buffer) (*LabelOwnerState, error) {
 
 func (los *LabelOwnerState) Marshal(buf *bytes.Buffer) error {
 	writeNumeric(buf, los.Starting)
-	writeNumeric(buf, los.VerAtStarting)
+	writeOptionalNumeric(buf, los.VerAtStarting)
 	return writeNumericSlice[uint32](buf, los.UpcomingVers, "upcoming versions")
 }
 
@@ -195,6 +195,9 @@ func NewClientLabelState(cs suites.CipherSuite, buf *bytes.Buffer) (*ClientLabel
 	versions, err := readFuncSlice[uint32](buf, func(buf *bytes.Buffer) (*RetainedVersion, error) {
 		return NewRetainedVersion(cs, buf)
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &ClientLabelState{Contact: contact, Owner: owner, Versions: versions}, nil
 }
@@ -204,7 +207,9 @@ func (cls *ClientLabelState) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	if writeOptional(buf, cls.Owner != nil) {
-		return cls.Owner.Marshal(buf)
+		if err := cls.Owner.Marshal(buf); err != nil {
+			return err
+		}
 	}
 	return writeMarshalSlice[uint32](buf, cls.Versions, "retained versions")
 }

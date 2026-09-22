@@ -144,9 +144,6 @@ func (ph *ProofHandle) Tracker() *math.VersionTracker {
 	return &math.VersionTracker{}
 }
 
-func (ph *ProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
-	panic("not implemented")
-}
 func (ph *ProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
 	panic("not implemented")
 }

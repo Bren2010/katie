@@ -25,7 +25,7 @@ func Marshal(x Marshaller) ([]byte, error) {
 }
 
 type numeric interface {
-	uint8 | uint16 | uint32 | uint64 | int
+	uint8 | uint16 | uint32 | uint64
 }
 
 func readNumeric[T numeric](buf *bytes.Buffer) (T, error) {
