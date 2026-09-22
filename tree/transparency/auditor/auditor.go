@@ -35,6 +35,7 @@ type Auditor struct {
 // Log to prune Prefix Tree entries. If true, the auditor retains all VRF
 // outputs added since the last distinguished log entry. If false, the auditor's
 // state is much smaller but any deletions from the Prefix Tree are rejected.
+// This value must always be the same for the lifetime of the auditor.
 func NewAuditor(
 	config *structs.PublicConfig,
 	auditorKey suites.SigningPrivateKey,
@@ -59,6 +60,8 @@ func NewAuditor(
 			return nil, err
 		} else if buf.Len() != 0 {
 			return nil, errors.New("unexpected data appended to auditor state")
+		} else if state.treeHead.TreeSize <= config.AuditorStartPos {
+			return nil, errors.New("configuration has unexpected tree size")
 		}
 	}
 
@@ -142,7 +145,9 @@ func (a *Auditor) previousRightmost(added uint64) (*uint64, *algorithms.DataProv
 	// Pass the log entries into a DataProvider as retained state and compute
 	// the previous rightmost distinguished log entry.
 	provider := algorithms.NewDataProvider(a.config.Suite, nil)
-	provider.AddRetained(nil, logEntries)
+	if err := provider.AddRetained(nil, logEntries); err != nil {
+		return nil, nil, err
+	}
 	prevDLE, err := algorithms.PreviousRightmost(a.config, n+1, provider)
 	if err != nil {
 		return nil, nil, err
@@ -305,8 +310,10 @@ func (a *Auditor) Commit() (*structs.AuditorTreeHead, error) {
 	// Serialize the auditor's state and commit it to the database.
 	raw, err := a.state.Marshal()
 	if err != nil {
+		a.state.treeHead.Signature = nil
 		return nil, err
 	} else if err := a.tx.PutState(raw); err != nil {
+		a.state.treeHead.Signature = nil
 		return nil, err
 	}
 
