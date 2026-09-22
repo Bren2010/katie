@@ -9,7 +9,6 @@ import (
 	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
-	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
@@ -123,10 +122,6 @@ func (as *auditorState) addedSince(x uint64, vrfOutput []byte) bool {
 		return false
 	}
 	return as.inserted[i].pos > x
-}
-
-func compareEntry(a, b prefix.Entry) int {
-	return bytes.Compare(a.VrfOutput, b.VrfOutput)
 }
 
 func compareInserted(a, b insertedVrfOutput) int {

@@ -77,29 +77,29 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 
 	// Make the requested modifications to the prefix tree.
 	prefixTree := prefix.NewTree(t.config.Suite, t.tx.PrefixStore())
-	prefixRoot, prefixProof, commitments, leaves, err := prefixTree.Mutate(n, prefixAdd, prefixRemove)
+	mut, err := prefixTree.Mutate(n, prefixAdd, prefixRemove)
 	if err != nil {
 		return nil, err
 	}
 
 	// Issue new tree head.
-	if err := t.issueTreeHead(n, timestamp, prefixRoot); err != nil {
+	if err := t.issueTreeHead(n, timestamp, mut.Root); err != nil {
 		return nil, err
 	}
 
 	// Construct the AuditorUpdate structure to return.
 	removedEntries := make([]prefix.Entry, len(prefixRemove))
 	for i, vrfOutput := range prefixRemove {
-		removedEntries[i] = prefix.Entry{VrfOutput: vrfOutput, Commitment: commitments[i]}
+		removedEntries[i] = prefix.Entry{VrfOutput: vrfOutput, Commitment: mut.Commitments[i]}
 	}
 	return &structs.AuditorUpdate{
 		Timestamp: timestamp,
 
 		Added:   prefixAdd,
 		Removed: removedEntries,
-		Leaves:  leaves,
+		Leaves:  mut.Leaves,
 
-		Proof: *prefixProof,
+		Proof: mut.Proof,
 	}, nil
 }
 

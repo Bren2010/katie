@@ -106,9 +106,13 @@ func (a *Auditor) Initialize(
 		return errors.New("unexpected prefix tree hash size")
 	}
 
+	timestamp := uint64(0)
+	if len(timestamps) > 0 {
+		timestamp = timestamps[len(timestamps)-1]
+	}
 	a.state = &auditorState{
 		treeHead: structs.AuditorTreeHead{
-			Timestamp: 0,
+			Timestamp: timestamp,
 			TreeSize:  a.config.AuditorStartPos,
 			Signature: nil,
 		},
@@ -273,6 +277,8 @@ func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 func (a *Auditor) Commit() (*structs.AuditorTreeHead, error) {
 	if a.state == nil || a.state.treeHead.TreeSize == 0 {
 		return nil, errors.New("can not commit empty state")
+	} else if a.state.treeHead.TreeSize == a.config.AuditorStartPos {
+		return nil, errors.New("no entries processed")
 	} else if a.state.treeHead.Signature != nil {
 		return &a.state.treeHead, nil
 	}
