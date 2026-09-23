@@ -30,14 +30,14 @@ func (vt *VersionTracker) AddResults(x uint64, omit bool, ladder []uint32, resul
 	vt.nonInclusion = append(vt.nonInclusion, posAndVersions{pos: x, vers: nonInclusion})
 }
 
-func (vt *VersionTracker) AddLadder(x uint64, omit bool, greatest int, ladder []uint32) {
+func (vt *VersionTracker) AddLadder(x uint64, omit bool, greatest int64, ladder []uint32) {
 	if !omit {
 		return
 	}
 
 	var inclusion, nonInclusion []uint32
 	for _, version := range ladder {
-		if int(version) <= greatest {
+		if int64(version) <= greatest {
 			inclusion = append(inclusion, version)
 		} else {
 			nonInclusion = append(nonInclusion, version)

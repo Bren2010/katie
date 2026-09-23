@@ -67,7 +67,7 @@ type ProofHandle interface {
 
 	// StopCondition returns true if the proof is exhausted. This is only used
 	// for owner monitoring, since those proofs are "paginated".
-	StopCondition(x uint64, greatest int) bool
+	StopCondition(x uint64, greatest int64) bool
 
 	// Tracker returns the tracker used for version lookup omission.
 	Tracker() *math.VersionTracker
@@ -197,11 +197,14 @@ func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]by
 	}
 	proof := rph.inner.PrefixProofs[0]
 
-	// Verify that proof shows inclusion for a single version.
-	if len(proof.Results) != 1 {
+	// Verify that proof shows inclusion for the requested versions.
+	if len(proof.Results) != len(vers) {
 		return nil, errors.New("unexpected number of results present in prefix proof")
-	} else if !proof.Results[0].Inclusion() {
-		return nil, errors.New("unexpected non-inclusion proof provided")
+	}
+	for _, res := range proof.Results {
+		if !res.Inclusion() {
+			return nil, errors.New("unexpected non-inclusion proof provided")
+		}
 	}
 
 	// Evaluate the prefix proof and return.
@@ -248,7 +251,7 @@ func (rph *ReceivedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64)
 	panic("unreachable")
 }
 
-func (rph *ReceivedProofHandle) StopCondition(_ uint64, _ int) bool {
+func (rph *ReceivedProofHandle) StopCondition(_ uint64, _ int64) bool {
 	// The only valid stop condition for a received proof is that all of the
 	// binary ladders have been consumed.
 	return len(rph.inner.PrefixProofs) == 0
@@ -320,9 +323,9 @@ func (pph *ProducedProofHandle) GetCommitment(ver uint32) []byte {
 
 // greatestAt returns the greatest version of the label that exists at log entry
 // `x`, or -1 if no version of the label should exist.
-func (pph *ProducedProofHandle) greatestAt(x uint64) int {
+func (pph *ProducedProofHandle) greatestAt(x uint64) int64 {
 	idx, _ := slices.BinarySearch(pph.index, x+1)
-	return idx - 1
+	return int64(idx) - 1
 }
 
 func (pph *ProducedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error) {
@@ -378,9 +381,9 @@ func (pph *ProducedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit
 		return nil, 0, err
 	}
 	res := 0
-	if greatest < int(ver) {
+	if greatest < int64(ver) {
 		res = -1
-	} else if greatest > int(ver) {
+	} else if greatest > int64(ver) {
 		res = 1
 	}
 
@@ -480,7 +483,7 @@ func (pph *ProducedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64)
 	}, nil
 }
 
-func (pph *ProducedProofHandle) StopCondition(x uint64, ver int) bool {
+func (pph *ProducedProofHandle) StopCondition(x uint64, ver int64) bool {
 	return len(pph.proofs) >= 25 || pph.greatestAt(x) > ver
 }
 

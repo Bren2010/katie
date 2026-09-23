@@ -88,7 +88,7 @@ type updater struct {
 	signedVer *uint32
 
 	index []uint64 // index is the label's index (= position of each version).
-	ver   int      // ver is the next version the user needs to be informed about.
+	ver   int64    // ver is the next version the user needs to be informed about.
 }
 
 func newUpdater(t *Tree, ctx context.Context) *updater {
@@ -115,7 +115,7 @@ func (u *updater) setRequest(req *structs.UpdateRequest) error {
 	u.index = indices[0]
 	u.ver = 0
 	if req.GreatestVersion != nil {
-		u.ver = int(*req.GreatestVersion) + 1
+		u.ver = int64(*req.GreatestVersion) + 1
 	}
 	return nil
 }
@@ -153,7 +153,7 @@ func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
 	u.index = indices[0]
 	u.ver = 0
 	if req.GreatestVersion != nil {
-		u.ver = int(*req.GreatestVersion) + 1
+		u.ver = int64(*req.GreatestVersion) + 1
 	}
 	return nil
 }
@@ -173,7 +173,7 @@ func (u *updater) process() {
 	// If the greatest version that was advertised by the user is less than the
 	// actual greatest version, first push out UpdateResponses for the
 	// unknown versions.
-	for u.ver < len(u.index) {
+	for u.ver < int64(len(u.index)) {
 		out, err := u.next(true)
 		if ok := u.send(wire.UpdateResponse{Out: out, Err: err}); !ok {
 			return
@@ -230,7 +230,7 @@ func (u *updater) process() {
 
 	// Push out the UpdateResponse for our new version of the label, and any
 	// others that were created concurrently.
-	for u.ver < len(u.index) {
+	for u.ver < int64(len(u.index)) {
 		out, err := u.next(u.index[u.ver] != pos)
 		if ok := u.send(wire.UpdateResponse{Out: out, Err: err}); !ok {
 			return
@@ -250,7 +250,7 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	ladder, err := u.ladder(u.ver-len(info), u.ver-1)
+	ladder, err := u.ladder(u.ver-int64(len(info)), u.ver-1)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +304,7 @@ func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []st
 		info   []structs.UpdateInfo
 	)
 
-	for ; u.ver < len(u.index) && u.index[u.ver] == pos; u.ver++ {
+	for ; u.ver < int64(len(u.index)) && u.index[u.ver] == pos; u.ver++ {
 		res, err := u.tree.getVersion(u.label, uint32(u.ver))
 		if err != nil {
 			return nil, nil, err
@@ -325,7 +325,7 @@ func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []st
 // `startVer` was the first new version inserted and `endVer` was the last new
 // version inserted. `startVer` and `endVer` are the same if only one version
 // was inserted.
-func (u *updater) ladder(startVer, endVer int) ([]structs.BinaryLadderStep, error) {
+func (u *updater) ladder(startVer, endVer int64) ([]structs.BinaryLadderStep, error) {
 	versions := updateLadderVersions(uint32(startVer), uint32(endVer))
 	return u.tree.getBinaryLadder(u.label, versions, startVer-1, u.tree.treeHead.TreeSize)
 }

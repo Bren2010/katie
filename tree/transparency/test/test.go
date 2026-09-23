@@ -136,7 +136,7 @@ func (ph *ProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]byte, error
 	return make([]byte, 32), nil
 }
 
-func (ph *ProofHandle) StopCondition(x uint64, ver int) bool {
+func (ph *ProofHandle) StopCondition(x uint64, ver int64) bool {
 	return ph.stopPos > 0 && ph.stopPos <= x
 }
 

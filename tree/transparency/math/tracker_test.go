@@ -17,7 +17,7 @@ func TestSearchMaps(t *testing.T) {
 	}
 	ladder := SearchBinaryLadder(target, greatest1000, left, right)
 	t.Logf("pos=1000 greatest=%v ladder=%v", greatest1000, ladder)
-	tracker.AddLadder(1000, true, int(greatest1000), ladder)
+	tracker.AddLadder(1000, true, int64(greatest1000), ladder)
 
 	left, right = tracker.SearchMaps(2000, true)
 	if len(left) != 3 || len(right) != 0 {
@@ -25,7 +25,7 @@ func TestSearchMaps(t *testing.T) {
 	}
 	ladder = SearchBinaryLadder(target, greatest2000, left, right)
 	t.Logf("pos=2000 greatest=%v ladder=%v", greatest2000, ladder)
-	tracker.AddLadder(2000, true, int(greatest2000), ladder)
+	tracker.AddLadder(2000, true, int64(greatest2000), ladder)
 
 	left, right = tracker.SearchMaps(1500, true)
 	if len(left) != 3 || len(right) != 1 {

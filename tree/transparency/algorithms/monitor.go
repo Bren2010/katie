@@ -48,15 +48,15 @@ type OwnerState struct {
 
 	// VerAtStarting is the version of the label that exists at `starting`, or
 	// -1 if the label didn't exist yet.
-	VerAtStarting int
+	VerAtStarting int64
 	// UpcomingVers is the position of each upcoming new version of the label.
 	UpcomingVers []uint64
 }
 
 func NewOwnerState(from *structs.LabelOwnerState) *OwnerState {
-	verAtStarting := -1
+	verAtStarting := int64(-1)
 	if from.VerAtStarting != nil {
-		verAtStarting = int(*from.VerAtStarting)
+		verAtStarting = int64(*from.VerAtStarting)
 	}
 	return &OwnerState{
 		Starting:      from.Starting,
@@ -84,7 +84,7 @@ func (os *OwnerState) SetStarting(x uint64) {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 
 	os.Starting = x
-	os.VerAtStarting = idx + os.VerAtStarting
+	os.VerAtStarting = int64(idx) + os.VerAtStarting
 	os.UpcomingVers = os.UpcomingVers[idx:]
 }
 
@@ -92,14 +92,14 @@ func (os *OwnerState) SetStarting(x uint64) {
 // been expected to exist at `x`, or -1 if the label didn't exist yet.
 //
 // This is not accurate for `x` values that are to the left of `Starting`.
-func (os *OwnerState) GreatestVersionAt(x uint64) int {
+func (os *OwnerState) GreatestVersionAt(x uint64) int64 {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
-	return idx + os.VerAtStarting
+	return int64(idx) + os.VerAtStarting
 }
 
 // GreatestVersion returns the absolute greatest version of the label known.
-func (os *OwnerState) GreatestVersion() int {
-	return os.VerAtStarting + len(os.UpcomingVers)
+func (os *OwnerState) GreatestVersion() int64 {
+	return os.VerAtStarting + int64(len(os.UpcomingVers))
 }
 
 // LastUpdate returns the position of the last known update, or `Starting` if
@@ -377,9 +377,9 @@ func (m *Monitor) OwnerInit(starting uint64, vers []uint32) ([]uint64, error) {
 	}
 
 	// Setup OwnerState object.
-	verAtStarting := -1
+	verAtStarting := int64(-1)
 	if len(vers) > 0 {
-		verAtStarting = int(vers[0])
+		verAtStarting = int64(vers[0])
 	}
 	m.Owner = &OwnerState{starting, verAtStarting, nil}
 

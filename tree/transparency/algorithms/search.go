@@ -22,7 +22,7 @@ func GreatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 	// distinguished log entries.
 	rightmostDLE, err := RightmostDistinguished(config, n, provider)
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	var x uint64
 	if rightmostDLE != nil {

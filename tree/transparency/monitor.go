@@ -68,7 +68,7 @@ func allLadderVersions(versions []uint32) []uint32 {
 // requested versions. `label` is the label that the binary ladder is for,
 // `greatest` is the greatest version of `label` that exists, and `n` is the
 // size of the tree.
-func (t *Tree) getBinaryLadder(label []byte, versions []uint32, greatest int, n uint64) ([]structs.BinaryLadderStep, error) {
+func (t *Tree) getBinaryLadder(label []byte, versions []uint32, greatest int64, n uint64) ([]structs.BinaryLadderStep, error) {
 	var (
 		// Contains the VRF output for each version. Used to lookup the
 		// commitment to the label's value at that version.
@@ -82,7 +82,7 @@ func (t *Tree) getBinaryLadder(label []byte, versions []uint32, greatest int, n 
 		if err != nil {
 			return nil, err
 		}
-		if int(ver) <= greatest { // Only look up existing versions.
+		if int64(ver) <= greatest { // Only look up existing versions.
 			vrfOutputs = append(vrfOutputs, vrfOutput)
 		}
 		out[i].Proof = proof
@@ -270,16 +270,16 @@ func (t *Tree) OwnerMonitor(
 	// Verify that, if some version of the label existed at `start`, that
 	// `GreatestVersion` is present and greater than or equal to that version.
 	if op.monitor.Owner.VerAtStarting > -1 {
-		if req.GreatestVersion == nil || int(*req.GreatestVersion) < op.monitor.Owner.VerAtStarting {
+		if req.GreatestVersion == nil || int64(*req.GreatestVersion) < op.monitor.Owner.VerAtStarting {
 			return nil, errors.New("version advertised is less than version at starting position")
 		}
 	}
 
 	// Remove any versions that aren't known to the user from `UpcomingVers`.
 	// This ensures that the stopping condition is followed.
-	end := 0
+	end := int64(0)
 	if req.GreatestVersion != nil {
-		end = int(*req.GreatestVersion) - op.monitor.Owner.VerAtStarting
+		end = int64(*req.GreatestVersion) - op.monitor.Owner.VerAtStarting
 	}
 	op.monitor.Owner.UpcomingVers = op.monitor.Owner.UpcomingVers[:end]
 

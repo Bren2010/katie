@@ -156,7 +156,7 @@ func verifyOwnerState(
 	t *testing.T,
 	state *OwnerState,
 	starting uint64,
-	verAtStarting int,
+	verAtStarting int64,
 	upcomingVers []uint64,
 ) {
 	if state == nil {

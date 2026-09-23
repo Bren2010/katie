@@ -133,20 +133,20 @@ func (m *Monitor) Update(pos uint64, versions int) error {
 	}
 
 	greatestVer := m.Owner.GreatestVersion()
-	if val := greatestVer + versions; val < 0 || val >= (1<<32)-1 {
+	endVer := greatestVer + int64(versions)
+	if endVer < 0 || endVer >= 1<<32 {
 		return errors.New("unexpected number of new versions created")
 	}
-	startVer := uint32(greatestVer + 1)
-	endVer := uint32(greatestVer + versions)
+	startVer32, endVer32 := uint32(greatestVer+1), uint32(endVer)
 
 	// Compute the list of versions that were created in this update but that
 	// wouldn't be looked up in a search binary ladder for the greatest version.
 	ladder := make(map[uint32]struct{})
-	for _, ver := range math.SearchBinaryLadder(endVer, endVer, nil, nil) {
+	for _, ver := range math.SearchBinaryLadder(endVer32, endVer32, nil, nil) {
 		ladder[ver] = struct{}{}
 	}
 	additional := make([]uint32, 0)
-	for ver := startVer; ver <= endVer; ver++ {
+	for ver := startVer32; ver <= endVer32; ver++ {
 		if _, ok := ladder[ver]; !ok {
 			additional = append(additional, ver)
 		}
@@ -173,7 +173,7 @@ func (m *Monitor) Update(pos uint64, versions int) error {
 		// Obtain a PrefixProof with a search binary ladder for the new greatest
 		// version, and a PrefixProof with lookups corresponding to any other
 		// new versions that weren't looked up in the search binary ladder.
-		res, err := m.provider.GetSearchBinaryLadder(pos, endVer, true)
+		res, err := m.provider.GetSearchBinaryLadder(pos, endVer32, true)
 		if err != nil {
 			return err
 		} else if res != 0 {
@@ -187,7 +187,7 @@ func (m *Monitor) Update(pos uint64, versions int) error {
 		if m.Contact == nil {
 			m.Contact = &ContactState{Ptrs: make(map[uint64]uint32)}
 		}
-		m.Contact.Ptrs[pos] = endVer
+		m.Contact.Ptrs[pos] = endVer32
 	}
 
 	// Retain the position of the new versions for later verification.
