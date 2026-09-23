@@ -30,7 +30,7 @@ func level(x uint64) uint64 {
 	return k
 }
 
-// Root returns the id of the root node of a tree with n entries.
+// Root returns the id of the root node of a tree with `n` entries.
 func Root(n uint64) uint64 {
 	return (1 << log2(n)) - 1
 }
@@ -67,7 +67,7 @@ func parentStep(x uint64) uint64 {
 	return (x | (1 << k)) ^ (b << (k + 1))
 }
 
-// Parent returns the id of the parent node of x.
+// Parent returns the id of the parent node of `x`.
 func Parent(x, n uint64) uint64 {
 	if x == Root(n) {
 		panic("root node has no parent")

@@ -75,9 +75,14 @@ func NewAuditor(
 	}, nil
 }
 
-// Initialize provides the initial state for the auditor. This must be called if
-// the auditor's starting position is greater than 0; otherwise, the auditor is
-// initialized on the first call to Process with default values.
+// Initialize provides the initial state for the auditor. The values given are
+// the full subtrees of the log tree, the timestamps of the log entries along
+// the frontier, and the root of the prefix tree just before the log entry at
+// `AuditorStartPos` is processed by the auditor.
+//
+// This must be called if the auditor's starting position is greater than 0;
+// otherwise, the auditor is initialized on the first call to Process with
+// default values.
 func (a *Auditor) Initialize(
 	fullSubtrees [][]byte,
 	timestamps []uint64,
@@ -126,6 +131,15 @@ func (a *Auditor) Initialize(
 		inserted: nil,
 	}
 	return nil
+}
+
+// TreeSize returns the greatest tree size processed by the auditor, which is
+// equivalent to the position of the next log entry to process.
+func (a *Auditor) TreeSize() uint64 {
+	if a.state == nil {
+		return 0
+	}
+	return a.state.treeHead.TreeSize
 }
 
 func (a *Auditor) previousRightmost(added uint64) (*uint64, *algorithms.DataProvider, error) {
@@ -226,7 +240,7 @@ func (a *Auditor) updateState(
 // Process takes an AuditorUpdate as input and updates the auditor's internal
 // state, returning an error if any issues with the update were detected. If the
 // update fails to process, no auditor state is changed. Successfully processed
-// updates are not persisted until `Commit` is called.
+// updates are not persisted until Commit is called.
 func (a *Auditor) Process(update *structs.AuditorUpdate) error {
 	if a.state == nil {
 		if a.config.AuditorStartPos > 0 {

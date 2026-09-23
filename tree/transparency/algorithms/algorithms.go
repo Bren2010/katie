@@ -1,3 +1,5 @@
+// Package algorithms implements the core algorithms for searching and modifying
+// a Combined Tree.
 package algorithms
 
 import (

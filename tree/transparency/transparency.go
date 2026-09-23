@@ -1,3 +1,4 @@
+// Package transparency implements the Combined Tree of a Transparency Log.
 package transparency
 
 import (
