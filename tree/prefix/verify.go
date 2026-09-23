@@ -194,12 +194,13 @@ func Verify(cs suites.CipherSuite, entries []Entry, proof *PrefixProof, root []b
 // EvaluateBeforeAfter evaluates `proof` before and after making the requested
 // additions and removals. The leaves that move up in the tree as a result of
 // the mutation, but that aren't on the search path of any added or removed
-// entry, must be provided in `leaves`.
+// entry, must be provided in `leaves`. If `add` and `remove` are both empty,
+// the two root values returned are the same.
 func EvaluateBeforeAfter(cs suites.CipherSuite, add, remove, leaves []Entry, proof *PrefixProof) ([]byte, []byte, error) {
 	// Verify that the provided entries are well-formed. Compute the added
 	// entries and removed VRF outputs to use to evaluate the "before" proof.
-	if len(add) == 0 && len(remove) == 0 {
-		return nil, nil, errors.New("no mutations requested")
+	if len(proof.Results) != len(add)+len(remove)+len(leaves) {
+		return nil, nil, errors.New("number of entries searched for does not match number of results")
 	}
 
 	var (

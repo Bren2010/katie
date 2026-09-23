@@ -88,15 +88,12 @@ type MutateResult struct {
 // the version counter. The current tree version is given in `ver`, which is 0
 // if the tree is empty. After this, version `ver+1` of the tree will exist.
 //
-// The inputs `add` and `remove` must not both be empty, must not have any
-// duplicate VRF outputs (although a VRF output in one may also be in the
-// other), and must be sorted by VRF output.
+// The inputs `add` and `remove` must not have any duplicate VRF outputs
+// (although a VRF output in one may also be in the other), and must be sorted
+// by VRF output. They may both be empty, in which case the new version of the
+// tree has the same contents as the current version.
 func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) (*MutateResult, error) {
 	// Verify that the entries to add and remove are well formed.
-	if len(add) == 0 && len(remove) == 0 {
-		return nil, errors.New("no mutations requested")
-	}
-
 	vrfOutputs := make([][]byte, 0, len(add)+len(remove))
 	for i, entry := range add {
 		if len(entry.VrfOutput) != t.cs.HashSize() {
@@ -166,6 +163,21 @@ func (t *Tree) Mutate(ver uint64, add []Entry, remove [][]byte) (*MutateResult, 
 func (t *Tree) getMutationRoot(ver uint64, vrfOutputs [][]byte) (node, error) {
 	if ver == 0 {
 		return emptyNode{}, nil
+	} else if len(vrfOutputs) == 0 {
+		// A batch search with nothing to search for doesn't load any tiles, but
+		// the root tile is still needed to know the root value of the tree.
+		id := tileId{ver: ver, ctr: 0}
+		data, err := t.tx.BatchGet([]string{id.String()})
+		if err != nil {
+			return nil, err
+		} else if len(data) != 1 || data[0] == nil {
+			return nil, errors.New("root tile not found")
+		}
+		root, err := unmarshalTile(t.cs, id, data[0])
+		if err != nil {
+			return nil, err
+		}
+		return root.root, nil
 	}
 	b := newBatch(t.cs, t.tx)
 	res, state := b.initialize(map[uint64][][]byte{ver: vrfOutputs})

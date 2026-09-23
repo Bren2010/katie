@@ -306,16 +306,68 @@ func TestSearchMultipleVersion(t *testing.T) {
 	}
 }
 
-// TestEmptyMutateFails checks that a mutation must add or remove something.
-func TestEmptyMutateFails(t *testing.T) {
+// TestEmptyMutate checks that a mutation that doesn't add or remove anything
+// creates a new version of the tree with the same contents, and that the
+// mutation's proof evaluates to the unchanged root value.
+func TestEmptyMutate(t *testing.T) {
 	cs := suites.KTSha256P256{}
-	tree := NewTree(cs, memPrefixStore())
 
-	if _, err := tree.Mutate(0, []Entry{{makeBytes(0x00), makeBytes(0x11)}}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tree.Mutate(1, nil, nil); err == nil {
-		t.Fatal("mutate did not return error when it should have")
+	for _, size := range []int{1, 500} {
+		tree := NewTree(cs, memPrefixStore())
+
+		// An empty mutation of an empty tree.
+		mut, err := tree.Mutate(0, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(mut.Root, make([]byte, cs.HashSize())) {
+			t.Fatal("unexpected root value for empty tree")
+		}
+		checkMutationProof(t, cs, make([]byte, cs.HashSize()), nil, nil, mut)
+
+		entries := make([]Entry, size)
+		for i := range entries {
+			vrfOutput, commitment := randomBytes(), randomBytes()
+			entries[i] = Entry{vrfOutput[:], commitment[:]}
+		}
+		sortEntries(entries)
+		mut, err = tree.Mutate(1, entries, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := mut.Root
+
+		// Empty mutations of a non-empty tree, twice in a row so that the
+		// second loads a root tile that was written by an empty mutation.
+		for ver := uint64(2); ver < 4; ver++ {
+			mut, err := tree.Mutate(ver, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			} else if !bytes.Equal(mut.Root, root) {
+				t.Fatal("empty mutation changed the root value")
+			}
+			checkMutationProof(t, cs, root, nil, nil, mut)
+		}
+
+		// Search the version of the tree created by the empty mutations.
+		selected := []Entry{entries[0], entries[size-1]}
+		res, err := tree.Search([]PrefixSearch{{4, [][]byte{selected[0].VrfOutput, selected[1].VrfOutput}}})
+		if err != nil {
+			t.Fatal(err)
+		} else if err := Verify(cs, selected, &res[0].Proof, root); err != nil {
+			t.Fatal(err)
+		}
+
+		// Mutate the version of the tree created by the empty mutations.
+		add := []Entry{{makeBytes(0x55), makeBytes(0x66)}}
+		remove := [][]byte{entries[0].VrfOutput}
+		if bytes.Equal(remove[0], add[0].VrfOutput) {
+			t.Fatal("unexpected vrf output collision")
+		}
+		mut, err = tree.Mutate(4, add, remove)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkMutationProof(t, cs, root, add, remove, mut)
 	}
 }
 

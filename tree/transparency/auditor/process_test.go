@@ -670,3 +670,34 @@ func TestNonZeroStartRemovalWindow(t *testing.T) {
 
 	sim.checkTreeHead(mustCommit(t, auditor))
 }
+
+// TestProcessEmptyUpdate checks that the auditor accepts log entries that don't
+// modify the prefix tree, both when the prefix tree is empty and when it isn't,
+// and that it still verifies the prefix tree root of such entries.
+func TestProcessEmptyUpdate(t *testing.T) {
+	sim, auditor := newTestAuditor(t, 0, true)
+
+	mustProcess(t, auditor, sim.append(slow(0), 0))
+	mustProcess(t, auditor, sim.append(slow(1), 2))
+	mustProcess(t, auditor, sim.append(slow(2), 0))
+	sim.checkTreeHead(mustCommit(t, auditor))
+
+	// An empty update that claims the wrong prior root is rejected.
+	update := sim.propose(slow(3), 0).update
+	tampered := *update
+	tampered.Proof.Elements = [][]byte{randomHash()}
+	if err := auditor.Process(&tampered); err == nil {
+		t.Fatal("auditor accepted an empty update with the wrong prefix tree root")
+	}
+
+	// An empty update can't move any leaves.
+	tampered = *update
+	tampered.Leaves = []prefix.Entry{{VrfOutput: sim.leaf(1, 0), Commitment: randomHash()}}
+	if err := auditor.Process(&tampered); err == nil {
+		t.Fatal("auditor accepted an empty update that moves a leaf")
+	}
+
+	mustProcess(t, auditor, update)
+	sim.accept(&proposal{update: update, root: sim.prefixRoots[sim.size()-1]})
+	sim.checkTreeHead(mustCommit(t, auditor))
+}

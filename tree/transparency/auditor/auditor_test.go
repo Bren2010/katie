@@ -218,3 +218,22 @@ func TestAuditorRetainsRecentInsertions(t *testing.T) {
 		t.Fatal("test did not exercise any retained insertions")
 	}
 }
+
+// TestAuditorEmptyLogEntry checks that the auditor accepts a log entry that the
+// Transparency Log adds without modifying the prefix tree.
+func TestAuditorEmptyLogEntry(t *testing.T) {
+	_, _, tree, auditor := makeAuditor(t)
+
+	update, err := tree.Mutate(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	} else if err := auditor.Process(update); err != nil {
+		t.Fatal(err)
+	}
+	head, err := auditor.Commit()
+	if err != nil {
+		t.Fatal(err)
+	} else if head.TreeSize != tree.TreeHead().TreeSize {
+		t.Fatal("auditor tree size does not match transparency log")
+	}
+}

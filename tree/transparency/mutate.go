@@ -15,7 +15,8 @@ import (
 
 // Mutate takes as input a set of new label-value pairs to insert, and a set of
 // existing label-version pairs to remove. Version counters are automatically
-// assigned/unassigned.
+// assigned/unassigned. Both `add` and `remove` may be empty, in which case a
+// new log entry is added without modifying the prefix tree.
 //
 // It returns the AuditorUpdate structure for the Third-Party Auditor, if any.
 func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate, error) {
@@ -174,6 +175,11 @@ func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]pref
 		// the last distinguished log entry was created.
 		if prevDLE == nil || index[len(index)-1] > *prevDLE {
 			return nil, nil, fmt.Errorf("unable to delete label that was modified recently: %s", label)
+		}
+		// A Third-Party Auditor can only verify that a label was published in
+		// a distinguished log entry if it processed that log entry.
+		if t.config.Mode == structs.ThirdPartyAuditing && *prevDLE < t.config.AuditorStartPos {
+			return nil, nil, fmt.Errorf("unable to delete label before auditor has processed a distinguished log entry: %s", label)
 		}
 
 		// Delete the label's index.
