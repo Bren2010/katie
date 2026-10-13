@@ -15,10 +15,9 @@ var (
 	ErrLabelExpired  = errors.New("requested version of label has expired")
 )
 
-func noLeftChild(x uint64) bool      { return math.IsLeaf(x) }
-func hasLeftChild(x uint64) bool     { return !noLeftChild(x) }
-func noRightChild(x, n uint64) bool  { return math.IsLeaf(x) || x == n-1 }
-func hasRightChild(x, n uint64) bool { return !noRightChild(x, n) }
+func noLeftChild(x uint64) bool     { return math.IsLeaf(x) }
+func hasLeftChild(x uint64) bool    { return !noLeftChild(x) }
+func noRightChild(x, n uint64) bool { return math.IsLeaf(x) || x == n-1 }
 
 // RightmostDistinguished returns the position of the rightmost distinguished
 // log entry, or nil if there is none. The public config for the Transparency

@@ -2,6 +2,7 @@ package algorithms
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"slices"
 
@@ -16,13 +17,8 @@ type sortableLogLeaf struct {
 	structs.LogEntry
 }
 
-func sortLogLeaf(a, b sortableLogLeaf) int {
-	if a.position < b.position {
-		return -1
-	} else if a.position > b.position {
-		return 1
-	}
-	return 0
+func compareLogLeaf(a, b sortableLogLeaf) int {
+	return cmp.Compare(a.position, b.position)
 }
 
 func addTimestamp(collection map[uint64]uint64, pos1, ts1 uint64) error {
@@ -140,18 +136,19 @@ func (dp *DataProvider) GetInclusionProof(x uint64, vers []uint32) error {
 func (dp *DataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	leaves := make([]sortableLogLeaf, 0)
 
-	// Put together initial list of leaves that were inspected by our proof and
-	// sort them.
+	// Put together the initial list of leaves that were inspected by our proof
+	// and sort them.
 	for x, ts := range dp.timestamps {
 		if _, ok := dp.logEntries[x]; ok {
 			continue
 		}
 		leaves = append(leaves, sortableLogLeaf{
-			position: x,
-			LogEntry: structs.LogEntry{Timestamp: ts, PrefixTree: dp.prefixTrees[x]},
+			position:   x,
+			Timestamp:  ts,
+			PrefixTree: dp.prefixTrees[x],
 		})
 	}
-	slices.SortFunc(leaves, sortLogLeaf)
+	slices.SortFunc(leaves, compareLogLeaf)
 
 	// Identify the leaves that we have only the timestamp for.
 	empty := make([]uint64, 0)
