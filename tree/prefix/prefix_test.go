@@ -313,7 +313,8 @@ func TestEmptyMutate(t *testing.T) {
 	cs := suites.KTSha256P256{}
 
 	for _, size := range []int{1, 500} {
-		tree := NewTree(cs, memPrefixStore())
+		store := memPrefixStore()
+		tree := NewTree(cs, store)
 
 		// An empty mutation of an empty tree.
 		mut, err := tree.Mutate(0, nil, nil)
@@ -346,6 +347,24 @@ func TestEmptyMutate(t *testing.T) {
 				t.Fatal("empty mutation changed the root value")
 			}
 			checkMutationProof(t, cs, root, nil, nil, mut)
+
+			// The new root tile should point directly to the root tile of the
+			// last non-empty version, rather than to the previous empty one.
+			id := tileId{ver: ver + 1, ctr: 0}
+			data, err := store.BatchGet([]string{id.String()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tile, err := unmarshalTile(cs, id, data[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if size > 1 {
+				ext, ok := tile.root.(externalNode)
+				if !ok || ext.id != (tileId{ver: 2, ctr: 0}) {
+					t.Fatalf("unexpected root tile for empty mutation: %v", tile.root)
+				}
+			}
 		}
 
 		// Search the version of the tree created by the empty mutations.
