@@ -40,7 +40,7 @@ func main() {
 	go metrics(config.MetricsAddr)
 
 	// Start the inserter thread.
-	tx, err := db.NewLDBTransparencyStore(config.DatabaseFile)
+	tx, err := db.NewPDBTransparencyStore(config.DatabaseFile)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}

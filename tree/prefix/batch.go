@@ -2,10 +2,16 @@ package prefix
 
 import (
 	"errors"
+	"runtime"
+	"sync"
 
 	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/db"
 )
+
+// tilesPerWorker is the minimum number of tiles each goroutine is given to
+// parse, to avoid spawning goroutines for small amounts of work.
+const tilesPerWorker = 64
 
 func getBit(data []byte, bit int) bool {
 	return (data[bit/8]>>(7-(bit%8)))&1 == 1
@@ -118,12 +124,26 @@ func (b *batch) get(nextSteps map[*cursor]nextStep) (map[tileId]*tile, error) {
 		return nil, err
 	}
 
+	// Parsing tiles is CPU-intensive enough that it's worth spreading across
+	// cores when a large number of tiles were fetched.
+	tiles := make([]tile, len(ids))
+	errs := make([]error, len(ids))
+	workers := min(runtime.GOMAXPROCS(0), (len(ids)+tilesPerWorker-1)/tilesPerWorker)
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			for i := w; i < len(ids); i += workers {
+				tiles[i], errs[i] = unmarshalTile(b.cs, ids[i], data[i])
+			}
+		})
+	}
+	wg.Wait()
+
 	for i, id := range ids {
-		t, err := unmarshalTile(b.cs, id, data[i])
-		if err != nil {
-			return nil, err
+		if errs[i] != nil {
+			return nil, errs[i]
 		}
-		out[id], b.cache[id] = &t, &t
+		out[id], b.cache[id] = &tiles[i], &tiles[i]
 	}
 	return out, nil
 }
