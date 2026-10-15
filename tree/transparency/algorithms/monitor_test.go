@@ -112,6 +112,22 @@ func TestContactMonitoring(t *testing.T) {
 	if err.Error() != "monitoring detected versions that are not monotonic" {
 		t.Fatalf("unexpected error returned: %v", err)
 	}
+
+	// TEST BLOCK 5: When a monitoring path ends at a log entry that is already
+	// in the monitoring state without a new binary ladder (because it's a
+	// non-distinguished frontier log entry), the greater version is retained.
+	res, err = runTest(testVector{
+		state: &ContactState{Ptrs: map[uint64]uint32{70: 1, 95: 2}},
+		tsMap: tsMap,
+
+		requests:       []uint64{63, 95, 99, 71, 79},
+		monitorLadders: []uint64{71, 79},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Ptrs) != 1 || res.Ptrs[95] != 2 {
+		t.Fatalf("unexpected monitoring state output: %v", res.Ptrs)
+	}
 }
 
 func TestInitEntries(t *testing.T) {

@@ -2,6 +2,7 @@ package algorithms
 
 import (
 	"errors"
+	"maps"
 	"slices"
 
 	"github.com/Bren2010/katie/tree/transparency/math"
@@ -45,7 +46,6 @@ type OwnerState struct {
 	// Starting is the position of the rightmost distinguished log entry that
 	// has been verified by owner monitoring.
 	Starting uint64
-
 	// VerAtStarting is the version of the label that exists at `starting`, or
 	// -1 if the label didn't exist yet.
 	VerAtStarting int64
@@ -84,7 +84,7 @@ func (os *OwnerState) SetStarting(x uint64) {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 
 	os.Starting = x
-	os.VerAtStarting = int64(idx) + os.VerAtStarting
+	os.VerAtStarting += int64(idx)
 	os.UpcomingVers = os.UpcomingVers[idx:]
 }
 
@@ -94,7 +94,7 @@ func (os *OwnerState) SetStarting(x uint64) {
 // This is not accurate for `x` values that are to the left of `Starting`.
 func (os *OwnerState) GreatestVersionAt(x uint64) int64 {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
-	return int64(idx) + os.VerAtStarting
+	return os.VerAtStarting + int64(idx)
 }
 
 // GreatestVersion returns the absolute greatest version of the label known.
@@ -113,8 +113,7 @@ func (os *OwnerState) LastUpdate() uint64 {
 
 func (os *OwnerState) Clone() *OwnerState {
 	return &OwnerState{
-		Starting: os.Starting,
-
+		Starting:      os.Starting,
 		VerAtStarting: os.VerAtStarting,
 		UpcomingVers:  slices.Clone(os.UpcomingVers),
 	}
@@ -191,7 +190,7 @@ func (m *Monitor) distinguishedAncestor(target uint64) (*uint64, error) {
 	return &distinguished[len(distinguished)-1], nil
 }
 
-func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint32) (*uint64, error) {
+func (m *Monitor) contactMonitor(x uint64, ver uint32, received map[uint64]uint32) (*uint64, error) {
 	// Determine whether this log entry is distinguished, or what the first
 	// distinguished log entry on its direct path and to its right is.
 	stop, err := m.distinguishedAncestor(x)
@@ -220,9 +219,9 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint3
 
 	// For each log entry in the computed list:
 	for _, y := range inspect {
-		// If a binary ladder was already provided from this log entry, verify
+		// If a binary ladder was already received from this log entry, verify
 		// that it was for a greater version.
-		if previousVer, ok := previous[y]; ok {
+		if previousVer, ok := received[y]; ok {
 			if previousVer <= ver {
 				return nil, errors.New("monitoring detected versions that are not monotonic")
 			}
@@ -232,7 +231,7 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, previous map[uint64]uint3
 		if err := m.provider.GetMonitoringBinaryLadder(y, ver); err != nil {
 			return nil, err
 		}
-		previous[y] = ver
+		received[y] = ver
 	}
 
 	if stop != nil { // We reached a distinguished log entry.
@@ -260,13 +259,19 @@ func (m *Monitor) ContactMonitor() error {
 	slices.Sort(logEntries)
 	slices.Reverse(logEntries)
 
+	// Setup our deduplication map of log entries that we've already received a
+	// binary ladder from. This is initialized with the current value of
+	// m.Contact.Ptrs to catch the case where one monitoring path ends where
+	// another one starts.
+	received := make(map[uint64]uint32)
+	maps.Copy(received, m.Contact.Ptrs)
+
 	// For each log entry in `logEntries`, monitor that version of the label.
-	previous := make(map[uint64]uint32)
 	ptrs := make(map[uint64]uint32)
 	for _, x := range logEntries {
 		ver := m.Contact.Ptrs[x]
 
-		updated, err := m.contactMonitor(x, ver, previous)
+		updated, err := m.contactMonitor(x, ver, received)
 		if err != nil {
 			return err
 		} else if updated != nil {

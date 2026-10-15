@@ -44,10 +44,29 @@ func (c *Config) IsDistinguished(left, right uint64) bool {
 	return right-left >= c.ReasonableMonitoringWindow
 }
 
+// DefaultMaxMonitoringProofs is the maximum number of prefix proofs included in
+// a monitoring response when PrivateConfig.MaxMonitoringProofs is unset.
+const DefaultMaxMonitoringProofs = 25
+
 type PrivateConfig struct {
 	SignatureKey suites.SigningPrivateKey
 	VrfKey       vrf.PrivateKey
 	Config
+
+	// MaxMonitoringProofs is the maximum number of prefix proofs included in a
+	// single monitoring response, after which owner monitoring is paginated.
+	// It is a local setting and not part of the public config. Set to 0 to use
+	// DefaultMaxMonitoringProofs.
+	MaxMonitoringProofs int
+}
+
+// MonitoringProofLimit returns the maximum number of prefix proofs to include
+// in a monitoring response.
+func (pc *PrivateConfig) MonitoringProofLimit() int {
+	if pc.MaxMonitoringProofs == 0 {
+		return DefaultMaxMonitoringProofs
+	}
+	return pc.MaxMonitoringProofs
 }
 
 func (pc *PrivateConfig) Public() *PublicConfig {

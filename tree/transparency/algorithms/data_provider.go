@@ -176,9 +176,11 @@ func (dp *DataProvider) inspectedLeaves() ([]sortableLogLeaf, error) {
 	return leaves, nil
 }
 
+// ProofResult contains the state derived from successfully evaluating a
+// CombinedTreeProof, which the user retains for future proofs.
 type ProofResult struct {
 	FullSubtrees [][]byte                    // The full subtrees for the user to retain.
-	Additional   [][]byte                    // The additional tree head, if requested.
+	Additional   [][]byte                    // The full subtrees of the additional tree size, if requested.
 	LogEntries   map[uint64]structs.LogEntry // Log entries for the user to retain.
 }
 

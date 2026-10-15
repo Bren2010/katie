@@ -124,6 +124,7 @@ func (t *Tree) startMonitor(last *uint64, label []byte) (*monitorOp, error) {
 	index := indices[0]
 
 	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, index)
+	handle.SetMaxProofs(t.config.MonitoringProofLimit())
 	provider := algorithms.NewDataProvider(t.config.Suite, handle)
 
 	if err := t.updateView(last, provider); err != nil {

@@ -29,6 +29,10 @@ func addVersion(
 	return nil
 }
 
+// ProofHandle abstracts over whether a CombinedTreeProof is being produced
+// (by the server, from the database) or consumed (by a client, from a received
+// proof). The algorithm implementations call its methods in the same order in
+// both cases, which keeps proof production and verification in sync.
 type ProofHandle interface {
 	// GetTimestamp takes as input the position of a log entry and returns the
 	// timestamp of the log entry.
@@ -73,7 +77,7 @@ type ProofHandle interface {
 	Tracker() *math.VersionTracker
 }
 
-// ReceivedProofHandle implements the proofHandle interface over a
+// ReceivedProofHandle implements the ProofHandle interface over a
 // CombinedTreeProof that was received and is being evaluated.
 type ReceivedProofHandle struct {
 	cs    suites.CipherSuite
@@ -113,7 +117,6 @@ func (rph *ReceivedProofHandle) GetTimestamp(x uint64) (uint64, error) {
 }
 
 func (rph *ReceivedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
-	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, 0, errors.New("unexpected number of prefix proofs consumed")
 	}
@@ -130,12 +133,10 @@ func (rph *ReceivedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit
 
 	// Put together the prefix.Entry structures we'll need for proof evaluation.
 	entries := make([]prefix.Entry, len(proof.Results))
-	for i, result := range proof.Results {
+	for i := range proof.Results {
 		entry, ok := rph.versions[ladder[i]]
 		if !ok {
 			return nil, 0, errors.New("required version not known")
-		} else if result.Inclusion() && entry.Commitment == nil {
-			return nil, 0, errors.New("commitment not known for required version")
 		}
 		entries[i] = entry
 	}
@@ -152,7 +153,6 @@ func (rph *ReceivedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit
 }
 
 func (rph *ReceivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
-	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, errors.New("unexpected number of prefix proofs consumed")
 	}
@@ -176,8 +176,6 @@ func (rph *ReceivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 		entry, ok := rph.versions[version]
 		if !ok {
 			return nil, errors.New("required version not known")
-		} else if entry.Commitment == nil {
-			return nil, errors.New("commitment not known for required version")
 		}
 		entries[i] = entry
 	}
@@ -191,7 +189,6 @@ func (rph *ReceivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 }
 
 func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]byte, error) {
-	// Pop next PrefixProof off of queue.
 	if len(rph.inner.PrefixProofs) == 0 {
 		return nil, errors.New("unexpected number of prefix proofs consumed")
 	}
@@ -213,8 +210,6 @@ func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]by
 		entry, ok := rph.versions[ver]
 		if !ok {
 			return nil, errors.New("required version not known")
-		} else if entry.Commitment == nil {
-			return nil, errors.New("commitment not known for required version")
 		}
 		entries[i] = entry
 	}
@@ -228,9 +223,6 @@ func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]by
 }
 
 func (rph *ReceivedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
-	if len(xs) != len(rph.inner.PrefixRoots) {
-		return nil, errors.New("unexpected number of prefix tree roots requested")
-	}
 	roots := rph.inner.PrefixRoots
 	rph.inner.PrefixRoots = nil
 	return roots, nil
@@ -264,12 +256,13 @@ type requiredProof struct {
 	vers []uint32
 }
 
-// ProducedProofHandle implements the proofHandle interface such that it can
+// ProducedProofHandle implements the ProofHandle interface such that it can
 // output the corresponding CombinedTreeProof.
 type ProducedProofHandle struct {
-	cs    suites.CipherSuite
-	tx    db.TransparencyStore
-	index []uint64
+	cs        suites.CipherSuite
+	tx        db.TransparencyStore
+	index     []uint64
+	maxProofs int
 
 	logEntries map[uint64]structs.LogEntry
 	versions   map[uint32]prefix.Entry
@@ -295,17 +288,19 @@ func NewProducedProofHandle(
 	}
 }
 
+// SetMaxProofs sets the maximum number of prefix proofs to include before
+// StopCondition returns true. A value of 0 means there is no limit.
+func (pph *ProducedProofHandle) SetMaxProofs(n int) { pph.maxProofs = n }
+
 // RequiredVersions returns the set of versions for which AddVersion must be
 // called with the corresponding VRF output for Output to return successfully.
 func (pph *ProducedProofHandle) RequiredVersions() map[uint32]struct{} {
 	accumulator := make(map[uint32]struct{})
-
 	for _, proof := range pph.proofs {
 		for _, ver := range proof.vers {
 			accumulator[ver] = struct{}{}
 		}
 	}
-
 	return accumulator
 }
 
@@ -328,37 +323,52 @@ func (pph *ProducedProofHandle) greatestAt(x uint64) int64 {
 	return int64(idx) - 1
 }
 
-func (pph *ProducedProofHandle) getLogEntry(x uint64) (*structs.LogEntry, error) {
-	if entry, ok := pph.logEntries[x]; ok {
-		return &entry, nil
+// getLogEntries returns the log entries at the given positions, fetching any
+// that are not already cached from the database in a single batch.
+func (pph *ProducedProofHandle) getLogEntries(xs []uint64) ([]structs.LogEntry, error) {
+	// Determine which log entries need to be fetched from the database.
+	missing := make([]uint64, 0)
+	for _, x := range xs {
+		if _, ok := pph.logEntries[x]; !ok {
+			missing = append(missing, x)
+		}
 	}
 
-	res, err := pph.tx.BatchGet([]uint64{x})
-	if err != nil {
-		return nil, err
-	}
-	raw := res[0]
-	if raw == nil {
-		return nil, errors.New("requested log entry not found")
+	if len(missing) > 0 {
+		res, err := pph.tx.BatchGet(missing)
+		if err != nil {
+			return nil, err
+		} else if len(res) != len(missing) {
+			return nil, errors.New("unexpected number of log entries returned")
+		}
+		for i, raw := range res {
+			if raw == nil {
+				return nil, errors.New("requested log entry not found")
+			}
+			buf := bytes.NewBuffer(raw)
+			entry, err := structs.NewLogEntry(pph.cs, buf)
+			if err != nil {
+				return nil, err
+			} else if buf.Len() != 0 {
+				return nil, errors.New("unexpected data appended to log entry")
+			}
+			pph.logEntries[missing[i]] = *entry
+		}
 	}
 
-	buf := bytes.NewBuffer(raw)
-	entry, err := structs.NewLogEntry(pph.cs, buf)
-	if err != nil {
-		return nil, err
-	} else if buf.Len() != 0 {
-		return nil, errors.New("unexpected data appended to log entry")
+	entries := make([]structs.LogEntry, len(xs))
+	for i, x := range xs {
+		entries[i] = pph.logEntries[x]
 	}
-	pph.logEntries[x] = *entry
-
-	return entry, nil
+	return entries, nil
 }
 
 func (pph *ProducedProofHandle) GetTimestamp(x uint64) (uint64, error) {
-	entry, err := pph.getLogEntry(x)
+	entries, err := pph.getLogEntries([]uint64{x})
 	if err != nil {
 		return 0, err
 	}
+	entry := entries[0]
 	pph.timestamps = append(pph.timestamps, entry.Timestamp)
 	return entry.Timestamp, nil
 }
@@ -376,10 +386,11 @@ func (pph *ProducedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit
 	}
 
 	// Determine the prefix tree root and the result of the search.
-	entry, err := pph.getLogEntry(x)
+	entries, err := pph.getLogEntries([]uint64{x})
 	if err != nil {
 		return nil, 0, err
 	}
+	entry := entries[0]
 	res := 0
 	if greatest < int64(ver) {
 		res = -1
@@ -393,31 +404,33 @@ func (pph *ProducedProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit
 }
 
 func (pph *ProducedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
-	entry, err := pph.getLogEntry(x)
+	entries, err := pph.getLogEntries([]uint64{x})
 	if err != nil {
 		return nil, err
 	}
+	entry := entries[0]
 	ladder := math.MonitoringBinaryLadder(ver)
 	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: ladder})
 	return entry.PrefixTree, nil
 }
 
 func (pph *ProducedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]byte, error) {
-	entry, err := pph.getLogEntry(x)
+	entries, err := pph.getLogEntries([]uint64{x})
 	if err != nil {
 		return nil, err
 	}
+	entry := entries[0]
 	pph.proofs = append(pph.proofs, requiredProof{pos: x, vers: slices.Clone(vers)})
 	return entry.PrefixTree, nil
 }
 
 func (pph *ProducedProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {
-	roots := make([][]byte, len(xs))
-	for i, x := range xs {
-		entry, err := pph.getLogEntry(x)
-		if err != nil {
-			return nil, err
-		}
+	entries, err := pph.getLogEntries(xs)
+	if err != nil {
+		return nil, err
+	}
+	roots := make([][]byte, len(entries))
+	for i, entry := range entries {
 		roots[i] = entry.PrefixTree
 	}
 	pph.roots = roots
@@ -484,7 +497,10 @@ func (pph *ProducedProofHandle) Output(leaves []uint64, n uint64, nP, m *uint64)
 }
 
 func (pph *ProducedProofHandle) StopCondition(x uint64, ver int64) bool {
-	return len(pph.proofs) >= 25 || pph.greatestAt(x) > ver
+	if pph.maxProofs > 0 && len(pph.proofs) >= pph.maxProofs {
+		return true
+	}
+	return pph.greatestAt(x) > ver
 }
 
 func (pph *ProducedProofHandle) Tracker() *math.VersionTracker { return &pph.tracker }
