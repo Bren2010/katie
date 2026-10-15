@@ -111,14 +111,6 @@ func (os *OwnerState) LastUpdate() uint64 {
 	return os.Starting
 }
 
-func (os *OwnerState) Clone() *OwnerState {
-	return &OwnerState{
-		Starting:      os.Starting,
-		VerAtStarting: os.VerAtStarting,
-		UpcomingVers:  slices.Clone(os.UpcomingVers),
-	}
-}
-
 // Monitor wraps the state that needs to be passed in to a monitoring operation.
 type Monitor struct {
 	config    *structs.PublicConfig
@@ -395,8 +387,9 @@ func (m *Monitor) OwnerInit(starting uint64, vers []uint32) ([]uint64, error) {
 // entry that is to the right of `owner.state.Starting`, and requests a search
 // binary ladder from each of them for the expected greatest version of the
 // label. `x` is the current log entry, `left` and `right` are the bounds used
-// for determining distinguished status.
-func (m *Monitor) ownerMonitor(x, left, right uint64) error {
+// for determining distinguished status. The position of the rightmost log entry
+// verified so far is written to `verified`. The owner's state is not modified.
+func (m *Monitor) ownerMonitor(x, left, right uint64, verified *uint64) error {
 	// If the current log entry is not distinguished, stop.
 	if !m.config.IsDistinguished(left, right) {
 		return nil
@@ -412,7 +405,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) error {
 		if err != nil {
 			return err
 		}
-		return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right)
+		return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right, verified)
 	}
 
 	// If the current log entry has a left child, recurse to the left child.
@@ -420,7 +413,9 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) error {
 		timestamp, err := m.provider.GetTimestamp(x)
 		if err != nil {
 			return err
-		} else if err := m.ownerMonitor(math.Left(x), left, timestamp); err != nil {
+		}
+		err = m.ownerMonitor(math.Left(x), left, timestamp, verified)
+		if err != nil {
 			return err
 		}
 	}
@@ -449,7 +444,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) error {
 			return errors.New("binary ladder inconsistent with expected greatest version of label")
 		}
 	}
-	m.Owner.SetStarting(x)
+	*verified = x
 
 	// If the current log entry has a right child, recurse to the right child.
 	if noRightChild(x, m.treeSize) {
@@ -459,7 +454,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) error {
 	if err != nil {
 		return err
 	}
-	return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right)
+	return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right, verified)
 }
 
 // OwnerMonitor performs owner monitoring, ensuring that the label has not been
@@ -470,17 +465,13 @@ func (m *Monitor) OwnerMonitor() error {
 	if m.Owner == nil {
 		return errors.New("label owner state has not been initialized")
 	}
-	// Set m.Owner to be a clone of its current value. If the operation as a
-	// whole succeeds, adopt the modifications to the clone. If it fails, keep
-	// the original state.
-	original := m.Owner
-	m.Owner = original.Clone()
 
-	err := m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost)
-	if err == nil {
-		*original = *m.Owner
+	verified := m.Owner.Starting
+	err := m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost, &verified)
+	if err != nil {
+		return err
 	}
+	m.Owner.SetStarting(verified)
 
-	m.Owner = original
-	return err
+	return nil
 }
