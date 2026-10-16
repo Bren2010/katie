@@ -1,8 +1,8 @@
 package algorithms
 
 import (
+	"cmp"
 	"errors"
-	"maps"
 	"slices"
 
 	"github.com/Bren2010/katie/tree/transparency/math"
@@ -12,33 +12,37 @@ import (
 // ContactState wraps the state maintained by a user that has looked up
 // (potentially multiple versions of) a single label.
 type ContactState struct {
-	// Ptrs is a map from log entry to the greatest version of the label that's
-	// been proven to exist at that point.
-	Ptrs map[uint64]uint32
+	// Entries contains a slice of log entries and the greatest version of the
+	// label that's been proven to exist at that point. It is sorted by
+	// position and no position is duplicate.
+	Entries []structs.MonitorMapEntry
 }
 
 func NewContactState(entries []structs.MonitorMapEntry) *ContactState {
-	ptrs := make(map[uint64]uint32)
-	for _, entry := range entries {
-		ptrs[entry.Position] = entry.Version
-	}
-	return &ContactState{Ptrs: ptrs}
+	sorted := slices.Clone(entries)
+	slices.SortFunc(sorted, func(a, b structs.MonitorMapEntry) int {
+		return cmp.Compare(a.Position, b.Position)
+	})
+	return &ContactState{Entries: slices.Clone(entries)}
 }
 
-func (cs *ContactState) Struct() []structs.MonitorMapEntry {
-	out := make([]structs.MonitorMapEntry, 0, len(cs.Ptrs))
-	for pos, ver := range cs.Ptrs {
-		out = append(out, structs.MonitorMapEntry{Position: pos, Version: ver})
-	}
-	slices.SortFunc(out, func(a, b structs.MonitorMapEntry) int {
-		if a.Position < b.Position {
-			return -1
-		} else if a.Position > b.Position {
-			return 1
-		}
-		return 0
+// find returns the index of the entry for log entry `pos` and true if one
+// exists, or the index where it would be inserted and false if not.
+func (cs *ContactState) find(pos uint64) (int, bool) {
+	return slices.BinarySearchFunc(cs.Entries, pos, func(entry structs.MonitorMapEntry, pos uint64) int {
+		return cmp.Compare(entry.Position, pos)
 	})
-	return out
+}
+
+// Set sets the version of the label for log entry `pos`, adding an entry for
+// it if one doesn't exist.
+func (cs *ContactState) Set(pos uint64, ver uint32) {
+	i, ok := cs.find(pos)
+	if ok {
+		cs.Entries[i].Version = ver
+	} else {
+		cs.Entries = slices.Insert(cs.Entries, i, structs.MonitorMapEntry{Position: pos, Version: ver})
+	}
 }
 
 // OwnerState wraps the state maintained by the owner of a single label.
@@ -244,39 +248,30 @@ func (m *Monitor) ContactMonitor() error {
 		return nil
 	}
 
-	// Extract the list of monitored log entries and sort it from right to left.
-	logEntries := make([]uint64, 0, len(m.Contact.Ptrs))
-	for x := range m.Contact.Ptrs {
-		logEntries = append(logEntries, x)
-	}
-	slices.Sort(logEntries)
-	slices.Reverse(logEntries)
-
-	// Setup our deduplication map of log entries that we've already received a
-	// binary ladder from. This is initialized with the current value of
-	// m.Contact.Ptrs to catch the case where one monitoring path ends where
-	// another one starts.
+	// Setup our map of log entries that we've already received a binary ladder
+	// from. This is initialized with the current contents of m.Contact to catch
+	// the case where one monitoring path ends where another one starts.
 	received := make(map[uint64]uint32)
-	maps.Copy(received, m.Contact.Ptrs)
+	for _, entry := range m.Contact.Entries {
+		received[entry.Position] = entry.Version
+	}
 
-	// For each log entry in `logEntries`, monitor that version of the label.
-	ptrs := make(map[uint64]uint32)
-	for _, x := range logEntries {
-		ver := m.Contact.Ptrs[x]
-
-		updated, err := m.contactMonitor(x, ver, received)
+	// Monitor each version of the label, from right to left.
+	var entries []structs.MonitorMapEntry
+	for _, entry := range slices.Backward(m.Contact.Entries) {
+		updated, err := m.contactMonitor(entry.Position, entry.Version, received)
 		if err != nil {
 			return err
 		} else if updated != nil {
-			ptrs[*updated] = ver
+			entries = append(entries, structs.MonitorMapEntry{Position: *updated, Version: entry.Version})
 		}
 	}
 
 	// Update retained state.
-	if len(ptrs) == 0 {
+	if len(entries) == 0 {
 		m.Contact = nil
 	} else {
-		m.Contact = &ContactState{Ptrs: ptrs}
+		m.Contact = NewContactState(entries)
 	}
 	return nil
 }

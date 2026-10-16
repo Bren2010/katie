@@ -107,7 +107,7 @@ func TestUpdate(t *testing.T) {
 	// Skips lookups that overlap with previous Update operations.
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{97: 1, 98: 1, 99: 2},
-		contact:  &ContactState{Ptrs: map[uint64]uint32{96: 1}},
+		contact:  contactState(map[uint64]uint32{96: 1}),
 		owner:    &OwnerState{Starting: new(uint64(63)), VerAtStarting: 0, UpcomingVers: []uint64{96}},
 		pos:      99,
 		versions: 1,
@@ -117,15 +117,14 @@ func TestUpdate(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(contact.Ptrs) != 2 || contact.Ptrs[96] != 1 || contact.Ptrs[99] != 2 {
-		t.Fatal("unexpected contact monitoring state")
 	}
+	verifyContactState(t, contact, map[uint64]uint32{96: 1, 99: 2})
 	verifyOwnerState(t, owner, 63, 0, []uint64{96, 99})
 
 	// Skips all previous tree lookups if they're unnecessary.
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{99: 2},
-		contact:  &ContactState{Ptrs: map[uint64]uint32{98: 1}},
+		contact:  contactState(map[uint64]uint32{98: 1}),
 		owner:    &OwnerState{Starting: new(uint64(63)), VerAtStarting: 0, UpcomingVers: []uint64{98}},
 		pos:      99,
 		versions: 1,
@@ -135,9 +134,8 @@ func TestUpdate(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(contact.Ptrs) != 2 || contact.Ptrs[98] != 1 || contact.Ptrs[99] != 2 {
-		t.Fatal("unexpected contact monitoring state")
 	}
+	verifyContactState(t, contact, map[uint64]uint32{98: 1, 99: 2})
 	verifyOwnerState(t, owner, 63, 0, []uint64{98, 99})
 
 	// New log entry contains multiple versions and is not distinguished.
@@ -153,9 +151,8 @@ func TestUpdate(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(contact.Ptrs) != 1 || contact.Ptrs[99] != 9 {
-		t.Fatal("unexpected contact monitoring state")
 	}
+	verifyContactState(t, contact, map[uint64]uint32{99: 9})
 	verifyOwnerState(t, owner, 0, -1, []uint64{99, 99, 99, 99, 99, 99, 99, 99, 99, 99})
 
 	// New log entry contains multiple versions and is distinguished.
@@ -239,11 +236,10 @@ func TestUpdate(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if contact == nil || len(contact.Ptrs) != 1 || contact.Ptrs[1] != 0 {
-		t.Fatal("unexpected contact monitoring state")
 	} else if owner.Starting != nil || !slices.Equal(owner.UpcomingVers, []uint64{1}) {
 		t.Fatalf("unexpected owner state: %+v", owner)
 	}
+	verifyContactState(t, contact, map[uint64]uint32{1: 0})
 	config.ReasonableMonitoringWindow = rmw
 
 	// New log entry contains one version and is not distinguished.

@@ -185,9 +185,9 @@ func (m *Monitor) Update(pos uint64, versions int) error {
 
 		// Add the new version to the owner's contact monitoring state.
 		if m.Contact == nil {
-			m.Contact = &ContactState{Ptrs: make(map[uint64]uint32)}
+			m.Contact = &ContactState{}
 		}
-		m.Contact.Ptrs[pos] = endVer32
+		m.Contact.Set(pos, endVer32)
 	}
 
 	// Retain the position of the new versions for later verification.

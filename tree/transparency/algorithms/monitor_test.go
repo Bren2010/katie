@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bren2010/katie/tree/transparency/structs"
 	"github.com/Bren2010/katie/tree/transparency/test"
 )
 
@@ -53,7 +54,7 @@ func TestContactMonitoring(t *testing.T) {
 	// TEST BLOCK 1: If a monitoring path ends in a non-distinguished log entry,
 	// that log entry is left in the monitoring state.
 	res, err := runTest(testVector{
-		state: &ContactState{Ptrs: map[uint64]uint32{70: 1}},
+		state: contactState(map[uint64]uint32{70: 1}),
 		tsMap: tsMap,
 
 		requests:       []uint64{63, 95, 99, 71, 79},
@@ -61,14 +62,13 @@ func TestContactMonitoring(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(res.Ptrs) != 1 || res.Ptrs[95] != 1 {
-		t.Fatal("unexpected monitoring state output")
 	}
+	verifyContactState(t, res, map[uint64]uint32{95: 1})
 
 	// TEST BLOCK 2: If a monitoring path ends in a distinguished log entry,
 	// that log entry is excluded from the monitoring state.
 	res, err = runTest(testVector{
-		state: &ContactState{Ptrs: map[uint64]uint32{70: 1}},
+		state: contactState(map[uint64]uint32{70: 1}),
 		tsMap: map[uint64]uint64{
 			63: now - rmw - 3,
 			71: now - rmw - 2,
@@ -89,7 +89,7 @@ func TestContactMonitoring(t *testing.T) {
 	// TEST BLOCK 3: When multiple monitoring paths intersect, the intersection
 	// is only monitored once.
 	res, err = runTest(testVector{
-		state: &ContactState{Ptrs: map[uint64]uint32{70: 1, 76: 2}},
+		state: contactState(map[uint64]uint32{70: 1, 76: 2}),
 		tsMap: tsMap,
 
 		requests:       []uint64{63, 95, 99, 77, 79, 71},
@@ -97,14 +97,13 @@ func TestContactMonitoring(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(res.Ptrs) != 1 || res.Ptrs[95] != 2 {
-		t.Fatal("unexpected monitoring state output")
 	}
+	verifyContactState(t, res, map[uint64]uint32{95: 2})
 
 	// TEST BLOCK 4: When multiple monitoring paths intersect, monotonicity is
 	// verified.
 	res, err = runTest(testVector{
-		state: &ContactState{Ptrs: map[uint64]uint32{70: 2, 76: 1}},
+		state: contactState(map[uint64]uint32{70: 2, 76: 1}),
 		tsMap: tsMap,
 
 		requests:       []uint64{63, 95, 99, 77, 79, 71},
@@ -118,7 +117,7 @@ func TestContactMonitoring(t *testing.T) {
 	// in the monitoring state without a new binary ladder (because it's a
 	// non-distinguished frontier log entry), the greater version is retained.
 	res, err = runTest(testVector{
-		state: &ContactState{Ptrs: map[uint64]uint32{70: 1, 95: 2}},
+		state: contactState(map[uint64]uint32{70: 1, 95: 2}),
 		tsMap: tsMap,
 
 		requests:       []uint64{63, 95, 99, 71, 79},
@@ -126,9 +125,8 @@ func TestContactMonitoring(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(res.Ptrs) != 1 || res.Ptrs[95] != 2 {
-		t.Fatalf("unexpected monitoring state output: %v", res.Ptrs)
 	}
+	verifyContactState(t, res, map[uint64]uint32{95: 2})
 }
 
 func TestInitEntries(t *testing.T) {
@@ -166,6 +164,25 @@ func TestInitEntries(t *testing.T) {
 		t.Fatal(err)
 	} else if !slices.Equal(entries, []uint64{87, 79}) {
 		t.Fatal("unexpected result from owner initialization")
+	}
+}
+
+// contactState returns the contact monitoring state that maps each log entry in
+// `ptrs` to the corresponding version of the label.
+func contactState(ptrs map[uint64]uint32) *ContactState {
+	entries := make([]structs.MonitorMapEntry, 0, len(ptrs))
+	for pos, ver := range ptrs {
+		entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
+	}
+	return NewContactState(entries)
+}
+
+func verifyContactState(t *testing.T, state *ContactState, expected map[uint64]uint32) {
+	t.Helper()
+	if state == nil {
+		t.Fatal("contact monitoring state not found when expected")
+	} else if !slices.Equal(state.Entries, contactState(expected).Entries) {
+		t.Fatalf("unexpected contact monitoring state: got=%v expected=%v", state.Entries, expected)
 	}
 }
 
