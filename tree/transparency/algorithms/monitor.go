@@ -393,43 +393,45 @@ func (m *Monitor) OwnerInit(starting *uint64, vers []uint32) ([]uint64, error) {
 // entry that is to the right of `owner.state.Starting`, and requests a search
 // binary ladder from each of them for the expected greatest version of the
 // label. `x` is the current log entry, `left` and `right` are the bounds used
-// for determining distinguished status. The position of the rightmost log entry
-// verified so far is written to `verified`. The owner's state is not modified.
-func (m *Monitor) ownerMonitor(x, left, right uint64, verified **uint64) error {
+// for determining distinguished status. It returns the position of the
+// rightmost log entry verified in the subtree rooted at `x`, or nil if none
+// were. The owner's state is not modified.
+func (m *Monitor) ownerMonitor(x, left, right uint64) (*uint64, error) {
 	// If the current log entry is not distinguished, stop.
 	if !m.config.IsDistinguished(left, right) {
-		return nil
+		return nil, nil
 	}
 
 	// If the current log entry's index is less than or equal to that of the log
 	// entry advertised by the user, recurse to its right child.
 	if m.Owner.Starting != nil && x <= *m.Owner.Starting {
 		if noRightChild(x, m.treeSize) {
-			return nil
+			return nil, nil
 		}
 		timestamp, err := m.provider.GetTimestamp(x)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right, verified)
+		return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right)
 	}
 
 	// If the current log entry has a left child, recurse to the left child.
+	var verified *uint64
 	if hasLeftChild(x) {
 		timestamp, err := m.provider.GetTimestamp(x)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		err = m.ownerMonitor(math.Left(x), left, timestamp, verified)
+		verified, err = m.ownerMonitor(math.Left(x), left, timestamp)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// If a stop condition has been reached, stop.
 	ver := m.Owner.GreatestVersionAt(x)
 	if m.provider.StopCondition(x, ver) {
-		return nil
+		return verified, nil
 	}
 
 	// Obtain a search binary ladder from the current log entry where the target
@@ -438,29 +440,35 @@ func (m *Monitor) ownerMonitor(x, left, right uint64, verified **uint64) error {
 	if ver < 0 {
 		res, err := m.provider.GetSearchBinaryLadder(x, 0, false)
 		if err != nil {
-			return err
+			return nil, err
 		} else if res != -1 {
-			return errors.New("binary ladder inconsistent with expected greatest version of label")
+			return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
 		}
 	} else {
 		res, err := m.provider.GetSearchBinaryLadder(x, uint32(ver), false)
 		if err != nil {
-			return err
+			return nil, err
 		} else if res != 0 {
-			return errors.New("binary ladder inconsistent with expected greatest version of label")
+			return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
 		}
 	}
-	*verified = &x
+	verified = &x
 
 	// If the current log entry has a right child, recurse to the right child.
 	if noRightChild(x, m.treeSize) {
-		return nil
+		return verified, nil
 	}
 	timestamp, err := m.provider.GetTimestamp(x)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right, verified)
+	rightVerified, err := m.ownerMonitor(math.Right(x, m.treeSize), timestamp, right)
+	if err != nil {
+		return nil, err
+	} else if rightVerified != nil {
+		return rightVerified, nil
+	}
+	return verified, nil
 }
 
 // OwnerMonitor performs owner monitoring, ensuring that the label has not been
@@ -472,8 +480,7 @@ func (m *Monitor) OwnerMonitor() error {
 		return errors.New("label owner state has not been initialized")
 	}
 
-	verified := m.Owner.Starting
-	err := m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost, &verified)
+	verified, err := m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost)
 	if err != nil {
 		return err
 	} else if verified != nil {
