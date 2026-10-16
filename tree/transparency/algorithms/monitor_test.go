@@ -9,6 +9,46 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/test"
 )
 
+// contactState returns the contact monitoring state that maps each log entry in
+// `ptrs` to the corresponding version of the label.
+func contactState(ptrs map[uint64]uint32) *ContactState {
+	entries := make([]structs.MonitorMapEntry, 0, len(ptrs))
+	for pos, ver := range ptrs {
+		entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
+	}
+	return NewContactState(entries)
+}
+
+func verifyContactState(t *testing.T, state *ContactState, expected map[uint64]uint32) {
+	t.Helper()
+	if state == nil {
+		t.Fatal("contact monitoring state not found when expected")
+	} else if !slices.Equal(state.Entries, contactState(expected).Entries) {
+		t.Fatalf("unexpected contact monitoring state: got=%v expected=%v", state.Entries, expected)
+	}
+}
+
+func verifyOwnerState(
+	t *testing.T,
+	state *OwnerState,
+	starting uint64,
+	verAtStarting int64,
+	upcomingVers []uint64,
+) {
+	t.Helper()
+	if state == nil {
+		t.Fatal("owner state not found when expected")
+	} else if state.Starting == nil || *state.Starting != starting {
+		t.Fatalf("unexpected owner state starting position: got=%v expected=%v", state.Starting, starting)
+	} else if state.VerAtStarting != verAtStarting {
+		t.Fatalf("unexpected owner state version at starting: got=%v expected=%v", state.VerAtStarting, verAtStarting)
+	} else if len(upcomingVers) == 0 && len(state.UpcomingVers) != 0 {
+		t.Fatalf("unexpected owner state upcoming versions: got=%v expected=nil", state.UpcomingVers)
+	} else if len(upcomingVers) > 0 && !slices.Equal(state.UpcomingVers, upcomingVers) {
+		t.Fatalf("unexpected owner state upcoming versions: got=%v expected=%v", state.UpcomingVers, upcomingVers)
+	}
+}
+
 func TestContactMonitoring(t *testing.T) {
 	config := test.Config(t)
 	rmw := config.ReasonableMonitoringWindow
@@ -32,6 +72,7 @@ func TestContactMonitoring(t *testing.T) {
 	runTest := func(vec testVector) (*ContactState, error) {
 		t.Helper()
 		public := config.Public()
+
 		handle := test.NewProofHandle(vec.tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -132,7 +173,6 @@ func TestContactMonitoring(t *testing.T) {
 func TestInitEntries(t *testing.T) {
 	config := test.Config(t)
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
-
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 	tsMap := map[uint64]uint64{
@@ -167,49 +207,9 @@ func TestInitEntries(t *testing.T) {
 	}
 }
 
-// contactState returns the contact monitoring state that maps each log entry in
-// `ptrs` to the corresponding version of the label.
-func contactState(ptrs map[uint64]uint32) *ContactState {
-	entries := make([]structs.MonitorMapEntry, 0, len(ptrs))
-	for pos, ver := range ptrs {
-		entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
-	}
-	return NewContactState(entries)
-}
-
-func verifyContactState(t *testing.T, state *ContactState, expected map[uint64]uint32) {
-	t.Helper()
-	if state == nil {
-		t.Fatal("contact monitoring state not found when expected")
-	} else if !slices.Equal(state.Entries, contactState(expected).Entries) {
-		t.Fatalf("unexpected contact monitoring state: got=%v expected=%v", state.Entries, expected)
-	}
-}
-
-func verifyOwnerState(
-	t *testing.T,
-	state *OwnerState,
-	starting uint64,
-	verAtStarting int64,
-	upcomingVers []uint64,
-) {
-	if state == nil {
-		t.Fatal("owner state not found when expected")
-	} else if state.Starting == nil || *state.Starting != starting {
-		t.Fatalf("unexpected owner state starting position: got=%v expected=%v", state.Starting, starting)
-	} else if state.VerAtStarting != verAtStarting {
-		t.Fatalf("unexpected owner state version at starting: got=%v expected=%v", state.VerAtStarting, verAtStarting)
-	} else if len(upcomingVers) == 0 && len(state.UpcomingVers) != 0 {
-		t.Fatalf("unexpected owner state upcoming versions: got=%v expected=nil", state.UpcomingVers)
-	} else if len(upcomingVers) > 0 && !slices.Equal(state.UpcomingVers, upcomingVers) {
-		t.Fatalf("unexpected owner state upcoming versions: got=%v expected=%v", state.UpcomingVers, upcomingVers)
-	}
-}
-
 func TestOwnerInit(t *testing.T) {
 	config := test.Config(t)
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
-
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 	tsMap := map[uint64]uint64{ // Same map as TestInitEntries
@@ -231,6 +231,7 @@ func TestOwnerInit(t *testing.T) {
 	runTest := func(vec testVector) (*OwnerState, error) {
 		t.Helper()
 		public := config.Public()
+
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -302,7 +303,6 @@ func TestOwnerInit(t *testing.T) {
 func TestOwnerMonitor(t *testing.T) {
 	config := test.Config(t)
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
-
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 	tsMap := map[uint64]uint64{
@@ -329,6 +329,7 @@ func TestOwnerMonitor(t *testing.T) {
 	runTest := func(vec testVector) error {
 		t.Helper()
 		public := config.Public()
+
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		handle.SetStopPos(vec.stopPos)
 		provider := NewDataProvider(config.Suite, handle)
@@ -504,7 +505,6 @@ func TestOwnerMonitor(t *testing.T) {
 
 func TestOwnerMonitorNoStarting(t *testing.T) {
 	config := test.Config(t)
-
 	now := uint64(time.Now().UnixMilli())
 	tsMap := make(map[uint64]uint64)
 	for pos := range uint64(100) {
@@ -514,6 +514,7 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 	runTest := func(state *OwnerState, verMap map[uint64]uint32, requests, searchLadders []uint64) error {
 		t.Helper()
 		public := config.Public()
+
 		handle := test.NewProofHandle(tsMap, verMap)
 		handle.SetStopPos(4)
 		provider := NewDataProvider(config.Suite, handle)

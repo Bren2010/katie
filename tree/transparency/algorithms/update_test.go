@@ -12,7 +12,6 @@ func TestUpdate(t *testing.T) {
 	config := test.Config(t)
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
-
 	tsMap := make(map[uint64]uint64)
 	for pos := range uint64(100) {
 		tsMap[pos] = now - 99 + pos
@@ -32,6 +31,7 @@ func TestUpdate(t *testing.T) {
 	runTest := func(vec testVector) (*ContactState, *OwnerState, error) {
 		t.Helper()
 		public := config.Public()
+
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
