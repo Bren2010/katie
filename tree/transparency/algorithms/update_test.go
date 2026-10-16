@@ -10,7 +10,6 @@ import (
 
 func TestUpdate(t *testing.T) {
 	config := test.Config(t)
-	public := config.Public()
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 
@@ -32,6 +31,7 @@ func TestUpdate(t *testing.T) {
 	}
 	runTest := func(vec testVector) (*ContactState, *OwnerState, error) {
 		t.Helper()
+		public := config.Public()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 

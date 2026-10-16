@@ -10,7 +10,6 @@ import (
 
 func TestContactMonitoring(t *testing.T) {
 	config := test.Config(t)
-	public := config.Public()
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 	tsMap := map[uint64]uint64{
@@ -31,6 +30,7 @@ func TestContactMonitoring(t *testing.T) {
 	}
 	runTest := func(vec testVector) (*ContactState, error) {
 		t.Helper()
+		public := config.Public()
 		handle := test.NewProofHandle(vec.tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -191,7 +191,6 @@ func verifyOwnerState(
 
 func TestOwnerInit(t *testing.T) {
 	config := test.Config(t)
-	public := config.Public()
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
 
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
@@ -214,6 +213,7 @@ func TestOwnerInit(t *testing.T) {
 	}
 	runTest := func(vec testVector) (*OwnerState, error) {
 		t.Helper()
+		public := config.Public()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -284,7 +284,6 @@ func TestOwnerInit(t *testing.T) {
 
 func TestOwnerMonitor(t *testing.T) {
 	config := test.Config(t)
-	public := config.Public()
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
 
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
@@ -312,6 +311,7 @@ func TestOwnerMonitor(t *testing.T) {
 	}
 	runTest := func(vec testVector) error {
 		t.Helper()
+		public := config.Public()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		handle.SetStopPos(vec.stopPos)
 		provider := NewDataProvider(config.Suite, handle)
@@ -487,7 +487,6 @@ func TestOwnerMonitor(t *testing.T) {
 
 func TestOwnerMonitorNoStarting(t *testing.T) {
 	config := test.Config(t)
-	public := config.Public()
 
 	now := uint64(time.Now().UnixMilli())
 	tsMap := make(map[uint64]uint64)
@@ -497,6 +496,7 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 
 	runTest := func(state *OwnerState, verMap map[uint64]uint32, requests, searchLadders []uint64) error {
 		t.Helper()
+		public := config.Public()
 		handle := test.NewProofHandle(tsMap, verMap)
 		handle.SetStopPos(4)
 		provider := NewDataProvider(config.Suite, handle)
