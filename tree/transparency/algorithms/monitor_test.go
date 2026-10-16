@@ -30,6 +30,7 @@ func TestContactMonitoring(t *testing.T) {
 		monitorLadders []uint64
 	}
 	runTest := func(vec testVector) (*ContactState, error) {
+		t.Helper()
 		handle := test.NewProofHandle(vec.tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -212,6 +213,7 @@ func TestOwnerInit(t *testing.T) {
 		searchLadders []uint64
 	}
 	runTest := func(vec testVector) (*OwnerState, error) {
+		t.Helper()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -309,6 +311,7 @@ func TestOwnerMonitor(t *testing.T) {
 		searchLadders []uint64
 	}
 	runTest := func(vec testVector) error {
+		t.Helper()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		handle.SetStopPos(vec.stopPos)
 		provider := NewDataProvider(config.Suite, handle)
@@ -493,6 +496,7 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 	}
 
 	runTest := func(state *OwnerState, verMap map[uint64]uint32, requests, searchLadders []uint64) error {
+		t.Helper()
 		handle := test.NewProofHandle(tsMap, verMap)
 		handle.SetStopPos(4)
 		provider := NewDataProvider(config.Suite, handle)

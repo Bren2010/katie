@@ -12,6 +12,7 @@ func TestUpdateView(t *testing.T) {
 	now := uint64(time.Now().UnixMilli())
 
 	runTest := func(n uint64, m *uint64, requests, timestamps []uint64) error {
+		t.Helper()
 		tsMap := make(map[uint64]uint64)
 		for i, pos := range requests {
 			tsMap[pos] = timestamps[i]
@@ -67,6 +68,7 @@ func TestRightmostDistinguished(t *testing.T) {
 	now := uint64(time.Now().UnixMilli())
 
 	runTest := func(n uint64, requests, timestamps []uint64) *uint64 {
+		t.Helper()
 		tsMap := make(map[uint64]uint64)
 		for i, pos := range requests {
 			tsMap[pos] = timestamps[i]
@@ -127,6 +129,7 @@ func TestPreviousDistinguished(t *testing.T) {
 	now := uint64(time.Now().UnixMilli())
 
 	runTest := func(n uint64, requests, timestamps []uint64) *uint64 {
+		t.Helper()
 		tsMap := make(map[uint64]uint64)
 		for i, pos := range requests {
 			tsMap[pos] = timestamps[i]

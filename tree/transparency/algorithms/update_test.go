@@ -31,6 +31,7 @@ func TestUpdate(t *testing.T) {
 		inclusionProofs []uint64
 	}
 	runTest := func(vec testVector) (*ContactState, *OwnerState, error) {
+		t.Helper()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
