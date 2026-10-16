@@ -170,11 +170,9 @@ func (m *Monitor) distinguishedAncestor(target uint64) (*uint64, error) {
 			return nil, err
 		}
 		if curr > target {
-			curr = math.Left(curr)
-			right = timestamp
+			curr, right = math.Left(curr), timestamp
 		} else {
-			curr = math.Right(curr, m.treeSize)
-			left = timestamp
+			curr, left = math.Right(curr, m.treeSize), timestamp
 		}
 	}
 
@@ -216,8 +214,8 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, received map[uint64]uint3
 	for _, y := range inspect {
 		// If a binary ladder was already received from this log entry, verify
 		// that it was for a greater version.
-		if previousVer, ok := received[y]; ok {
-			if previousVer <= ver {
+		if receivedVer, ok := received[y]; ok {
+			if receivedVer <= ver {
 				return nil, errors.New("monitoring detected versions that are not monotonic")
 			}
 			return nil, nil
@@ -233,7 +231,7 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, received map[uint64]uint3
 		return nil, nil
 	} else if len(inspect) > 0 { // We moved forward without reaching a DLE.
 		return &inspect[len(inspect)-1], nil
-	}
+	} // We made no progress...
 	return &x, nil
 }
 
