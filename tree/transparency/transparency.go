@@ -113,7 +113,7 @@ func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, 
 		return nil, 0, nil, nil, errors.New("can not operate on an empty tree")
 	} else if last != nil {
 		if *last == t.treeHead.TreeSize {
-			return &structs.FullTreeHead{}, t.treeHead.TreeSize, nil, nil, nil
+			return &structs.FullTreeHead{}, t.treeHead.TreeSize, nil, last, nil
 		} else if *last > t.treeHead.TreeSize {
 			return nil, 0, nil, nil, errors.New("tree size advertised by user is greater than current tree size")
 		}

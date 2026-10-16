@@ -456,7 +456,7 @@ func (c *Client) ownerMonitor(
 		if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
 		}
-		return c.putLabelState(updated, req.Label, labelState, labelState.Owner.Starting)
+		return c.putLabelState(updated, req.Label, labelState, *labelState.Owner.Starting) // TODO: Verify non-nil
 	}
 }
 
@@ -608,5 +608,5 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 		return err
 	}
 
-	return sv.client.putLabelState(updated, sv.req.Label, sv.labelState, sv.labelState.Owner.Starting)
+	return sv.client.putLabelState(updated, sv.req.Label, sv.labelState, *sv.labelState.Owner.Starting) // TODO: Verify non-nil
 }

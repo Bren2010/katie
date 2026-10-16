@@ -1,6 +1,7 @@
 package algorithms
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 func TestUpdate(t *testing.T) {
 	config := test.Config(t)
+	public := config.Public()
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 
@@ -29,7 +31,6 @@ func TestUpdate(t *testing.T) {
 		inclusionProofs []uint64
 	}
 	runTest := func(vec testVector) (*ContactState, *OwnerState, error) {
-		public := config.Public()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -52,7 +53,7 @@ func TestUpdate(t *testing.T) {
 	// Previous tree is entirely distinguished.
 	contact, owner, err := runTest(testVector{
 		verMap:   map[uint64]uint32{1: 0},
-		owner:    &OwnerState{Starting: 0, VerAtStarting: -1},
+		owner:    &OwnerState{Starting: new(uint64(0)), VerAtStarting: -1},
 		pos:      1,
 		versions: 1,
 
@@ -69,7 +70,7 @@ func TestUpdate(t *testing.T) {
 	// Previous tree root is distinguished but path is not.
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{63: 0},
-		owner:    &OwnerState{Starting: 0, VerAtStarting: -1},
+		owner:    &OwnerState{Starting: new(uint64(0)), VerAtStarting: -1},
 		pos:      63,
 		versions: 1,
 
@@ -87,7 +88,7 @@ func TestUpdate(t *testing.T) {
 	config.ReasonableMonitoringWindow = now
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{63: 0},
-		owner:    &OwnerState{Starting: 0, VerAtStarting: -1},
+		owner:    &OwnerState{Starting: new(uint64(0)), VerAtStarting: -1},
 		pos:      63,
 		versions: 1,
 
@@ -106,7 +107,7 @@ func TestUpdate(t *testing.T) {
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{97: 1, 98: 1, 99: 2},
 		contact:  &ContactState{Ptrs: map[uint64]uint32{96: 1}},
-		owner:    &OwnerState{Starting: 63, VerAtStarting: 0, UpcomingVers: []uint64{96}},
+		owner:    &OwnerState{Starting: new(uint64(63)), VerAtStarting: 0, UpcomingVers: []uint64{96}},
 		pos:      99,
 		versions: 1,
 
@@ -124,7 +125,7 @@ func TestUpdate(t *testing.T) {
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{99: 2},
 		contact:  &ContactState{Ptrs: map[uint64]uint32{98: 1}},
-		owner:    &OwnerState{Starting: 63, VerAtStarting: 0, UpcomingVers: []uint64{98}},
+		owner:    &OwnerState{Starting: new(uint64(63)), VerAtStarting: 0, UpcomingVers: []uint64{98}},
 		pos:      99,
 		versions: 1,
 
@@ -141,7 +142,7 @@ func TestUpdate(t *testing.T) {
 	// New log entry contains multiple versions and is not distinguished.
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{99: 9},
-		owner:    &OwnerState{Starting: 0, VerAtStarting: -1},
+		owner:    &OwnerState{Starting: new(uint64(0)), VerAtStarting: -1},
 		pos:      99,
 		versions: 10,
 
@@ -159,7 +160,7 @@ func TestUpdate(t *testing.T) {
 	// New log entry contains multiple versions and is distinguished.
 	contact, owner, err = runTest(testVector{
 		verMap:   map[uint64]uint32{63: 9},
-		owner:    &OwnerState{Starting: 0, VerAtStarting: -1},
+		owner:    &OwnerState{Starting: new(uint64(0)), VerAtStarting: -1},
 		pos:      63,
 		versions: 10,
 
@@ -177,7 +178,7 @@ func TestUpdate(t *testing.T) {
 	// Rejects proof where previous tree has overlapping version.
 	_, _, err = runTest(testVector{
 		verMap:   map[uint64]uint32{62: 0, 63: 9},
-		owner:    &OwnerState{Starting: 0, VerAtStarting: -1},
+		owner:    &OwnerState{Starting: new(uint64(0)), VerAtStarting: -1},
 		pos:      63,
 		versions: 10,
 
@@ -192,7 +193,7 @@ func TestUpdate(t *testing.T) {
 	// Rejects proof where new log entry has greater than expected version.
 	_, _, err = runTest(testVector{
 		verMap:   map[uint64]uint32{99: 10},
-		owner:    &OwnerState{Starting: 0, VerAtStarting: -1},
+		owner:    &OwnerState{Starting: new(uint64(0)), VerAtStarting: -1},
 		pos:      99,
 		versions: 10,
 
@@ -203,6 +204,46 @@ func TestUpdate(t *testing.T) {
 	if err.Error() != "binary ladder inconsistent with expected greatest version of label" {
 		t.Fatal(err)
 	}
+
+	// Owner with no starting position can update in log entry 0, where the
+	// previous tree is empty.
+	contact, owner, err = runTest(testVector{
+		verMap:   map[uint64]uint32{0: 0},
+		owner:    &OwnerState{VerAtStarting: -1},
+		pos:      0,
+		versions: 1,
+
+		requests:      []uint64{63, 95, 99, 31, 15, 7, 3, 1},
+		searchLadders: []uint64{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if contact != nil {
+		t.Fatal("unexpected contact monitoring state")
+	} else if owner.Starting != nil || owner.VerAtStarting != -1 || !slices.Equal(owner.UpcomingVers, []uint64{0}) {
+		t.Fatalf("unexpected owner state: %+v", owner)
+	}
+
+	// Owner with no starting position does not skip log entry 0 when verifying
+	// the previous tree.
+	config.ReasonableMonitoringWindow = now
+	contact, owner, err = runTest(testVector{
+		verMap:   map[uint64]uint32{1: 0},
+		owner:    &OwnerState{VerAtStarting: -1},
+		pos:      1,
+		versions: 1,
+
+		requests:      []uint64{63, 95, 99, 0, 1},
+		searchLadders: []uint64{0, 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if contact == nil || len(contact.Ptrs) != 1 || contact.Ptrs[1] != 0 {
+		t.Fatal("unexpected contact monitoring state")
+	} else if owner.Starting != nil || !slices.Equal(owner.UpcomingVers, []uint64{1}) {
+		t.Fatalf("unexpected owner state: %+v", owner)
+	}
+	config.ReasonableMonitoringWindow = rmw
 
 	// New log entry contains one version and is not distinguished.
 	// Covered sufficiently above.

@@ -44,10 +44,11 @@ func (cs *ContactState) Struct() []structs.MonitorMapEntry {
 // OwnerState wraps the state maintained by the owner of a single label.
 type OwnerState struct {
 	// Starting is the position of the rightmost distinguished log entry that
-	// has been verified by owner monitoring.
-	Starting uint64
+	// has been verified by owner monitoring, or nil if no log entries have been
+	// verified yet.
+	Starting *uint64
 	// VerAtStarting is the version of the label that exists at `starting`, or
-	// -1 if the label didn't exist yet.
+	// -1 if the label didn't exist yet (or `starting` is nil).
 	VerAtStarting int64
 	// UpcomingVers is the position of each upcoming new version of the label.
 	UpcomingVers []uint64
@@ -83,7 +84,7 @@ func (os *OwnerState) Struct() *structs.LabelOwnerState {
 func (os *OwnerState) SetStarting(x uint64) {
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 
-	os.Starting = x
+	os.Starting = &x
 	os.VerAtStarting += int64(idx)
 	os.UpcomingVers = os.UpcomingVers[idx:]
 }
@@ -103,10 +104,12 @@ func (os *OwnerState) GreatestVersion() int64 {
 }
 
 // LastUpdate returns the position of the last known update, or `Starting` if
-// there have been no recent updates.
-func (os *OwnerState) LastUpdate() uint64 {
+// there have been no recent updates. It returns nil if neither exists, meaning
+// that an update may be at any position, including 0.
+func (os *OwnerState) LastUpdate() *uint64 {
 	if len(os.UpcomingVers) > 0 {
-		return os.UpcomingVers[len(os.UpcomingVers)-1]
+		last := os.UpcomingVers[len(os.UpcomingVers)-1]
+		return &last
 	}
 	return os.Starting
 }
@@ -202,7 +205,7 @@ func (m *Monitor) contactMonitor(x uint64, ver uint32, received map[uint64]uint3
 			// context of an Owner Monitoring operation, and the given log entry
 			// is equal to or to the right of the owner's `start` position, skip
 			// inspecting the final distinguished log entry.
-			if m.Owner != nil && x >= m.Owner.Starting {
+			if m.Owner != nil && (m.Owner.Starting == nil || *m.Owner.Starting <= x) {
 				inspect = inspect[:len(inspect)-1]
 			}
 			break
@@ -322,8 +325,11 @@ func (m *Monitor) init(starting, x, left, right uint64) ([]uint64, error) {
 
 // InitEntries returns the log entries that will be inspected while initializing
 // the owner's state with a starting position of `starting` (done in OwnerInit).
-func (m *Monitor) InitEntries(starting uint64) ([]uint64, error) {
-	return m.init(starting, math.Root(m.treeSize), 0, m.rightmost)
+func (m *Monitor) InitEntries(starting *uint64) ([]uint64, error) {
+	if starting == nil {
+		return nil, nil
+	}
+	return m.init(*starting, math.Root(m.treeSize), 0, m.rightmost)
 }
 
 // OwnerInit initializes the label owner's state. `starting` contains the log
@@ -332,7 +338,7 @@ func (m *Monitor) InitEntries(starting uint64) ([]uint64, error) {
 // `InitEntries`.
 //
 // Algorithm from the first portion of Section 8.3.
-func (m *Monitor) OwnerInit(starting uint64, vers []uint32) ([]uint64, error) {
+func (m *Monitor) OwnerInit(starting *uint64, vers []uint32) ([]uint64, error) {
 	if m.Owner != nil {
 		return nil, errors.New("label owner state is already initialized")
 	}
@@ -389,7 +395,7 @@ func (m *Monitor) OwnerInit(starting uint64, vers []uint32) ([]uint64, error) {
 // label. `x` is the current log entry, `left` and `right` are the bounds used
 // for determining distinguished status. The position of the rightmost log entry
 // verified so far is written to `verified`. The owner's state is not modified.
-func (m *Monitor) ownerMonitor(x, left, right uint64, verified *uint64) error {
+func (m *Monitor) ownerMonitor(x, left, right uint64, verified **uint64) error {
 	// If the current log entry is not distinguished, stop.
 	if !m.config.IsDistinguished(left, right) {
 		return nil
@@ -397,7 +403,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64, verified *uint64) error {
 
 	// If the current log entry's index is less than or equal to that of the log
 	// entry advertised by the user, recurse to its right child.
-	if x <= m.Owner.Starting {
+	if m.Owner.Starting != nil && x <= *m.Owner.Starting {
 		if noRightChild(x, m.treeSize) {
 			return nil
 		}
@@ -444,7 +450,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64, verified *uint64) error {
 			return errors.New("binary ladder inconsistent with expected greatest version of label")
 		}
 	}
-	*verified = x
+	*verified = &x
 
 	// If the current log entry has a right child, recurse to the right child.
 	if noRightChild(x, m.treeSize) {
@@ -470,8 +476,9 @@ func (m *Monitor) OwnerMonitor() error {
 	err := m.ownerMonitor(math.Root(m.treeSize), 0, m.rightmost, &verified)
 	if err != nil {
 		return err
+	} else if verified != nil {
+		m.Owner.SetStarting(*verified)
 	}
-	m.Owner.SetStarting(verified)
 
 	return nil
 }

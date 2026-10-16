@@ -429,7 +429,7 @@ func updateRetainedVersions(
 	// Build the slice of RetainedVersion structures that will be stored.
 	retained := make([]structs.RetainedVersion, 0, len(required))
 	for ver := range required {
-		entry, ok := handle.GetVersion(ver)
+		entry, ok := handle.GetVersion(ver) // TODO: Is this necessary?
 		if !ok {
 			return errors.New("required version not found")
 		}

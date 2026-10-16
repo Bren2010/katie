@@ -41,8 +41,7 @@ func GreatestVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, p
 			return 0, errors.New("log entry not consistent with claimed greatest version of label")
 		}
 		if res == 0 && first {
-			terminal = x
-			first = false
+			terminal, first = x, false
 		}
 		if x != n-1 {
 			x = math.Right(x, n)

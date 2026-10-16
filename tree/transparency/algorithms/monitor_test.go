@@ -10,6 +10,7 @@ import (
 
 func TestContactMonitoring(t *testing.T) {
 	config := test.Config(t)
+	public := config.Public()
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
 	tsMap := map[uint64]uint64{
@@ -29,7 +30,6 @@ func TestContactMonitoring(t *testing.T) {
 		monitorLadders []uint64
 	}
 	runTest := func(vec testVector) (*ContactState, error) {
-		public := config.Public()
 		handle := test.NewProofHandle(vec.tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -153,14 +153,14 @@ func TestInitEntries(t *testing.T) {
 	}
 
 	// Owner initialization rejects non-distinguished log entries.
-	_, err = monitor.InitEntries(83)
+	_, err = monitor.InitEntries(new(uint64(83)))
 	if err.Error() != "requested starting position is not distinguished" {
 		t.Fatalf("unexpected error returned: %v", err)
 	}
 
 	// Owner initialization accepts distinguished log entries; doesn't return
 	// expired log entries or those to the right.
-	entries, err := monitor.InitEntries(87)
+	entries, err := monitor.InitEntries(new(uint64(87)))
 	if err != nil {
 		t.Fatal(err)
 	} else if !slices.Equal(entries, []uint64{87, 79}) {
@@ -177,7 +177,7 @@ func verifyOwnerState(
 ) {
 	if state == nil {
 		t.Fatal("owner state not found when expected")
-	} else if state.Starting != starting {
+	} else if state.Starting == nil || *state.Starting != starting {
 		t.Fatalf("unexpected owner state starting position: got=%v expected=%v", state.Starting, starting)
 	} else if state.VerAtStarting != verAtStarting {
 		t.Fatalf("unexpected owner state version at starting: got=%v expected=%v", state.VerAtStarting, verAtStarting)
@@ -190,6 +190,7 @@ func verifyOwnerState(
 
 func TestOwnerInit(t *testing.T) {
 	config := test.Config(t)
+	public := config.Public()
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
 
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
@@ -211,7 +212,6 @@ func TestOwnerInit(t *testing.T) {
 		searchLadders []uint64
 	}
 	runTest := func(vec testVector) (*OwnerState, error) {
-		public := config.Public()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -222,7 +222,7 @@ func TestOwnerInit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = monitor.OwnerInit(87, vec.vers)
+		_, err = monitor.OwnerInit(new(uint64(87)), vec.vers)
 
 		if err := handle.Verify(vec.requests, vec.searchLadders, nil, nil); err != nil {
 			t.Fatal(err)
@@ -282,6 +282,7 @@ func TestOwnerInit(t *testing.T) {
 
 func TestOwnerMonitor(t *testing.T) {
 	config := test.Config(t)
+	public := config.Public()
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
 
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
@@ -308,7 +309,6 @@ func TestOwnerMonitor(t *testing.T) {
 		searchLadders []uint64
 	}
 	runTest := func(vec testVector) error {
-		public := config.Public()
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		handle.SetStopPos(vec.stopPos)
 		provider := NewDataProvider(config.Suite, handle)
@@ -331,7 +331,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When search ladders return expected results, starting position is set to
 	// the last distinguished log entry that was verified.
-	state := &OwnerState{Starting: 87, VerAtStarting: 1}
+	state := &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1}
 	err := runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 1, 97: 1, 99: 1},
@@ -346,7 +346,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When search ladders return expected results but the algorithm hits a
 	// stopping condition, starting position is set to where we stopped.
-	state = &OwnerState{Starting: 87, VerAtStarting: 1}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1}
 	err = runTest(testVector{
 		state:   state,
 		verMap:  map[uint64]uint32{95: 1},
@@ -362,7 +362,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When search ladders return expected results and new versions of the label
 	// are processed, they are removed from the list of upcoming versions.
-	state = &OwnerState{Starting: 87, VerAtStarting: 1, UpcomingVers: []uint64{95, 97}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{95, 97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 2, 97: 3, 99: 3},
@@ -377,7 +377,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When some but not all new versions of the label are processed, only
 	// processed versions are removed from the list of upcoming versions.
-	state = &OwnerState{Starting: 87, VerAtStarting: 1, UpcomingVers: []uint64{95, 97}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{95, 97}}
 	err = runTest(testVector{
 		state:   state,
 		verMap:  map[uint64]uint32{95: 2},
@@ -393,7 +393,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When a new version of a label is added in a log entry that isn't directly
 	// inspected, the increase in version is still verified.
-	state = &OwnerState{Starting: 87, VerAtStarting: 1, UpcomingVers: []uint64{96, 97, 99}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{96, 97, 99}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 1, 97: 3, 99: 4},
@@ -408,7 +408,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When multiple new versions of a label are added in a single log entry,
 	// the increase in version is verified atomically.
-	state = &OwnerState{Starting: 87, VerAtStarting: 1, UpcomingVers: []uint64{97, 97, 97, 99}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{97, 97, 97, 99}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 1, 97: 4, 99: 5},
@@ -423,7 +423,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When a label is expected not to exist and the search ladder shows that it
 	// doesn't exist, this is accepted.
-	state = &OwnerState{Starting: 87, VerAtStarting: -1, UpcomingVers: []uint64{97}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{97: 0, 99: 0},
@@ -438,7 +438,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When a label is expected not to exist but the search ladder shows that it
 	// does exist, this is rejected.
-	state = &OwnerState{Starting: 87, VerAtStarting: -1, UpcomingVers: []uint64{97}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 0},
@@ -453,7 +453,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When a search ladder indicates that a label version is greater than
 	// expected, this is rejected.
-	state = &OwnerState{Starting: 87, VerAtStarting: -1, UpcomingVers: []uint64{97}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{97: 0, 99: 1},
@@ -468,7 +468,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When a search ladder indicates that a label version is less than
 	// expected, this is rejected.
-	state = &OwnerState{Starting: 87, VerAtStarting: -1, UpcomingVers: []uint64{97, 97}}
+	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97, 97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{97: 1, 99: 0},
@@ -480,4 +480,60 @@ func TestOwnerMonitor(t *testing.T) {
 		t.Fatalf("unexpected error returned: %v", err)
 	}
 	verifyOwnerState(t, state, 87, -1, []uint64{97, 97})
+}
+
+func TestOwnerMonitorNoStarting(t *testing.T) {
+	config := test.Config(t)
+	public := config.Public()
+
+	now := uint64(time.Now().UnixMilli())
+	tsMap := make(map[uint64]uint64)
+	for pos := range uint64(100) {
+		tsMap[pos] = now - 99 + pos
+	}
+
+	runTest := func(state *OwnerState, verMap map[uint64]uint32, requests, searchLadders []uint64) error {
+		handle := test.NewProofHandle(tsMap, verMap)
+		handle.SetStopPos(4)
+		provider := NewDataProvider(config.Suite, handle)
+
+		if err := UpdateView(public, 100, nil, provider); err != nil {
+			t.Fatal(err)
+		}
+		monitor, err := NewMonitor(public, 100, provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		monitor.Owner = state
+		err = monitor.OwnerMonitor()
+
+		if err := handle.Verify(requests, searchLadders, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		return err
+	}
+
+	// With no starting position, verification begins at log entry 0. Only the
+	// leftmost log entries are distinguished, since their left bound is 0.
+	state := &OwnerState{VerAtStarting: -1}
+	err := runTest(state, nil,
+		[]uint64{63, 95, 99, 31, 15, 7, 3, 1, 0},
+		[]uint64{0, 1, 3},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyOwnerState(t, state, 3, -1, nil)
+
+	// If verification fails, the owner's state is left unmodified.
+	state = &OwnerState{VerAtStarting: -1}
+	err = runTest(state, map[uint64]uint32{1: 0},
+		[]uint64{63, 95, 99, 31, 15, 7, 3, 1, 0},
+		[]uint64{0, 1},
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	} else if state.Starting != nil || state.VerAtStarting != -1 {
+		t.Fatalf("unexpected owner state: %+v", state)
+	}
 }

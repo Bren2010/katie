@@ -9,6 +9,7 @@ import (
 
 func TestGreatestVersionSearch(t *testing.T) {
 	config := test.Config(t)
+	public := config.Public()
 
 	rmw := config.ReasonableMonitoringWindow
 	now := uint64(time.Now().UnixMilli())
@@ -21,7 +22,6 @@ func TestGreatestVersionSearch(t *testing.T) {
 		searchLadders []uint64
 	}
 	runTest := func(vec testVector) (uint64, error) {
-		public := config.Public()
 		handle := test.NewProofHandle(vec.tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
@@ -124,6 +124,7 @@ func TestGreatestVersionSearch(t *testing.T) {
 
 func TestFixedVersionSearch(t *testing.T) {
 	config := test.Config(t)
+	public := config.Public()
 	config.MaximumLifetime = 3 * config.ReasonableMonitoringWindow / 2
 
 	ml, rmw := config.MaximumLifetime, config.ReasonableMonitoringWindow
@@ -138,7 +139,6 @@ func TestFixedVersionSearch(t *testing.T) {
 		inclusionProofs []uint64
 	}
 	runTest := func(vec testVector) (uint64, error) {
-		public := config.Public()
 		handle := test.NewProofHandle(vec.tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 

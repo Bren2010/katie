@@ -97,13 +97,13 @@ func (cs *ClientState) Marshal(buf *bytes.Buffer) error {
 }
 
 type LabelOwnerState struct {
-	Starting      uint64
+	Starting      *uint64 // Absent if no log entries have been verified yet.
 	VerAtStarting *uint32
 	UpcomingVers  []uint64
 }
 
 func NewLabelOwnerState(buf *bytes.Buffer) (*LabelOwnerState, error) {
-	starting, err := readNumeric[uint64](buf)
+	starting, err := readOptionalNumeric[uint64](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func NewLabelOwnerState(buf *bytes.Buffer) (*LabelOwnerState, error) {
 }
 
 func (los *LabelOwnerState) Marshal(buf *bytes.Buffer) error {
-	writeNumeric(buf, los.Starting)
+	writeOptionalNumeric(buf, los.Starting)
 	writeOptionalNumeric(buf, los.VerAtStarting)
 	return writeNumericSlice[uint32](buf, los.UpcomingVers, "upcoming versions")
 }

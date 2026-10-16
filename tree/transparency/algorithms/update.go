@@ -31,18 +31,18 @@ func (m *Monitor) nonDistinguishedAncestor(target uint64) (*uint64, error) {
 			return nil, err
 		}
 		if x < target {
-			x = math.Right(x, m.treeSize)
-			left = timestamp
+			x, left = math.Right(x, m.treeSize), timestamp
 		} else {
-			x = math.Left(x)
-			right = timestamp
+			x, right = math.Left(x), timestamp
 		}
 	}
 }
 
 func (m *Monitor) verifyPreviousTree(pos uint64) error {
+	// If the new versions were added in log entry 0, the previous tree is
+	// empty and there is nothing to verify.
 	if pos == 0 {
-		panic("unreachable")
+		return nil
 	}
 	greatestVer := m.Owner.GreatestVersion()
 	lastUpdate := m.Owner.LastUpdate()
@@ -62,7 +62,7 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 
 	// Populate the version tracker with information on what lookups to omit.
 	if greatestVer >= 0 {
-		tracker := m.provider.handle.Tracker()
+		tracker := m.provider.handle.Tracker() // TODO: Is this actually necessary?
 		ladder := math.SearchBinaryLadder(uint32(greatestVer), uint32(greatestVer), nil, nil)
 
 		// Compute version omissions from x itself. This requires looking at
@@ -85,7 +85,7 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 		// If a binary ladder would have already been received from this log
 		// entry in step 2.2 when processing a previous label update, skip
 		// this log entry.
-		if x <= lastUpdate {
+		if lastUpdate != nil && x <= *lastUpdate {
 			goto MoveRight
 		}
 
@@ -126,7 +126,7 @@ func (m *Monitor) Update(pos uint64, versions int) error {
 		return errors.New("label owner state has not been initialized")
 	} else if pos >= m.treeSize {
 		return errors.New("given log entry does not exist")
-	} else if pos <= m.Owner.LastUpdate() {
+	} else if last := m.Owner.LastUpdate(); last != nil && pos <= *last {
 		return errors.New("update position must be to the right of any previous version")
 	} else if versions < 1 {
 		return errors.New("unexpected number of new versions created")

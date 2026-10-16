@@ -160,14 +160,14 @@ func TestOwnerMonitor(t *testing.T) {
 	tree, labels := generateRandomTree(t)
 
 	// Rejects `start` greater than tree size.
-	_, err := tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 200})
+	_, err := tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: new(uint64(200))})
 	if err.Error() != "advertised starting position is greater than tree size" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects `greatest_version` greater than greatest known version.
 	ver := uint32(200)
-	_, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
+	_, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: new(uint64(1)), GreatestVersion: &ver})
 	if err.Error() != "version advertised is greater than known greatest version" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,14 +175,14 @@ func TestOwnerMonitor(t *testing.T) {
 	// Rejects `greatest_version` less than greatest version at starting
 	// position.
 	ver = 0
-	_, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 1, GreatestVersion: &ver})
+	_, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: new(uint64(1)), GreatestVersion: &ver})
 	if err.Error() != "version advertised is less than version at starting position" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Continues to rightmost distinguished log entry if possible.
 	ver = 6
-	res, err := tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
+	res, err := tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: new(uint64(0)), GreatestVersion: &ver})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res.Monitor.PrefixProofs) != 2 {
@@ -192,7 +192,7 @@ func TestOwnerMonitor(t *testing.T) {
 	// Stops before reaching a log entry if the version it contains is greater
 	// than the user knows about.
 	ver = 1
-	res, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: 0, GreatestVersion: &ver})
+	res, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{Label: labels[0], Start: new(uint64(0)), GreatestVersion: &ver})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res.Monitor.PrefixProofs) != 1 {
@@ -205,7 +205,7 @@ func TestOwnerMonitor(t *testing.T) {
 	res, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{
 		Label:           labels[0],
 		Entries:         []structs.MonitorMapEntry{{Position: 2, Version: 2}},
-		Start:           0,
+		Start:           new(uint64(0)),
 		GreatestVersion: &ver,
 	})
 	if err != nil {
@@ -219,7 +219,7 @@ func TestOwnerMonitor(t *testing.T) {
 	res, err = tree.OwnerMonitor(ctx, &structs.OwnerMonitorRequest{
 		Label:           labels[0],
 		Entries:         []structs.MonitorMapEntry{{Position: 2, Version: 2}},
-		Start:           6,
+		Start:           new(uint64(6)),
 		GreatestVersion: &ver,
 	})
 	if err != nil {

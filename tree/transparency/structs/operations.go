@@ -193,7 +193,7 @@ type OwnerInitRequest struct {
 	Last *uint64
 
 	Label []byte
-	Start uint64
+	Start *uint64
 }
 
 func NewOwnerInitRequest(buf *bytes.Buffer) (*OwnerInitRequest, error) {
@@ -205,7 +205,7 @@ func NewOwnerInitRequest(buf *bytes.Buffer) (*OwnerInitRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	start, err := readNumeric[uint64](buf)
+	start, err := readOptionalNumeric[uint64](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (oir *OwnerInitRequest) Marshal(buf *bytes.Buffer) error {
 	if err := writeBytes[uint8](buf, oir.Label, "label"); err != nil {
 		return err
 	}
-	writeNumeric(buf, oir.Start)
+	writeOptionalNumeric(buf, oir.Start)
 	return nil
 }
 
@@ -270,7 +270,7 @@ type OwnerMonitorRequest struct {
 
 	Label           []byte
 	Entries         []MonitorMapEntry
-	Start           uint64
+	Start           *uint64 // Absent if no log entries have been verified yet.
 	GreatestVersion *uint32
 }
 
@@ -287,7 +287,7 @@ func NewOwnerMonitorRequest(buf *bytes.Buffer) (*OwnerMonitorRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	start, err := readNumeric[uint64](buf)
+	start, err := readOptionalNumeric[uint64](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +305,7 @@ func (omr *OwnerMonitorRequest) Marshal(buf *bytes.Buffer) error {
 	} else if err := writeMarshalSlice[uint8](buf, omr.Entries, "monitoring map"); err != nil {
 		return err
 	}
-	writeNumeric(buf, omr.Start)
+	writeOptionalNumeric(buf, omr.Start)
 	writeOptionalNumeric(buf, omr.GreatestVersion)
 	return nil
 }
