@@ -12,7 +12,7 @@ import (
 // ContactState wraps the state maintained by a user that has looked up
 // (potentially multiple versions of) a single label.
 type ContactState struct {
-	// Entries contains a slice of log entries and the greatest version of the
+	// Entries contains a slice of log entries with the greatest version of the
 	// label that's been proven to exist at that point. It is sorted by
 	// position and no position is duplicate.
 	Entries []structs.MonitorMapEntry
@@ -23,21 +23,15 @@ func NewContactState(entries []structs.MonitorMapEntry) *ContactState {
 	slices.SortFunc(sorted, func(a, b structs.MonitorMapEntry) int {
 		return cmp.Compare(a.Position, b.Position)
 	})
-	return &ContactState{Entries: slices.Clone(entries)}
-}
-
-// find returns the index of the entry for log entry `pos` and true if one
-// exists, or the index where it would be inserted and false if not.
-func (cs *ContactState) find(pos uint64) (int, bool) {
-	return slices.BinarySearchFunc(cs.Entries, pos, func(entry structs.MonitorMapEntry, pos uint64) int {
-		return cmp.Compare(entry.Position, pos)
-	})
+	return &ContactState{Entries: sorted}
 }
 
 // Set sets the version of the label for log entry `pos`, adding an entry for
 // it if one doesn't exist.
 func (cs *ContactState) Set(pos uint64, ver uint32) {
-	i, ok := cs.find(pos)
+	i, ok := slices.BinarySearchFunc(cs.Entries, pos, func(entry structs.MonitorMapEntry, pos uint64) int {
+		return cmp.Compare(entry.Position, pos)
+	})
 	if ok {
 		cs.Entries[i].Version = ver
 	} else {
@@ -386,9 +380,10 @@ func (m *Monitor) OwnerInit(starting *uint64, vers []uint32) ([]uint64, error) {
 // entry that is to the right of `owner.state.Starting`, and requests a search
 // binary ladder from each of them for the expected greatest version of the
 // label. `x` is the current log entry, `left` and `right` are the bounds used
-// for determining distinguished status. It returns the position of the
-// rightmost log entry verified in the subtree rooted at `x`, or nil if none
-// were. The owner's state is not modified.
+// for determining distinguished status.
+//
+// It returns the position of the rightmost log entry verified in the subtree
+// rooted at `x`, or nil if none were. The owner's state is not modified.
 func (m *Monitor) ownerMonitor(x, left, right uint64) (*uint64, error) {
 	// If the current log entry is not distinguished, stop.
 	if !m.config.IsDistinguished(left, right) {

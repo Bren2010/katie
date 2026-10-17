@@ -48,7 +48,11 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 	lastUpdate := m.Owner.LastUpdate()
 
 	// Determine the first log entry in the previous tree that is not
-	// distinguished in the current tree.
+	// distinguished in the current tree. This is done by finding the first log
+	// entry in the direct path of `pos-1` that is not distinguished, and then
+	// moving left until we get an x <= pos-1. Moving left without checking if
+	// the left child exists is safe because we already know we're on the direct
+	// path of `pos-1`.
 	res, err := m.nonDistinguishedAncestor(pos - 1)
 	if err != nil {
 		return err
@@ -62,7 +66,7 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 
 	// Populate the version tracker with information on what lookups to omit.
 	if greatestVer >= 0 {
-		tracker := m.provider.handle.Tracker() // TODO: Is this actually necessary?
+		tracker := m.provider.handle.Tracker()
 		ladder := math.SearchBinaryLadder(uint32(greatestVer), uint32(greatestVer), nil, nil)
 
 		// Compute version omissions from x itself. This requires looking at
