@@ -2,6 +2,7 @@ package algorithms
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/Bren2010/katie/tree/transparency/math"
 )
@@ -10,12 +11,7 @@ import (
 // `target`. It returns the first node in this path that is not distinguished,
 // or `nil` if `target` itself is distinguished.
 func (m *Monitor) nonDistinguishedAncestor(target uint64) (*uint64, error) {
-	x := math.Root(m.treeSize)
-	left := uint64(0)
-	right, err := m.provider.GetTimestamp(m.treeSize - 1)
-	if err != nil {
-		return nil, err
-	}
+	x, left, right := math.Root(m.treeSize), uint64(0), m.rightmost
 
 	for {
 		if !m.config.IsDistinguished(left, right) {
@@ -38,12 +34,19 @@ func (m *Monitor) nonDistinguishedAncestor(target uint64) (*uint64, error) {
 	}
 }
 
+// verifyPreviousTree verifies that no unexpected versions of the label exist in
+// the previous tree, which is the log tree up to but excluding the log entry
+// `pos` where new versions of the label were added. This is a greatest-version
+// search for the previous greatest version of the label, starting from the
+// first log entry on the previous tree's frontier that isn't distinguished in
+// the current tree.
 func (m *Monitor) verifyPreviousTree(pos uint64) error {
 	// If the new versions were added in log entry 0, the previous tree is
 	// empty and there is nothing to verify.
 	if pos == 0 {
 		return nil
 	}
+
 	greatestVer := m.Owner.GreatestVersion()
 	lastUpdate := m.Owner.LastUpdate()
 
@@ -64,57 +67,34 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 		x = math.Left(x)
 	}
 
-	// Populate the version tracker with information on what lookups to omit.
+	// Lookups that would be omitted in a greatest-version search are omitted
+	// here too. That search would've already inspected x's parent on the
+	// frontier (if any), so record the versions it would've proven to be
+	// included there. If no version of the label existed, there's nothing to
+	// record.
+	tracker := m.provider.handle.Tracker()
+	var ladder []uint32
 	if greatestVer >= 0 {
-		tracker := m.provider.handle.Tracker()
-		ladder := math.SearchBinaryLadder(uint32(greatestVer), uint32(greatestVer), nil, nil)
-
-		// Compute version omissions from x itself. This requires looking at
-		// which lookups might've succeeded in a Greatest Version search that
-		// started at x's parent (if any).
-		if x != math.Root(pos) {
-			parent := math.Parent(x, pos)
-			tracker.AddLadder(parent, true, m.Owner.GreatestVersionAt(parent), ladder)
-		}
-		// Compute version omissions from all of x's children. It's not strictly
-		// true that `greatestVer` exists at `x` (in fact, it might not). But
-		// we know we won't do any lookups until `greatestVer` exists, so it
-		// doesn't change the algorithm's output.
-		tracker.AddLadder(x, true, greatestVer, ladder)
+		ladder = math.SearchBinaryLadder(uint32(greatestVer), uint32(greatestVer), nil, nil)
+	}
+	if x != math.Root(pos) {
+		parent := math.Parent(x, pos)
+		tracker.AddLadder(parent, true, m.Owner.GreatestVersionAt(parent), ladder)
 	}
 
 	// Starting from the identified log entry, proceed down the remainder of
 	// the previous tree's frontier from left to right.
 	for {
-		// If a binary ladder would have already been received from this log
-		// entry in step 2.2 when processing a previous label update, skip
-		// this log entry.
 		if lastUpdate != nil && x <= *lastUpdate {
-			goto MoveRight
+			// A binary ladder would have already been received from this log
+			// entry when processing a previous label update, so skip it. The
+			// lookups it would have contained are still omitted from later
+			// ladders, as if it had been inspected.
+			tracker.AddLadder(x, true, m.Owner.GreatestVersionAt(x), ladder)
+		} else if err := m.verifyGreatestVersion(x, greatestVer, true); err != nil {
+			return err
 		}
 
-		// Obtain a search binary ladder from this log entry where the target
-		// version is the previous greatest version of the label. Verify that
-		// the binary ladder terminates in a way that is consistent with the
-		// previous greatest version of the label being the greatest that
-		// existed.
-		if greatestVer < 0 {
-			res, err := m.provider.GetSearchBinaryLadder(x, 0, true)
-			if err != nil {
-				return err
-			} else if res != -1 {
-				return errors.New("binary ladder inconsistent with expected greatest version of label")
-			}
-		} else {
-			res, err := m.provider.GetSearchBinaryLadder(x, uint32(greatestVer), true)
-			if err != nil {
-				return err
-			} else if res != 0 {
-				return errors.New("binary ladder inconsistent with expected greatest version of label")
-			}
-		}
-
-	MoveRight:
 		if x == pos-1 {
 			return nil
 		}
@@ -138,21 +118,17 @@ func (m *Monitor) Update(pos uint64, versions int) error {
 
 	greatestVer := m.Owner.GreatestVersion()
 	endVer := greatestVer + int64(versions)
-	if endVer < 0 || endVer >= 1<<32 {
+	if endVer >= 1<<32 {
 		return errors.New("unexpected number of new versions created")
 	}
-	startVer32, endVer32 := uint32(greatestVer+1), uint32(endVer)
 
 	// Compute the list of versions that were created in this update but that
 	// wouldn't be looked up in a search binary ladder for the greatest version.
-	ladder := make(map[uint32]struct{})
-	for _, ver := range math.SearchBinaryLadder(endVer32, endVer32, nil, nil) {
-		ladder[ver] = struct{}{}
-	}
-	additional := make([]uint32, 0)
-	for ver := startVer32; ver <= endVer32; ver++ {
-		if _, ok := ladder[ver]; !ok {
-			additional = append(additional, ver)
+	ladder := math.SearchBinaryLadder(uint32(endVer), uint32(endVer), nil, nil)
+	var additional []uint32
+	for ver := greatestVer + 1; ver <= endVer; ver++ {
+		if !slices.Contains(ladder, uint32(ver)) {
+			additional = append(additional, uint32(ver))
 		}
 	}
 
@@ -161,37 +137,34 @@ func (m *Monitor) Update(pos uint64, versions int) error {
 		return err
 	}
 
-	// Determine if the new log entry is distinguished.
+	// Determine if the new log entry is distinguished. If it isn't, obtain a
+	// PrefixProof with a search binary ladder for the new greatest version.
 	res, err := m.nonDistinguishedAncestor(pos)
 	if err != nil {
 		return err
 	}
-	if res == nil { // The log entry is distinguished.
-		// Obtain a PrefixProof with lookups corresponding only to new versions
-		// of the label that would not be looked up in a search binary ladder
-		// for the new greatest version.
-		if err := m.provider.GetInclusionProof(pos, additional); err != nil {
+	distinguished := res == nil
+	if !distinguished {
+		if err := m.verifyGreatestVersion(pos, endVer, true); err != nil {
 			return err
 		}
-	} else { // The log entry is not distinguished.
-		// Obtain a PrefixProof with a search binary ladder for the new greatest
-		// version, and a PrefixProof with lookups corresponding to any other
-		// new versions that weren't looked up in the search binary ladder.
-		res, err := m.provider.GetSearchBinaryLadder(pos, endVer32, true)
-		if err != nil {
-			return err
-		} else if res != 0 {
-			return errors.New("binary ladder inconsistent with expected greatest version of label")
-		}
-		if err := m.provider.GetInclusionProof(pos, additional); err != nil {
-			return err
-		}
+	}
+	// Obtain a PrefixProof with lookups corresponding to any new versions of
+	// the label that weren't looked up in a search binary ladder for the new
+	// greatest version.
+	if err := m.provider.GetInclusionProof(pos, additional); err != nil {
+		return err
+	}
 
-		// Add the new version to the owner's contact monitoring state.
+	// If the log entry isn't distinguished, add the new version to the owner's
+	// contact monitoring state.
+	if !distinguished {
 		if m.Contact == nil {
 			m.Contact = &ContactState{}
 		}
-		m.Contact.Set(pos, endVer32)
+		if err := m.Contact.Set(pos, uint32(endVer), m.treeSize); err != nil {
+			return err
+		}
 	}
 
 	// Retain the position of the new versions for later verification.

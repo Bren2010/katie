@@ -26,17 +26,26 @@ func NewContactState(entries []structs.MonitorMapEntry) *ContactState {
 	return &ContactState{Entries: sorted}
 }
 
-// Set sets the version of the label for log entry `pos`, adding an entry for
-// it if one doesn't exist.
-func (cs *ContactState) Set(pos uint64, ver uint32) {
-	i, ok := slices.BinarySearchFunc(cs.Entries, pos, func(entry structs.MonitorMapEntry, pos uint64) int {
-		return cmp.Compare(entry.Position, pos)
-	})
-	if ok {
-		cs.Entries[i].Version = ver
-	} else {
-		cs.Entries = slices.Insert(cs.Entries, i, structs.MonitorMapEntry{Position: pos, Version: ver})
+// Set sets the version of the label for log entry `pos` to `ver`, adding an
+// entry for it if one doesn't exist. `n` is the size of the tree.
+func (cs *ContactState) Set(pos uint64, ver uint32, n uint64) error {
+	path := math.RightDirectPath(pos, n)
+	entries := make([]structs.MonitorMapEntry, 0, len(cs.Entries))
+
+	for _, entry := range cs.Entries {
+		if entry.Position < pos {
+			entries = append(entries, entry)
+		} else if entry.Version >= ver {
+			return errors.New("contact monitoring state has unexpectedly great version of label")
+		} else if entry.Position == pos {
+			entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
+		} else if !slices.Contains(path, entry.Position) {
+			entries = append(entries, entry)
+		}
 	}
+
+	cs.Entries = entries
+	return nil
 }
 
 // OwnerState wraps the state maintained by the owner of a single label.
@@ -140,6 +149,24 @@ func NewMonitor(config *structs.PublicConfig, treeSize uint64, provider *DataPro
 		rightmost: rightmost,
 		treeSize:  treeSize,
 	}, nil
+}
+
+// verifyGreatestVersion obtains a search binary ladder from log entry `x` and
+// verifies that `ver` is the greatest version of the label that exists there,
+// or that no version of the label exists if `ver` is -1. Redundant lookups are
+// omitted if `omit` is true.
+func (m *Monitor) verifyGreatestVersion(x uint64, ver int64, omit bool) error {
+	target, expected := uint32(0), -1
+	if ver >= 0 {
+		target, expected = uint32(ver), 0
+	}
+	res, err := m.provider.GetSearchBinaryLadder(x, target, omit)
+	if err != nil {
+		return err
+	} else if res != expected {
+		return errors.New("binary ladder inconsistent with expected greatest version of label")
+	}
+	return nil
 }
 
 // distinguishedAncestor returns the first distinguished log entry that is on
@@ -349,20 +376,12 @@ func (m *Monitor) OwnerInit(starting *uint64, vers []uint32) ([]uint64, error) {
 	// the ladder terminates in a way that is consistent with the version
 	// provided in `vers`.
 	for i, x := range xs {
+		ver := int64(-1)
 		if i < len(vers) {
-			res, err := m.provider.GetSearchBinaryLadder(x, vers[i], false)
-			if err != nil {
-				return nil, err
-			} else if res != 0 {
-				return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
-			}
-		} else {
-			res, err := m.provider.GetSearchBinaryLadder(x, 0, false)
-			if err != nil {
-				return nil, err
-			} else if res != -1 {
-				return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
-			}
+			ver = int64(vers[i])
+		}
+		if err := m.verifyGreatestVersion(x, ver, false); err != nil {
+			return nil, err
 		}
 	}
 
@@ -425,20 +444,8 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) (*uint64, error) {
 	// Obtain a search binary ladder from the current log entry where the target
 	// version is the greatest version of the label expected to exist at this
 	// point, based on the label owner's state.
-	if ver < 0 {
-		res, err := m.provider.GetSearchBinaryLadder(x, 0, false)
-		if err != nil {
-			return nil, err
-		} else if res != -1 {
-			return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
-		}
-	} else {
-		res, err := m.provider.GetSearchBinaryLadder(x, uint32(ver), false)
-		if err != nil {
-			return nil, err
-		} else if res != 0 {
-			return nil, errors.New("binary ladder inconsistent with expected greatest version of label")
-		}
+	if err := m.verifyGreatestVersion(x, ver, false); err != nil {
+		return nil, err
 	}
 	verified = &x
 
