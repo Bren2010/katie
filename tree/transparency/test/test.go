@@ -65,12 +65,18 @@ func ConfigWithAuditor(t *testing.T) (structs.PrivateConfig, suites.SigningPriva
 	return config, auditorKey
 }
 
+type searchLadder struct {
+	pos  uint64
+	vers []uint32
+}
+
 type ProofHandle struct {
 	timestamps map[uint64]uint64
 	versions   map[uint64]uint32
+	tracker    math.VersionTracker
 
 	requested         []uint64
-	searchLadders     []uint64
+	searchLadders     []searchLadder
 	monitoringLadders []uint64
 	inclusionProofs   []uint64
 
@@ -84,12 +90,41 @@ func NewProofHandle(timestamps map[uint64]uint64, versions map[uint64]uint32) *P
 func (ph *ProofHandle) Verify(requested, searchLadders, monitoringLadders, inclusionProofs []uint64) error {
 	if !slices.Equal(ph.requested, requested) {
 		return fmt.Errorf("unexpected log entries requested: %v", ph.requested)
-	} else if !slices.Equal(ph.searchLadders, searchLadders) {
+	}
+
+	if len(searchLadders) != len(ph.searchLadders) {
 		return fmt.Errorf("unexpected search ladders requested: %v", ph.searchLadders)
-	} else if !slices.Equal(ph.monitoringLadders, monitoringLadders) {
+	}
+	for i, pos := range searchLadders {
+		if pos != ph.searchLadders[i].pos {
+			return fmt.Errorf("unexpected search ladders requested: %v", ph.searchLadders)
+		}
+	}
+
+	if !slices.Equal(ph.monitoringLadders, monitoringLadders) {
 		return fmt.Errorf("unexpected monitoring ladders requested: %v", ph.monitoringLadders)
 	} else if !slices.Equal(ph.inclusionProofs, inclusionProofs) {
 		return fmt.Errorf("unexpected inclusion proofs requested: %v", ph.inclusionProofs)
+	}
+	return nil
+}
+
+func (ph *ProofHandle) SearchLadders() [][]uint32 {
+	out := make([][]uint32, len(ph.searchLadders))
+	for i, ladder := range ph.searchLadders {
+		out[i] = ladder.vers
+	}
+	return out
+}
+
+func (ph *ProofHandle) VerifySearchLadders(ladders [][]uint32) error {
+	if len(ladders) != len(ph.searchLadders) {
+		return fmt.Errorf("unexpected search ladders requested: %v", ph.searchLadders)
+	}
+	for i, ladder := range ladders {
+		if !slices.Equal(ladder, ph.searchLadders[i].vers) {
+			return fmt.Errorf("unexpected search ladders requested: %v", ph.searchLadders)
+		}
 	}
 	return nil
 }
@@ -107,23 +142,31 @@ func (ph *ProofHandle) GetTimestamp(x uint64) (uint64, error) {
 }
 
 func (ph *ProofHandle) GetSearchBinaryLadder(x uint64, ver uint32, omit bool) ([]byte, int, error) {
-	ph.searchLadders = append(ph.searchLadders, x)
-
-	posVer, ok := ph.versions[x]
-	if !ok {
-		if ver == 0 {
-			return make([]byte, 32), -1, nil
-		}
+	greatest := int64(-1)
+	if posVer, ok := ph.versions[x]; ok {
+		greatest = int64(posVer)
+	} else if ver != 0 {
 		panic("version not known for position")
 	}
 
-	if posVer < ver {
-		return make([]byte, 32), -1, nil
-	} else if posVer == ver {
-		return make([]byte, 32), 0, nil
+	// Compute the versions looked up in the binary ladder, the same way as a
+	// ProducedProofHandle.
+	var ladder []uint32
+	if greatest < 0 {
+		ladder = []uint32{0}
 	} else {
-		return make([]byte, 32), 1, nil
+		leftInclusion, rightNonInclusion := ph.tracker.SearchMaps(x, omit)
+		ladder = math.SearchBinaryLadder(ver, uint32(greatest), leftInclusion, rightNonInclusion)
 	}
+	ph.searchLadders = append(ph.searchLadders, searchLadder{pos: x, vers: ladder})
+	ph.tracker.AddLadder(x, omit, greatest, ladder)
+
+	if greatest < int64(ver) {
+		return make([]byte, 32), -1, nil
+	} else if greatest == int64(ver) {
+		return make([]byte, 32), 0, nil
+	}
+	return make([]byte, 32), 1, nil
 }
 
 func (ph *ProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) ([]byte, error) {
@@ -141,7 +184,7 @@ func (ph *ProofHandle) StopCondition(x uint64, ver int64) bool {
 }
 
 func (ph *ProofHandle) Tracker() *math.VersionTracker {
-	return &math.VersionTracker{}
+	return &ph.tracker
 }
 
 func (ph *ProofHandle) GetPrefixTrees(xs []uint64) ([][]byte, error) {

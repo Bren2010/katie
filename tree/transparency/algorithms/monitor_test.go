@@ -32,7 +32,7 @@ func verifyOwnerState(
 	t *testing.T,
 	state *OwnerState,
 	starting uint64,
-	verAtStarting int64,
+	previousVers []uint32,
 	upcomingVers []uint64,
 ) {
 	t.Helper()
@@ -40,11 +40,9 @@ func verifyOwnerState(
 		t.Fatal("owner state not found when expected")
 	} else if state.Starting == nil || *state.Starting != starting {
 		t.Fatalf("unexpected owner state starting position: got=%v expected=%v", state.Starting, starting)
-	} else if state.VerAtStarting != verAtStarting {
-		t.Fatalf("unexpected owner state version at starting: got=%v expected=%v", state.VerAtStarting, verAtStarting)
-	} else if len(upcomingVers) == 0 && len(state.UpcomingVers) != 0 {
-		t.Fatalf("unexpected owner state upcoming versions: got=%v expected=nil", state.UpcomingVers)
-	} else if len(upcomingVers) > 0 && !slices.Equal(state.UpcomingVers, upcomingVers) {
+	} else if !slices.Equal(state.PreviousVers, previousVers) {
+		t.Fatalf("unexpected owner state previous versions: got=%v expected=%v", state.PreviousVers, previousVers)
+	} else if !slices.Equal(state.UpcomingVers, upcomingVers) {
 		t.Fatalf("unexpected owner state upcoming versions: got=%v expected=%v", state.UpcomingVers, upcomingVers)
 	}
 }
@@ -261,7 +259,20 @@ func TestOwnerInit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 87, 1, nil)
+	verifyOwnerState(t, state, 87, []uint32{1}, nil)
+
+	// Expected set of previous versions is retained
+	state, err = runTest(testVector{
+		verMap: map[uint64]uint32{87: 1, 79: 0},
+		vers:   []uint32{1, 0},
+
+		requests:      []uint64{63, 95, 99, 79, 87},
+		searchLadders: []uint64{87, 79},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyOwnerState(t, state, 87, []uint32{1, 0}, nil)
 
 	// Search ladder returns version too great.
 	_, err = runTest(testVector{
@@ -352,7 +363,7 @@ func TestOwnerMonitor(t *testing.T) {
 
 	// When search ladders return expected results, starting position is set to
 	// the last distinguished log entry that was verified.
-	state := &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1}
+	state := &OwnerState{Starting: new(uint64(87)), PreviousVers: []uint32{1}}
 	err := runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 1, 97: 1, 99: 1},
@@ -363,11 +374,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 99, 1, nil)
+	verifyOwnerState(t, state, 99, []uint32{1, 1}, nil)
 
 	// When search ladders return expected results but the algorithm hits a
 	// stopping condition, starting position is set to where we stopped.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1}
+	state = &OwnerState{Starting: new(uint64(87)), PreviousVers: []uint32{1}}
 	err = runTest(testVector{
 		state:   state,
 		verMap:  map[uint64]uint32{95: 1},
@@ -379,11 +390,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 95, 1, nil)
+	verifyOwnerState(t, state, 95, []uint32{1}, nil)
 
 	// When search ladders return expected results and new versions of the label
 	// are processed, they are removed from the list of upcoming versions.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{95, 97}}
+	state = &OwnerState{Starting: new(uint64(87)), PreviousVers: []uint32{1}, UpcomingVers: []uint64{95, 97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 2, 97: 3, 99: 3},
@@ -394,11 +405,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 99, 3, nil)
+	verifyOwnerState(t, state, 99, []uint32{3, 2}, nil)
 
 	// When some but not all new versions of the label are processed, only
 	// processed versions are removed from the list of upcoming versions.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{95, 97}}
+	state = &OwnerState{Starting: new(uint64(87)), PreviousVers: []uint32{1}, UpcomingVers: []uint64{95, 97}}
 	err = runTest(testVector{
 		state:   state,
 		verMap:  map[uint64]uint32{95: 2},
@@ -410,11 +421,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 95, 2, []uint64{97})
+	verifyOwnerState(t, state, 95, []uint32{2}, []uint64{97})
 
 	// When a new version of a label is added in a log entry that isn't directly
 	// inspected, the increase in version is still verified.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{96, 97, 99}}
+	state = &OwnerState{Starting: new(uint64(87)), PreviousVers: []uint32{1}, UpcomingVers: []uint64{96, 97, 99}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 1, 97: 3, 99: 4},
@@ -425,11 +436,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 99, 4, nil)
+	verifyOwnerState(t, state, 99, []uint32{4, 1}, nil)
 
 	// When multiple new versions of a label are added in a single log entry,
 	// the increase in version is verified atomically.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: 1, UpcomingVers: []uint64{97, 97, 97, 99}}
+	state = &OwnerState{Starting: new(uint64(87)), PreviousVers: []uint32{1}, UpcomingVers: []uint64{97, 97, 97, 99}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 1, 97: 4, 99: 5},
@@ -440,11 +451,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 99, 5, nil)
+	verifyOwnerState(t, state, 99, []uint32{5, 1}, nil)
 
 	// When a label is expected not to exist and the search ladder shows that it
 	// doesn't exist, this is accepted.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97}}
+	state = &OwnerState{Starting: new(uint64(87)), UpcomingVers: []uint64{97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{97: 0, 99: 0},
@@ -455,11 +466,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 99, 0, nil)
+	verifyOwnerState(t, state, 99, []uint32{0}, nil)
 
 	// When a label is expected not to exist but the search ladder shows that it
 	// does exist, this is rejected.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97}}
+	state = &OwnerState{Starting: new(uint64(87)), UpcomingVers: []uint64{97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{95: 0},
@@ -470,11 +481,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err.Error() != "binary ladder inconsistent with expected greatest version of label" {
 		t.Fatalf("unexpected error returned: %v", err)
 	}
-	verifyOwnerState(t, state, 87, -1, []uint64{97})
+	verifyOwnerState(t, state, 87, nil, []uint64{97})
 
 	// When a search ladder indicates that a label version is greater than
 	// expected, this is rejected.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97}}
+	state = &OwnerState{Starting: new(uint64(87)), UpcomingVers: []uint64{97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{97: 0, 99: 1},
@@ -485,11 +496,11 @@ func TestOwnerMonitor(t *testing.T) {
 	if err.Error() != "binary ladder inconsistent with expected greatest version of label" {
 		t.Fatalf("unexpected error returned: %v", err)
 	}
-	verifyOwnerState(t, state, 87, -1, []uint64{97})
+	verifyOwnerState(t, state, 87, nil, []uint64{97})
 
 	// When a search ladder indicates that a label version is less than
 	// expected, this is rejected.
-	state = &OwnerState{Starting: new(uint64(87)), VerAtStarting: -1, UpcomingVers: []uint64{97, 97}}
+	state = &OwnerState{Starting: new(uint64(87)), UpcomingVers: []uint64{97, 97}}
 	err = runTest(testVector{
 		state:  state,
 		verMap: map[uint64]uint32{97: 1, 99: 0},
@@ -500,7 +511,7 @@ func TestOwnerMonitor(t *testing.T) {
 	if err.Error() != "binary ladder inconsistent with expected greatest version of label" {
 		t.Fatalf("unexpected error returned: %v", err)
 	}
-	verifyOwnerState(t, state, 87, -1, []uint64{97, 97})
+	verifyOwnerState(t, state, 87, nil, []uint64{97, 97})
 }
 
 func TestOwnerMonitorNoStarting(t *testing.T) {
@@ -537,7 +548,7 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 
 	// With no starting position, verification begins at log entry 0. Only the
 	// leftmost log entries are distinguished, since their left bound is 0.
-	state := &OwnerState{VerAtStarting: -1}
+	state := &OwnerState{}
 	err := runTest(state, nil,
 		[]uint64{63, 95, 99, 31, 15, 7, 3, 1, 0},
 		[]uint64{0, 1, 3},
@@ -545,17 +556,17 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifyOwnerState(t, state, 3, -1, nil)
+	verifyOwnerState(t, state, 3, nil, nil)
 
 	// If verification fails, the owner's state is left unmodified.
-	state = &OwnerState{VerAtStarting: -1}
+	state = &OwnerState{}
 	err = runTest(state, map[uint64]uint32{1: 0},
 		[]uint64{63, 95, 99, 31, 15, 7, 3, 1, 0},
 		[]uint64{0, 1},
 	)
 	if err == nil {
 		t.Fatal("expected error")
-	} else if state.Starting != nil || state.VerAtStarting != -1 {
+	} else if state.Starting != nil || state.VerAtStarting() != -1 {
 		t.Fatalf("unexpected owner state: %+v", state)
 	}
 }

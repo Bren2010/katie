@@ -97,9 +97,9 @@ func (cs *ClientState) Marshal(buf *bytes.Buffer) error {
 }
 
 type LabelOwnerState struct {
-	Starting      *uint64 // Absent if no log entries have been verified yet.
-	VerAtStarting *uint32
-	UpcomingVers  []uint64
+	Starting     *uint64 // Absent if no log entries have been verified yet.
+	PreviousVers []uint32
+	UpcomingVers []uint64
 }
 
 func NewLabelOwnerState(buf *bytes.Buffer) (*LabelOwnerState, error) {
@@ -107,7 +107,7 @@ func NewLabelOwnerState(buf *bytes.Buffer) (*LabelOwnerState, error) {
 	if err != nil {
 		return nil, err
 	}
-	verAtStarting, err := readOptionalNumeric[uint32](buf)
+	previousVers, err := readNumericSlice[uint8, uint32](buf)
 	if err != nil {
 		return nil, err
 	}
@@ -116,15 +116,17 @@ func NewLabelOwnerState(buf *bytes.Buffer) (*LabelOwnerState, error) {
 		return nil, err
 	}
 	return &LabelOwnerState{
-		Starting:      starting,
-		VerAtStarting: verAtStarting,
-		UpcomingVers:  upcomingVers,
+		Starting:     starting,
+		PreviousVers: previousVers,
+		UpcomingVers: upcomingVers,
 	}, nil
 }
 
 func (los *LabelOwnerState) Marshal(buf *bytes.Buffer) error {
 	writeOptionalNumeric(buf, los.Starting)
-	writeOptionalNumeric(buf, los.VerAtStarting)
+	if err := writeNumericSlice[uint8](buf, los.PreviousVers, "previous versions"); err != nil {
+		return err
+	}
 	return writeNumericSlice[uint32](buf, los.UpcomingVers, "upcoming versions")
 }
 

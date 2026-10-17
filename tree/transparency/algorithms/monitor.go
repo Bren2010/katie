@@ -29,19 +29,28 @@ func NewContactState(entries []structs.MonitorMapEntry) *ContactState {
 // Set sets the version of the label for log entry `pos` to `ver`, adding an
 // entry for it if one doesn't exist. `n` is the size of the tree.
 func (cs *ContactState) Set(pos uint64, ver uint32, n uint64) error {
+	entries := make([]structs.MonitorMapEntry, 0, len(cs.Entries)+1)
+
 	path := math.RightDirectPath(pos, n)
-	entries := make([]structs.MonitorMapEntry, 0, len(cs.Entries))
+	newEntry := structs.MonitorMapEntry{Position: pos, Version: ver}
+	inserted := false
 
 	for _, entry := range cs.Entries {
 		if entry.Position < pos {
 			entries = append(entries, entry)
+			continue
 		} else if entry.Version >= ver {
 			return errors.New("contact monitoring state has unexpectedly great version of label")
-		} else if entry.Position == pos {
-			entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
-		} else if !slices.Contains(path, entry.Position) {
+		}
+		if !inserted {
+			entries, inserted = append(entries, newEntry), true
+		}
+		if entry.Position != pos && !slices.Contains(path, entry.Position) {
 			entries = append(entries, entry)
 		}
+	}
+	if !inserted {
+		entries = append(entries, newEntry)
 	}
 
 	cs.Entries = entries
@@ -54,60 +63,84 @@ type OwnerState struct {
 	// has been verified by owner monitoring, or nil if no log entries have been
 	// verified yet.
 	Starting *uint64
-	// VerAtStarting is the version of the label that exists at `starting`, or
-	// -1 if the label didn't exist yet (or `starting` is nil).
-	VerAtStarting int64
+	// PreviousVers is the greatest version of the label that existed at
+	// `Starting`, followed by the greatest version at each log entry in the
+	// left direct path of `Starting`, ending at the first log entry that was
+	// expired or where the label doesn't exist.
+	PreviousVers []uint32
 	// UpcomingVers is the position of each upcoming new version of the label.
 	UpcomingVers []uint64
 }
 
 func NewOwnerState(from *structs.LabelOwnerState) *OwnerState {
-	verAtStarting := int64(-1)
-	if from.VerAtStarting != nil {
-		verAtStarting = int64(*from.VerAtStarting)
-	}
 	return &OwnerState{
-		Starting:      from.Starting,
-		VerAtStarting: verAtStarting,
-		UpcomingVers:  from.UpcomingVers,
+		Starting:     from.Starting,
+		PreviousVers: from.PreviousVers,
+		UpcomingVers: from.UpcomingVers,
 	}
 }
 
 func (os *OwnerState) Struct() *structs.LabelOwnerState {
-	var verAtStarting *uint32
-	if os.VerAtStarting >= 0 {
-		ver := uint32(os.VerAtStarting)
-		verAtStarting = &ver
-	}
 	return &structs.LabelOwnerState{
-		Starting:      os.Starting,
-		VerAtStarting: verAtStarting,
-		UpcomingVers:  os.UpcomingVers,
+		Starting:     os.Starting,
+		PreviousVers: os.PreviousVers,
+		UpcomingVers: os.UpcomingVers,
 	}
 }
 
-// SetStarting sets the owner's starting position to be `x`, consuming any
-// values from `UpcomingVers` and incrementing `VerAtStarting` as appropriate.
-func (os *OwnerState) SetStarting(x uint64) {
-	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
+func (os *OwnerState) previousVer(i int) int64 {
+	if i >= len(os.PreviousVers) {
+		return -1
+	}
+	return int64(os.PreviousVers[i])
+}
 
+// VerAtStarting returns the version of the label that exists at `Starting`, or
+// -1 if the label didn't exist yet (or `Starting` is nil).
+func (os *OwnerState) VerAtStarting() int64 { return os.previousVer(0) }
+
+// SetStarting sets the owner's starting position to be `x`, which must not be
+// to the left of the current starting position. It consumes any values from
+// `UpcomingVers` and recomputes `PreviousVers`.
+func (os *OwnerState) SetStarting(x uint64) {
+	// Every log entry in the direct path of `x` and to its left is either:
+	// - to the right of the current starting position,
+	// - the current starting position itself, or
+	// - in the left direct path of the current starting position.
+	// The greatest version at any of these points is already known.
+	var previousVers []uint32
+	for _, y := range append([]uint64{x}, math.LeftDirectPath(x)...) {
+		ver := os.GreatestVersionAt(y)
+		if ver < 0 {
+			break
+		}
+		previousVers = append(previousVers, uint32(ver))
+	}
+
+	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
 	os.Starting = &x
-	os.VerAtStarting += int64(idx)
+	os.PreviousVers = previousVers
 	os.UpcomingVers = os.UpcomingVers[idx:]
 }
 
 // GreatestVersionAt returns the greatest version of the label that would've
 // been expected to exist at `x`, or -1 if the label didn't exist yet.
 //
-// This is not accurate for `x` values that are to the left of `Starting`.
+// For `x` to the left of `Starting`, this is only accurate if `x` is in the
+// direct path of `Starting` (and wasn't expired when the owner's state was
+// initialized). Otherwise, the version at `Starting` is returned.
 func (os *OwnerState) GreatestVersionAt(x uint64) int64 {
+	if os.Starting != nil && x < *os.Starting {
+		i := slices.Index(math.LeftDirectPath(*os.Starting), x)
+		return os.previousVer(i + 1)
+	}
 	idx, _ := slices.BinarySearch(os.UpcomingVers, x+1)
-	return os.VerAtStarting + int64(idx)
+	return os.VerAtStarting() + int64(idx)
 }
 
 // GreatestVersion returns the absolute greatest version of the label known.
 func (os *OwnerState) GreatestVersion() int64 {
-	return os.VerAtStarting + int64(len(os.UpcomingVers))
+	return os.VerAtStarting() + int64(len(os.UpcomingVers))
 }
 
 // LastUpdate returns the position of the last known update, or `Starting` if
@@ -386,11 +419,7 @@ func (m *Monitor) OwnerInit(starting *uint64, vers []uint32) ([]uint64, error) {
 	}
 
 	// Setup OwnerState object.
-	verAtStarting := int64(-1)
-	if len(vers) > 0 {
-		verAtStarting = int64(vers[0])
-	}
-	m.Owner = &OwnerState{starting, verAtStarting, nil}
+	m.Owner = &OwnerState{Starting: starting, PreviousVers: slices.Clone(vers)}
 
 	return xs, nil
 }
