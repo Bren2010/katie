@@ -60,6 +60,13 @@ func TestMath(t *testing.T) {
 	assert(slicesEq(BatchCopath([]uint64{}, 50, &forty, &thirty), []uint64{61, 71, 87, 97}))
 	assert(slicesEq(BatchCopath([]uint64{}, 50, &thirty, &forty), []uint64{15, 39, 51, 57, 61, 87, 97}))
 
+	// Full subtrees of the additional tree size that the verifier already knows
+	// are not included in the proof.
+	fortyOne, fortyEight := uint64(41), uint64(48)
+	assert(slicesEq(BatchCopath([]uint64{}, 50, &forty, &forty), []uint64{87, 97}))
+	assert(slicesEq(BatchCopath([]uint64{}, 50, &fortyEight, &forty), []uint64{87, 97}))
+	assert(slicesEq(BatchCopath([]uint64{40}, 50, &fortyOne, nil), []uint64{31, 71, 82, 85, 91, 97}))
+
 	thirtyNine := uint64(39)
 	assert(slicesEq(BatchCopath([]uint64{38}, 39, nil, &thirtyNine), []uint64{}))
 }

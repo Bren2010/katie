@@ -164,20 +164,24 @@ func FullSubtrees(x, n uint64) []uint64 {
 // size to prove consistency with.
 func BatchCopath(leaves []uint64, n uint64, nP, m *uint64) []uint64 {
 	// Compute the set of node indices to prove inclusion for. This is a
-	// combination of the requested leaves and any retained subtrees from `m`.
+	// combination of the requested leaves, any retained subtrees from `m`, and
+	// the full subtrees of `nP`. The full subtrees of `nP` are only included in
+	// the output if the verifier doesn't already know them.
 	dedup, include := make(map[uint64]struct{}), make(map[uint64]struct{})
 	for _, x := range leaves {
 		dedup[2*x] = struct{}{}
 	}
-	if nP != nil {
-		for _, x := range FullSubtrees(Root(*nP), *nP) {
-			dedup[x] = struct{}{}
-			include[x] = struct{}{}
-		}
-	}
 	if m != nil {
 		for _, x := range FullSubtrees(Root(*m), *m) {
 			dedup[x] = struct{}{}
+		}
+	}
+	if nP != nil {
+		for _, x := range FullSubtrees(Root(*nP), *nP) {
+			if _, ok := dedup[x]; !ok {
+				dedup[x] = struct{}{}
+				include[x] = struct{}{}
+			}
 		}
 	}
 	nodes := make([]uint64, 0, len(dedup))
