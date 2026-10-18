@@ -102,9 +102,10 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 	}
 }
 
-// Update verifies that some new versions of the label were added to the tree
-// correctly. `pos` is the position of the log entry where the new versions were
-// added. `versions` is the number of new versions added.
+// Update runs the algorithm from Section 9.1 to verify that some new versions
+// of the label were added to the tree correctly. `pos` is the position of the
+// log entry where the new versions were added. `versions` is the number of new
+// versions added.
 func (m *Monitor) Update(pos uint64, versions int) error {
 	if m.Owner == nil {
 		return errors.New("label owner state has not been initialized")

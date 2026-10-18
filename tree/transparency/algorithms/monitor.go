@@ -95,13 +95,13 @@ func (os *OwnerState) previousVer(i int) int64 {
 	return int64(os.PreviousVers[i])
 }
 
-// VerAtStarting returns the version of the label that exists at `Starting`, or
-// -1 if the label didn't exist yet (or `Starting` is nil).
+// VerAtStarting returns the version of the label that exists at `os.Starting`,
+// or -1 if the label didn't exist yet (or `os.Starting` is nil).
 func (os *OwnerState) VerAtStarting() int64 { return os.previousVer(0) }
 
 // SetStarting sets the owner's starting position to be `x`, which must not be
 // to the left of the current starting position. It consumes any values from
-// `UpcomingVers` and recomputes `PreviousVers`.
+// `os.UpcomingVers` and recomputes `os.PreviousVers`.
 func (os *OwnerState) SetStarting(x uint64) {
 	// Every log entry in the direct path of `x` and to its left is either:
 	// - to the right of the current starting position,
@@ -126,8 +126,8 @@ func (os *OwnerState) SetStarting(x uint64) {
 // GreatestVersionAt returns the greatest version of the label that would've
 // been expected to exist at `x`, or -1 if the label didn't exist yet.
 //
-// For `x` to the left of `Starting`, this is only accurate if `x` is in the
-// direct path of `Starting` (and wasn't expired when the owner's state was
+// For `x` to the left of `os.Starting`, this is only accurate if `x` is in the
+// direct path of `os.Starting` (and wasn't expired when the owner's state was
 // initialized). Otherwise, the version at `Starting` is returned.
 func (os *OwnerState) GreatestVersionAt(x uint64) int64 {
 	if os.Starting != nil && x < *os.Starting {
@@ -143,7 +143,7 @@ func (os *OwnerState) GreatestVersion() int64 {
 	return os.VerAtStarting() + int64(len(os.UpcomingVers))
 }
 
-// LastUpdate returns the position of the last known update, or `Starting` if
+// LastUpdate returns the position of the last known update, or `os.Starting` if
 // there have been no recent updates. It returns nil if neither exists, meaning
 // that an update may be at any position, including 0.
 func (os *OwnerState) LastUpdate() *uint64 {
@@ -371,7 +371,8 @@ func (m *Monitor) init(starting, x, left, right uint64) ([]uint64, error) {
 }
 
 // InitEntries returns the log entries that will be inspected while initializing
-// the owner's state with a starting position of `starting` (done in OwnerInit).
+// the owner's state with the given starting position. This does not actually
+// perform owner state initialization, that is done by OwnerInit.
 func (m *Monitor) InitEntries(starting *uint64) ([]uint64, error) {
 	if starting == nil {
 		return nil, nil
@@ -379,12 +380,10 @@ func (m *Monitor) InitEntries(starting *uint64) ([]uint64, error) {
 	return m.init(*starting, math.Root(m.treeSize), 0, m.rightmost)
 }
 
-// OwnerInit initializes the label owner's state. `starting` contains the log
-// entry where the label owner wants their ownership to start, and `vers`
-// contains the version of the label that exists at each log entry returned by
-// `InitEntries`.
-//
-// Algorithm from the first portion of Section 8.3.
+// OwnerInit runs the algorithm from the first portion of Section 8.3 to
+// initialize a label owner's state. `starting` contains the log entry where the
+// label owner wants their ownership to start, and `vers` contains the version
+// of the label that exists at each log entry returned by InitEntries.
 func (m *Monitor) OwnerInit(starting *uint64, vers []uint32) ([]uint64, error) {
 	if m.Owner != nil {
 		return nil, errors.New("label owner state is already initialized")
@@ -495,10 +494,9 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) (*uint64, error) {
 	return verified, nil
 }
 
-// OwnerMonitor performs owner monitoring, ensuring that the label has not been
-// modified without the label owner's permission.
-//
-// Algorithm from the second portion of Section 8.3.
+// OwnerMonitor runs the algorithm from the section portion of Section 8.3. It
+// performs owner monitoring, ensuring that the label has not been modified
+// without the label owner's permission.
 func (m *Monitor) OwnerMonitor() error {
 	if m.Owner == nil {
 		return errors.New("label owner state has not been initialized")

@@ -60,11 +60,11 @@ func RightmostDistinguished(config *structs.PublicConfig, n uint64, provider *Da
 // entry is being constructed and we need to know which distinguished log
 // entries exist to its left.
 //
-// The public config for the Transparency Log is given in `config`, and the size
+// The public config for the Transparency Log is given in `config` and the size
 // of the tree is `n`.
 //
 // Note: It is NOT the case that calling PreviousRightmost on a tree of size n
-// is equal to calling RightmostDistinguished on a tree of size n-1. This is
+// is equal to calling RightmostDistinguished on a tree of size `n-1`. This is
 // because adding a single log entry can create multiple distinguished log
 // entries.
 func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataProvider) (*uint64, error) {
@@ -118,7 +118,7 @@ func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataPro
 }
 
 // UpdateView runs the algorithm from Section 4.2. The previous size of the tree
-// is `m`, the current size of the tree is `n`.
+// is `m` and the current size of the tree is `n`.
 func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, provider *DataProvider) error {
 	if m != nil && *m > n {
 		return errors.New("new tree size is not greater than previous tree size")

@@ -87,9 +87,9 @@ func (w *distinguishedWalker) walk(x, left, right uint64) error {
 }
 
 // WalkDistinguished runs the algorithm from Section 10.1. The public config for
-// the Transparency Log is given in `config`, the size of the tree is `n`, the
-// optional stopping position is `stop`, and the application's definition of
-// "recent" is `recent`.
+// the Transparency Log is given in `config`, the optional stopping position is
+// `stop`, the application's definition of "recent" is `recent`, and the size of
+// the tree is `n`.
 //
 // It returns the positions of the recent distinguished log entries in
 // left-to-right order.

@@ -67,6 +67,9 @@ func NewDataProvider(cs suites.CipherSuite, handle ProofHandle) *DataProvider {
 	}
 }
 
+// AddRetained adds the user's retained state to the DataProvider.
+// `fullSubtrees` contains the full subtrees of the log tree and `logEntries`
+// contains a map from the position of each retained log entry to its value.
 func (dp *DataProvider) AddRetained(fullSubtrees [][]byte, logEntries map[uint64]structs.LogEntry) error {
 	dp.fullSubtrees = fullSubtrees
 	dp.logEntries = logEntries

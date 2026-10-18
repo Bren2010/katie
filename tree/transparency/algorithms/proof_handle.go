@@ -97,11 +97,14 @@ func NewReceivedProofHandle(cs suites.CipherSuite, inner structs.CombinedTreePro
 }
 
 // AddVersion adds the VRF output and commitment corresponding to a version of a
-// label to the ReceivedProofHandle.
+// label to the ReceivedProofHandle. The commitment may be nil if it isn't
+// known.
 func (rph *ReceivedProofHandle) AddVersion(ver uint32, vrfOutput, commitment []byte) error {
 	return addVersion(rph.cs, rph.versions, ver, vrfOutput, commitment)
 }
 
+// GetVersion returns the VRF output and commitment corresponding to the
+// requested version. The commitment may be nil if it isn't known.
 func (rph *ReceivedProofHandle) GetVersion(ver uint32) (prefix.Entry, bool) {
 	entry, ok := rph.versions[ver]
 	return entry, ok
