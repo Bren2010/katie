@@ -501,3 +501,53 @@ func (ur *UpdateResponse) Marshal(config *PublicConfig, buf *bytes.Buffer) error
 	}
 	return ur.Update.Marshal(buf)
 }
+
+type DistinguishedRequest struct {
+	Last *uint64
+	Stop *uint64
+}
+
+func NewDistinguishedRequest(buf *bytes.Buffer) (*DistinguishedRequest, error) {
+	last, err := readOptionalNumeric[uint64](buf)
+	if err != nil {
+		return nil, err
+	}
+	stop, err := readOptionalNumeric[uint64](buf)
+	if err != nil {
+		return nil, err
+	}
+	return &DistinguishedRequest{last, stop}, nil
+}
+
+func (dr *DistinguishedRequest) Marshal(buf *bytes.Buffer) error {
+	writeOptionalNumeric(buf, dr.Last)
+	writeOptionalNumeric(buf, dr.Stop)
+	return nil
+}
+
+type DistinguishedResponse struct {
+	FullTreeHead  FullTreeHead
+	Distinguished CombinedTreeProof
+}
+
+func NewDistinguishedResponse(
+	config *PublicConfig,
+	buf *bytes.Buffer,
+) (*DistinguishedResponse, error) {
+	fth, err := NewFullTreeHead(config, buf)
+	if err != nil {
+		return nil, err
+	}
+	distinguished, err := NewCombinedTreeProof(config.Suite, buf)
+	if err != nil {
+		return nil, err
+	}
+	return &DistinguishedResponse{*fth, *distinguished}, nil
+}
+
+func (dr *DistinguishedResponse) Marshal(buf *bytes.Buffer) error {
+	if err := dr.FullTreeHead.Marshal(buf); err != nil {
+		return err
+	}
+	return dr.Distinguished.Marshal(buf)
+}
