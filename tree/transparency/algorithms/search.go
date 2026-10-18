@@ -95,7 +95,10 @@ func FixedVersionSearch(config *structs.PublicConfig, ver uint32, n uint64, prov
 				return 0, ErrLabelExpired
 			}
 		} // Otherwise, look up the target version specifically.
-		if err := provider.GetInclusionProof(terminalPos, []uint32{ver}); err != nil {
+		err := provider.GetInclusionProof(terminalPos, []uint32{ver})
+		if err == errUnexpectedNonInclusion {
+			return 0, ErrLabelNotFound
+		} else if err != nil {
 			return 0, err
 		}
 		return terminalPos, nil

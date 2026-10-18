@@ -13,6 +13,8 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
+var errUnexpectedNonInclusion = errors.New("unexpected non-inclusion proof provided")
+
 func addVersion(
 	cs suites.CipherSuite,
 	versions map[uint32]prefix.Entry,
@@ -169,7 +171,7 @@ func (rph *ReceivedProofHandle) GetMonitoringBinaryLadder(x uint64, ver uint32) 
 	}
 	for _, res := range proof.Results {
 		if !res.Inclusion() {
-			return nil, errors.New("unexpected non-inclusion proof provided")
+			return nil, errUnexpectedNonInclusion
 		}
 	}
 
@@ -203,7 +205,7 @@ func (rph *ReceivedProofHandle) GetInclusionProof(x uint64, vers []uint32) ([]by
 	}
 	for _, res := range proof.Results {
 		if !res.Inclusion() {
-			return nil, errors.New("unexpected non-inclusion proof provided")
+			return nil, errUnexpectedNonInclusion
 		}
 	}
 

@@ -39,7 +39,7 @@ func (cs *ContactState) Set(pos uint64, ver uint32, n uint64) error {
 		if entry.Position < pos {
 			entries = append(entries, entry)
 			continue
-		} else if entry.Version >= ver {
+		} else if entry.Version > ver {
 			return errors.New("contact monitoring state has unexpectedly great version of label")
 		}
 		if !inserted {
@@ -203,7 +203,8 @@ func (m *Monitor) verifyGreatestVersion(x uint64, ver int64, omit bool) error {
 }
 
 // distinguishedAncestor returns the first distinguished log entry that is on
-// the direct path of `target` and to its right.
+// the direct path of `target` and to its right. It may return `target` itself
+// if `target` is distinguished.
 func (m *Monitor) distinguishedAncestor(target uint64) (*uint64, error) {
 	// List all distinguished log entries in the direct path of `target` and to
 	// its right.
@@ -423,11 +424,11 @@ func (m *Monitor) OwnerInit(starting *uint64, vers []uint32) ([]uint64, error) {
 	return xs, nil
 }
 
-// ownerMonitor performs a depth-first walk of every unexpired distinguished log
-// entry that is to the right of `owner.state.Starting`, and requests a search
-// binary ladder from each of them for the expected greatest version of the
-// label. `x` is the current log entry, `left` and `right` are the bounds used
-// for determining distinguished status.
+// ownerMonitor performs a depth-first walk of every distinguished log entry
+// that is to the right of `owner.state.Starting` and requests a search binary
+// ladder from each of them for the expected greatest version of the label. `x`
+// is the current log entry, `left` and `right` are the bounds used for
+// determining distinguished status.
 //
 // It returns the position of the rightmost log entry verified in the subtree
 // rooted at `x`, or nil if none were. The owner's state is not modified.
@@ -494,7 +495,7 @@ func (m *Monitor) ownerMonitor(x, left, right uint64) (*uint64, error) {
 	return verified, nil
 }
 
-// OwnerMonitor runs the algorithm from the section portion of Section 8.3. It
+// OwnerMonitor runs the algorithm from the second portion of Section 8.3. It
 // performs owner monitoring, ensuring that the label has not been modified
 // without the label owner's permission.
 func (m *Monitor) OwnerMonitor() error {

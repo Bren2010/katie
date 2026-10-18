@@ -95,7 +95,7 @@ func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataPro
 
 	// If the rightmost distinguished log entry has a left child and the left
 	// child is distinguished, then there's a subtree of distinguished log
-	// entries. Find it's rightmost edge.
+	// entries. Find its rightmost edge.
 	if hasLeftChild(*rightmost) && config.IsDistinguished(left, right) {
 		out := math.Left(*rightmost)
 		for {
@@ -121,7 +121,7 @@ func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataPro
 // is `m` and the current size of the tree is `n`.
 func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, provider *DataProvider) error {
 	if m != nil && *m > n {
-		return errors.New("new tree size is not greater than previous tree size")
+		return errors.New("new tree size is less than previous tree size")
 	} else if n == 0 {
 		return nil
 	}
