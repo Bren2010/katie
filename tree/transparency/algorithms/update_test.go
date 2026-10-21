@@ -474,12 +474,12 @@ func TestUpdateContactState(t *testing.T) {
 	// version that the owner already knew about, which must be less than the
 	// version being created. Version 1 at 99 means the state is corrupt, so the
 	// update is rejected and the state is left as it was.
-	contact = contactState(map[uint64]uint32{99: 1})
+	contact = contactState(map[uint64]uint32{99: 2})
 	_, err = runTest(contact)
 	if err == nil || err.Error() != "contact monitoring state has unexpectedly great version of label" {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	verifyContactState(t, contact, map[uint64]uint32{99: 1})
+	verifyContactState(t, contact, map[uint64]uint32{99: 2})
 }
 
 // TestUpdateMaxVersion verifies that Update handles creating the greatest

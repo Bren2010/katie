@@ -33,7 +33,7 @@ func TestUpdateView(t *testing.T) {
 	// Previous tree size is greater than current tree size
 	prev := uint64(100)
 	err := runTest(99, &prev, nil, nil)
-	if err.Error() != "new tree size is not greater than previous tree size" {
+	if err.Error() != "new tree size is less than previous tree size" {
 		t.Fatalf("unexpected error returned: %v", err)
 	}
 
