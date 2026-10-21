@@ -4,7 +4,6 @@ package algorithms
 
 import (
 	"errors"
-	"time"
 
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -118,8 +117,9 @@ func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataPro
 }
 
 // UpdateView runs the algorithm from Section 4.2. The previous size of the tree
-// is `m` and the current size of the tree is `n`.
-func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, provider *DataProvider) error {
+// is `m`, the current size of the tree is `n`, and the current time according
+// to the local clock is `now`, in milliseconds since the Unix epoch.
+func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, now uint64, provider *DataProvider) error {
 	if m != nil && *m > n {
 		return errors.New("new tree size is less than previous tree size")
 	} else if n == 0 {
@@ -132,7 +132,6 @@ func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, provider *Dat
 		}
 	}
 
-	now := uint64(time.Now().UnixMilli())
 	ts, err := provider.GetTimestamp(n - 1)
 	if err != nil {
 		return err

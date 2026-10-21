@@ -2,8 +2,11 @@ package db
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 type memKeyValue struct {
@@ -79,58 +82,57 @@ func (mls memManagedLog) IncrementGreatestVersion(ctx context.Context, label []b
 	return ver, nil
 }
 
-// type ClientLabelState struct {
-// 	Raw      []byte
-// 	Terminal uint64
-// }
-//
-// type ClientStore struct {
-// 	State      []byte
-// 	LabelState map[string]ClientLabelState
-// }
+type memClientLabel struct {
+	raw      []byte
+	terminal uint64
+}
 
-// func NewClientState() *ClientStore {
-// 	return &ClientStore{LabelState: make(map[string]ClientLabelState)}
-// }
+type memClient struct {
+	state  []byte
+	labels map[string]memClientLabel
+}
 
-// func (cs *ClientStore) GetState() ([]byte, error) {
-// 	return dup(cs.State), nil
-// }
+// NewMemoryClientStore returns an in-memory implementation of the ClientStore
+// interface.
+func NewMemoryClientStore() ClientStore {
+	return &memClient{labels: make(map[string]memClientLabel)}
+}
 
-// func (cs *ClientStore) GetLabelState(label []byte) ([]byte, error) {
-// 	return dup(cs.LabelState[hex.EncodeToString(label)].Raw), nil
-// }
+func (cs *memClient) GetState() ([]byte, error) { return dup(cs.state), nil }
 
-// func (cs *ClientStore) GetStaleLabel(cutoff uint64) ([]byte, []byte, error) {
-// 	for labelStr, state := range cs.LabelState {
-// 		if state.Terminal <= cutoff {
-// 			label, err := hex.DecodeString(labelStr)
-// 			if err != nil {
-// 				return nil, nil, err
-// 			}
-// 			return label, dup(state.Raw), nil
-// 		}
-// 	}
-// 	return nil, nil, nil
-// }
+func (cs *memClient) GetLabelState(label []byte) ([]byte, error) {
+	return dup(cs.labels[hex.EncodeToString(label)].raw), nil
+}
 
-// func (cs *ClientStore) PutState(raw []byte) error {
-// 	cs.State = dup(raw)
-// 	return nil
-// }
+func (cs *memClient) GetStaleLabel(cutoff uint64) ([]byte, []byte, error) {
+	// Iterate in sorted order so that the label returned is deterministic.
+	for _, labelStr := range slices.Sorted(maps.Keys(cs.labels)) {
+		state := cs.labels[labelStr]
+		if state.terminal <= cutoff {
+			label, err := hex.DecodeString(labelStr)
+			if err != nil {
+				return nil, nil, err
+			}
+			return label, dup(state.raw), nil
+		}
+	}
+	return nil, nil, nil
+}
 
-// func (cs *ClientStore) PutLabelState(raw, label, rawLabel []byte, terminal uint64) error {
-// 	cs.State = dup(raw)
+func (cs *memClient) PutState(raw []byte) error {
+	cs.state = dup(raw)
+	return nil
+}
 
-// 	labelStr := hex.EncodeToString(label)
-// 	if rawLabel == nil {
-// 		delete(cs.LabelState, labelStr)
-// 	} else {
-// 		cs.LabelState[labelStr] = ClientLabelState{
-// 			Raw:      dup(rawLabel),
-// 			Terminal: terminal,
-// 		}
-// 	}
+func (cs *memClient) PutLabelState(raw, label, rawLabel []byte, terminal uint64) error {
+	cs.state = dup(raw)
 
-// 	return nil
-// }
+	labelStr := hex.EncodeToString(label)
+	if rawLabel == nil {
+		delete(cs.labels, labelStr)
+	} else {
+		cs.labels[labelStr] = memClientLabel{raw: dup(rawLabel), terminal: terminal}
+	}
+
+	return nil
+}

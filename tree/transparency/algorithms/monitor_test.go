@@ -78,7 +78,7 @@ func TestContactMonitoring(t *testing.T) {
 		handle := test.NewProofHandle(vec.tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, provider); err != nil {
+		if err := UpdateView(public, 100, nil, now, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)
@@ -237,7 +237,7 @@ func TestOwnerInit(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, provider); err != nil {
+		if err := UpdateView(public, 100, nil, now, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)
@@ -349,7 +349,7 @@ func TestOwnerMonitor(t *testing.T) {
 		handle.SetStopPos(vec.stopPos)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, provider); err != nil {
+		if err := UpdateView(public, 100, nil, now, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)
@@ -534,7 +534,7 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 		handle.SetStopPos(4)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, provider); err != nil {
+		if err := UpdateView(public, 100, nil, now, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)
