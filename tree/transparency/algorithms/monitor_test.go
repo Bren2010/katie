@@ -16,7 +16,7 @@ func contactState(ptrs map[uint64]uint32) *ContactState {
 	for pos, ver := range ptrs {
 		entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
 	}
-	state, err := NewContactState(entries)
+	state, err := newContactState(entries, ^uint64(0))
 	if err != nil {
 		panic(err)
 	}
@@ -576,13 +576,17 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 }
 
 func TestNewContactState(t *testing.T) {
-	_, err := NewContactState([]structs.MonitorMapEntry{{Position: 5, Version: 1}, {Position: 3, Version: 0}})
+	_, err := newContactState([]structs.MonitorMapEntry{{Position: 5, Version: 1}, {Position: 3, Version: 0}}, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewContactState([]structs.MonitorMapEntry{{Position: 5, Version: 1}, {Position: 5, Version: 2}})
+	_, err = newContactState([]structs.MonitorMapEntry{{Position: 5, Version: 1}, {Position: 5, Version: 2}}, 6)
 	if err == nil {
 		t.Fatal("expected error for duplicate position")
+	}
+	_, err = newContactState([]structs.MonitorMapEntry{{Position: 5, Version: 1}, {Position: 3, Version: 0}}, 5)
+	if err == nil {
+		t.Fatal("expected error for position not in tree")
 	}
 }
 
@@ -596,7 +600,7 @@ func TestNewOwnerState(t *testing.T) {
 		{Starting: ptr(13), PreviousVers: []uint32{(1 << 32) - 1}},
 	}
 	for i, state := range valid {
-		if _, err := NewOwnerState(state); err != nil {
+		if _, err := newOwnerState(state, 15); err != nil {
 			t.Fatalf("valid state %d rejected: %v", i, err)
 		}
 	}
@@ -610,9 +614,11 @@ func TestNewOwnerState(t *testing.T) {
 		{Starting: ptr(13), UpcomingVers: []uint64{13}},
 		{UpcomingVers: []uint64{4, 3}},
 		{Starting: ptr(13), PreviousVers: []uint32{(1 << 32) - 1}, UpcomingVers: []uint64{14}},
+		{Starting: ptr(15)},
+		{Starting: ptr(13), UpcomingVers: []uint64{14, 15}},
 	}
 	for i, state := range invalid {
-		if _, err := NewOwnerState(state); err == nil {
+		if _, err := newOwnerState(state, 15); err == nil {
 			t.Fatalf("invalid state %d accepted", i)
 		}
 	}

@@ -18,13 +18,17 @@ type ContactState struct {
 	Entries []structs.MonitorMapEntry
 }
 
-// NewContactState returns a new ContactState containing `entries`, which may be
-// in any order. It returns an error if any position is duplicate.
-func NewContactState(entries []structs.MonitorMapEntry) (*ContactState, error) {
+// newContactState returns a new ContactState containing `entries`, which may be
+// in any order. `n` is the size of the tree. It returns an error if any
+// position is duplicate or not in the tree.
+func newContactState(entries []structs.MonitorMapEntry, n uint64) (*ContactState, error) {
 	sorted := slices.Clone(entries)
 	slices.SortFunc(sorted, func(a, b structs.MonitorMapEntry) int {
 		return cmp.Compare(a.Position, b.Position)
 	})
+	if len(sorted) > 0 && sorted[len(sorted)-1].Position >= n {
+		return nil, errors.New("contact monitoring state has position not in tree")
+	}
 	for i := 1; i < len(sorted); i++ {
 		if sorted[i].Position == sorted[i-1].Position {
 			return nil, errors.New("contact monitoring state has duplicate position")
@@ -79,11 +83,16 @@ type OwnerState struct {
 	UpcomingVers []uint64
 }
 
-// NewOwnerState returns a new OwnerState from the retained state in `from`. It
-// returns an error if the retained state is not internally consistent.
-func NewOwnerState(from *structs.LabelOwnerState) (*OwnerState, error) {
+// newOwnerState returns a new OwnerState from the retained state in `from`.
+// `n` is the size of the tree. It returns an error if the retained state is not
+// internally consistent or references log entries not in the tree.
+func newOwnerState(from *structs.LabelOwnerState, n uint64) (*OwnerState, error) {
 	if from == nil {
 		return nil, errors.New("label owner state not provided")
+	} else if from.Starting != nil && *from.Starting >= n {
+		return nil, errors.New("starting position is not in tree")
+	} else if len(from.UpcomingVers) > 0 && slices.Max(from.UpcomingVers) >= n {
+		return nil, errors.New("upcoming version is not in tree")
 	}
 
 	// Verify that PreviousVers has at most one entry for `Starting` and each
@@ -223,6 +232,30 @@ func NewMonitor(config *structs.PublicConfig, treeSize uint64, provider *DataPro
 		rightmost: rightmost,
 		treeSize:  treeSize,
 	}, nil
+}
+
+// SetContactState sets the contact monitoring state to contain `entries`, which
+// may be in any order. It returns an error if any position is duplicate or not
+// in the tree.
+func (m *Monitor) SetContactState(entries []structs.MonitorMapEntry) error {
+	contact, err := newContactState(entries, m.treeSize)
+	if err != nil {
+		return err
+	}
+	m.Contact = contact
+	return nil
+}
+
+// SetOwnerState sets the label owner's state from the retained state in `from`.
+// It returns an error if the retained state is not internally consistent or
+// references log entries not in the tree.
+func (m *Monitor) SetOwnerState(from *structs.LabelOwnerState) error {
+	owner, err := newOwnerState(from, m.treeSize)
+	if err != nil {
+		return err
+	}
+	m.Owner = owner
+	return nil
 }
 
 // verifyGreatestVersion obtains a search binary ladder from log entry `x` and
@@ -368,12 +401,7 @@ func (m *Monitor) ContactMonitor() error {
 		m.Contact = nil
 		return nil
 	}
-	contact, err := NewContactState(entries)
-	if err != nil {
-		return err
-	}
-	m.Contact = contact
-	return nil
+	return m.SetContactState(entries)
 }
 
 // init returns the list of log entries to verify if an owner is starting their
