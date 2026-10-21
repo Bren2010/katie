@@ -16,7 +16,11 @@ func contactState(ptrs map[uint64]uint32) *ContactState {
 	for pos, ver := range ptrs {
 		entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
 	}
-	return NewContactState(entries)
+	state, err := NewContactState(entries)
+	if err != nil {
+		panic(err)
+	}
+	return state
 }
 
 func verifyContactState(t *testing.T, state *ContactState, expected map[uint64]uint32) {
@@ -568,5 +572,48 @@ func TestOwnerMonitorNoStarting(t *testing.T) {
 		t.Fatal("expected error")
 	} else if state.Starting != nil || state.VerAtStarting() != -1 {
 		t.Fatalf("unexpected owner state: %+v", state)
+	}
+}
+
+func TestNewContactState(t *testing.T) {
+	_, err := NewContactState([]structs.MonitorMapEntry{{Position: 5, Version: 1}, {Position: 3, Version: 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewContactState([]structs.MonitorMapEntry{{Position: 5, Version: 1}, {Position: 5, Version: 2}})
+	if err == nil {
+		t.Fatal("expected error for duplicate position")
+	}
+}
+
+func TestNewOwnerState(t *testing.T) {
+	ptr := func(x uint64) *uint64 { return &x }
+
+	valid := []*structs.LabelOwnerState{
+		{},
+		{UpcomingVers: []uint64{0, 0, 4}},
+		{Starting: ptr(13), PreviousVers: []uint32{4, 2, 2}, UpcomingVers: []uint64{14, 14}},
+		{Starting: ptr(13), PreviousVers: []uint32{(1 << 32) - 1}},
+	}
+	for i, state := range valid {
+		if _, err := NewOwnerState(state); err != nil {
+			t.Fatalf("valid state %d rejected: %v", i, err)
+		}
+	}
+
+	// LeftDirectPath(13) is [11, 7], so at most 3 previous versions.
+	invalid := []*structs.LabelOwnerState{
+		nil,
+		{PreviousVers: []uint32{0}},
+		{Starting: ptr(13), PreviousVers: []uint32{4, 3, 2, 1}},
+		{Starting: ptr(13), PreviousVers: []uint32{2, 3}},
+		{Starting: ptr(13), UpcomingVers: []uint64{13}},
+		{UpcomingVers: []uint64{4, 3}},
+		{Starting: ptr(13), PreviousVers: []uint32{(1 << 32) - 1}, UpcomingVers: []uint64{14}},
+	}
+	for i, state := range invalid {
+		if _, err := NewOwnerState(state); err == nil {
+			t.Fatalf("invalid state %d accepted", i)
+		}
 	}
 }

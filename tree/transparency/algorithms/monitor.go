@@ -18,12 +18,19 @@ type ContactState struct {
 	Entries []structs.MonitorMapEntry
 }
 
-func NewContactState(entries []structs.MonitorMapEntry) *ContactState {
+// NewContactState returns a new ContactState containing `entries`, which may be
+// in any order. It returns an error if any position is duplicate.
+func NewContactState(entries []structs.MonitorMapEntry) (*ContactState, error) {
 	sorted := slices.Clone(entries)
 	slices.SortFunc(sorted, func(a, b structs.MonitorMapEntry) int {
 		return cmp.Compare(a.Position, b.Position)
 	})
-	return &ContactState{Entries: sorted}
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i].Position == sorted[i-1].Position {
+			return nil, errors.New("contact monitoring state has duplicate position")
+		}
+	}
+	return &ContactState{Entries: sorted}, nil
 }
 
 // Set sets the version of the label for log entry `pos` to `ver`, adding an
@@ -72,12 +79,46 @@ type OwnerState struct {
 	UpcomingVers []uint64
 }
 
-func NewOwnerState(from *structs.LabelOwnerState) *OwnerState {
-	return &OwnerState{
+// NewOwnerState returns a new OwnerState from the retained state in `from`. It
+// returns an error if the retained state is not internally consistent.
+func NewOwnerState(from *structs.LabelOwnerState) (*OwnerState, error) {
+	if from == nil {
+		return nil, errors.New("label owner state not provided")
+	}
+
+	// Verify that PreviousVers has at most one entry for `Starting` and each
+	// log entry in its left direct path, and that it never increases.
+	if from.Starting == nil {
+		if len(from.PreviousVers) != 0 {
+			return nil, errors.New("previous versions provided without starting position")
+		}
+	} else if len(from.PreviousVers) > 1+len(math.LeftDirectPath(*from.Starting)) {
+		return nil, errors.New("unexpected number of previous versions")
+	}
+	for i := 1; i < len(from.PreviousVers); i++ {
+		if from.PreviousVers[i] > from.PreviousVers[i-1] {
+			return nil, errors.New("previous versions are not monotonic")
+		}
+	}
+
+	// Verify that UpcomingVers is sorted and to the right of `Starting`.
+	for i, pos := range from.UpcomingVers {
+		if from.Starting != nil && pos <= *from.Starting {
+			return nil, errors.New("upcoming version is not to the right of starting position")
+		} else if i > 0 && pos < from.UpcomingVers[i-1] {
+			return nil, errors.New("upcoming versions are not sorted")
+		}
+	}
+
+	os := &OwnerState{
 		Starting:     from.Starting,
 		PreviousVers: from.PreviousVers,
 		UpcomingVers: from.UpcomingVers,
 	}
+	if os.GreatestVersion() >= 1<<32 {
+		return nil, errors.New("greatest version of label is too large")
+	}
+	return os, nil
 }
 
 func (os *OwnerState) Struct() *structs.LabelOwnerState {
@@ -325,9 +366,13 @@ func (m *Monitor) ContactMonitor() error {
 	// Update retained state.
 	if len(entries) == 0 {
 		m.Contact = nil
-	} else {
-		m.Contact = NewContactState(entries)
+		return nil
 	}
+	contact, err := NewContactState(entries)
+	if err != nil {
+		return err
+	}
+	m.Contact = contact
 	return nil
 }
 

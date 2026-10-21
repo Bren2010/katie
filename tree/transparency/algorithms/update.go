@@ -47,6 +47,10 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 		return nil
 	}
 
+	// If the owner's state no longer has the position of the previous greatest
+	// version, LastUpdate returns `Starting` instead, which is at or to the
+	// right of that position. This skips the same log entries: every log entry
+	// inspected below is to the right of `Starting`.
 	greatestVer := m.Owner.GreatestVersion()
 	lastUpdate := m.Owner.LastUpdate()
 
@@ -67,11 +71,9 @@ func (m *Monitor) verifyPreviousTree(pos uint64) error {
 		x = math.Left(x)
 	}
 
-	// Lookups that would be omitted in a greatest-version search are omitted
-	// here too. That search would've already inspected x's parent on the
-	// frontier (if any), so record the versions it would've proven to be
-	// included there. If no version of the label existed, there's nothing to
-	// record.
+	// Omit lookups that would be omitted in a greatest-version search, starting
+	// with any lookups that would've succeeded in the previous tree's rightmost
+	// distinguished log entry.
 	tracker := m.provider.handle.Tracker()
 	var ladder []uint32
 	if greatestVer >= 0 {
