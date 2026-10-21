@@ -37,6 +37,13 @@ func newContactState(entries []structs.MonitorMapEntry, n uint64) (*ContactState
 	return &ContactState{Entries: sorted}, nil
 }
 
+func (cs *ContactState) Struct() []structs.MonitorMapEntry {
+	if cs == nil || len(cs.Entries) == 0 {
+		return nil
+	}
+	return cs.Entries
+}
+
 // Set sets the version of the label for log entry `pos` to `ver`, adding an
 // entry for it if one doesn't exist. `n` is the size of the tree.
 func (cs *ContactState) Set(pos uint64, ver uint32, n uint64) error {

@@ -2,7 +2,10 @@ package transparency
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
+	"slices"
+	"time"
 
 	"github.com/Bren2010/katie/crypto/commitments"
 	"github.com/Bren2010/katie/tree/log"
@@ -17,6 +20,7 @@ type verifier struct {
 	config *structs.PublicConfig
 	state  *structs.ClientState
 	fth    structs.FullTreeHead
+	now    uint64 // Local time the response was received, in milliseconds.
 
 	handle   *algorithms.ReceivedProofHandle
 	provider *algorithms.DataProvider
@@ -29,8 +33,9 @@ type verifier struct {
 func newVerifier(
 	config *structs.PublicConfig,
 	state *structs.ClientState,
-	last *uint64,
 	fth structs.FullTreeHead,
+	now time.Time,
+	last *uint64,
 	proof structs.CombinedTreeProof,
 ) (*verifier, error) {
 	// Set up ProofHandle and DataProvider.
@@ -58,11 +63,11 @@ func newVerifier(
 		nP = &fth.AuditorTreeHead.TreeSize
 	}
 
-	return &verifier{config, state, fth, handle, provider, n, nP, last}, nil
+	return &verifier{config, state, fth, uint64(now.UnixMilli()), handle, provider, n, nP, last}, nil
 }
 
 func (v *verifier) updateView() error {
-	return algorithms.UpdateView(v.config, v.n, v.m, v.provider)
+	return algorithms.UpdateView(v.config, v.n, v.m, v.now, v.provider)
 }
 
 func (v *verifier) greatestVersionSearch(ver uint32) (uint64, error) {
@@ -266,17 +271,35 @@ func getDistinguished(config *structs.PublicConfig, state *structs.ClientState) 
 	return *rightmostDLE, nil
 }
 
-func greatestVersion(owner *structs.LabelOwnerState) *uint32 {
-	greatest := uint32(len(owner.UpcomingVers))
-	if owner.VerAtStarting == nil {
-		if greatest == 0 {
-			return nil
-		}
-		greatest -= 1
-		return &greatest
+// verAtStarting returns the greatest version of the label that existed at the
+// owner's starting position, or -1 if there is none.
+func verAtStarting(owner *structs.LabelOwnerState) int64 {
+	if len(owner.PreviousVers) == 0 {
+		return -1
 	}
-	greatest += *owner.VerAtStarting
-	return &greatest
+	return int64(owner.PreviousVers[0])
+}
+
+// greatestVersion returns the greatest version of the label known to the
+// owner, or nil if no version of the label is known to exist.
+func greatestVersion(owner *structs.LabelOwnerState) *uint32 {
+	greatest := verAtStarting(owner) + int64(len(owner.UpcomingVers))
+	if greatest < 0 {
+		return nil
+	}
+	out := uint32(greatest)
+	return &out
+}
+
+// ownerTerminal returns the `terminal` value that an owned label is stored
+// with, for the purpose of determining when it is stale. This is the owner's
+// starting position or, if the owner hasn't verified any distinguished log
+// entries yet, zero so that the label is always considered stale.
+func ownerTerminal(owner *structs.LabelOwnerState) uint64 {
+	if owner.Starting == nil {
+		return 0
+	}
+	return *owner.Starting
 }
 
 func parseLabelState(config *structs.PublicConfig, raw []byte) (*structs.ClientLabelState, error) {
@@ -370,25 +393,38 @@ func simplifyMonitoringMap(ptrs map[uint64]uint32, n uint64) {
 // updateContactState is used specifically after Search operations. It computes
 // the rightmost terminal log entry for the search, and removes any map entries
 // that no longer need to be monitored as a result of this search.
-func updateContactState(
+func updateContactState( // TODO: Can we replace this with ContactState.Set?
 	state *structs.ClientLabelState,
 	x, n uint64,
 	ver uint32,
 ) (uint64, error) {
-	contact := algorithms.NewContactState(state.Contact)
+	ptrs := make(map[uint64]uint32, len(state.Contact))
+	for _, entry := range state.Contact {
+		if _, ok := ptrs[entry.Position]; ok {
+			return 0, errors.New("contact monitoring state has duplicate position")
+		}
+		ptrs[entry.Position] = entry.Version
+	}
 
 	path := append([]uint64{x}, math.RightDirectPath(x, n)...)
 	for _, pos := range path {
-		posVer, ok := contact.Ptrs[pos]
+		posVer, ok := ptrs[pos]
 		if ok && posVer > ver {
 			break
 		}
-		contact.Ptrs[pos] = ver
+		ptrs[pos] = ver
 		x = pos
 	}
-	simplifyMonitoringMap(contact.Ptrs, n)
+	simplifyMonitoringMap(ptrs, n)
 
-	state.Contact = contact.Struct()
+	entries := make([]structs.MonitorMapEntry, 0, len(ptrs))
+	for pos, ver := range ptrs {
+		entries = append(entries, structs.MonitorMapEntry{Position: pos, Version: ver})
+	}
+	slices.SortFunc(entries, func(a, b structs.MonitorMapEntry) int {
+		return cmp.Compare(a.Position, b.Position)
+	})
+	state.Contact = entries
 	return x, nil
 }
 
@@ -413,9 +449,9 @@ func updateRetainedVersions(
 	if state.Owner != nil {
 		ownedVersions := make([]uint32, 0)
 		next := uint32(0)
-		if starting := state.Owner.VerAtStarting; starting != nil {
-			ownedVersions = append(ownedVersions, *starting)
-			next = *starting + 1
+		if starting := verAtStarting(state.Owner); starting >= 0 {
+			ownedVersions = append(ownedVersions, uint32(starting))
+			next = uint32(starting) + 1
 		}
 		for i := range len(state.Owner.UpcomingVers) {
 			ownedVersions = append(ownedVersions, next+uint32(i))

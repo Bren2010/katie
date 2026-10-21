@@ -12,36 +12,33 @@ import (
 )
 
 // verifyEntries verifies that the monitoring map entries presented in a request
-// are valid. It returns the contact monitoring state.
-func verifyEntries(entries []structs.MonitorMapEntry, index []uint64, n uint64) (map[uint64]uint32, error) {
+// are valid.
+func verifyEntries(entries []structs.MonitorMapEntry, index []uint64, n uint64) error { // TODO: Is this replaced by NewContactState?
 	// Verify that `entries` is in ascending order by both `position` and
 	// `version`, and that no `position` or `version` is duplicate.
 	for i := 1; i < len(entries); i++ {
 		if entries[i-1].Position >= entries[i].Position {
-			return nil, errors.New("monitoring map is not sorted by position")
+			return errors.New("monitoring map is not sorted by position")
 		} else if entries[i-1].Version >= entries[i].Version {
-			return nil, errors.New("monitoring map is not sorted by version")
+			return errors.New("monitoring map is not sorted by version")
 		}
 	}
 
 	// Verify that each `position` is on the (right) direct path of the first
 	// log entry to contain the associated `version` of the label.
-	ptrs := make(map[uint64]uint32)
 	for _, entry := range entries {
 		if int(entry.Version) >= len(index) {
-			return nil, errors.New("unexpected version found in monitoring map")
+			return errors.New("unexpected version found in monitoring map")
 		}
 		first := index[entry.Version]
 
 		path := math.RightDirectPath(first, n)
 		if entry.Position != first && !slices.Contains(path, entry.Position) {
-			return nil, errors.New("unexpected position found in monitoring map")
+			return errors.New("unexpected position found in monitoring map")
 		}
-
-		ptrs[entry.Position] = entry.Version
 	}
 
-	return ptrs, nil
+	return nil
 }
 
 // allLadderVersions returns the sorted list of all versions that would appear
@@ -167,11 +164,11 @@ func (t *Tree) ContactMonitor(
 		return nil, err
 	}
 
-	ptrs, err := verifyEntries(req.Entries, op.index, op.n)
-	if err != nil {
+	if err := verifyEntries(req.Entries, op.index, op.n); err != nil {
+		return nil, err
+	} else if err := op.monitor.SetContactState(req.Entries); err != nil {
 		return nil, err
 	}
-	op.monitor.Contact = &algorithms.ContactState{Ptrs: ptrs}
 	if err := op.monitor.ContactMonitor(); err != nil {
 		return nil, err
 	}
@@ -201,7 +198,7 @@ func (t *Tree) OwnerInit(
 
 	// Compute the greatest version of the label that exists at each log entry
 	// in `entries`.
-	state := &algorithms.OwnerState{Starting: 0, VerAtStarting: -1, UpcomingVers: op.index}
+	state := &algorithms.OwnerState{UpcomingVers: op.index}
 	versions := make([]uint32, 0, len(entries))
 	for _, entry := range entries {
 		ver := state.GreatestVersionAt(entry)
@@ -212,10 +209,14 @@ func (t *Tree) OwnerInit(
 	}
 	// Fetch the VRF proof and value commitment for all versions that may appear
 	// in a binary ladder for any version in `versions`.
+	greatestAtStart := int64(-1)
+	if req.Start != nil {
+		greatestAtStart = state.GreatestVersionAt(*req.Start)
+	}
 	binaryLadder, err := t.getBinaryLadder(
 		req.Label,
 		allLadderVersions(versions),
-		state.GreatestVersionAt(req.Start),
+		greatestAtStart,
 		op.n,
 	)
 	if err != nil {
@@ -250,12 +251,11 @@ func (t *Tree) OwnerMonitor(
 	}
 
 	// Verify `Entries` is acceptable.
-	ptrs, err := verifyEntries(req.Entries, op.index, op.n)
-	if err != nil {
+	if err := verifyEntries(req.Entries, op.index, op.n); err != nil {
 		return nil, err
 	}
-	// Verify that `Start` is less than the size of the tree.
-	if req.Start >= t.treeHead.TreeSize {
+	// Verify that `Start` is either absent or less than the size of the tree.
+	if req.Start != nil && *req.Start >= op.n {
 		return nil, errors.New("advertised starting position is greater than tree size")
 	}
 	// Verify that `GreatestVersion` is either absent, or less than or equal to
@@ -264,14 +264,24 @@ func (t *Tree) OwnerMonitor(
 		return nil, errors.New("version advertised is greater than known greatest version")
 	}
 
-	op.monitor.Contact = &algorithms.ContactState{Ptrs: ptrs}
-	op.monitor.Owner = &algorithms.OwnerState{VerAtStarting: -1, UpcomingVers: op.index}
-	op.monitor.Owner.SetStarting(req.Start)
+	if err := op.monitor.SetContactState(req.Entries); err != nil {
+		return nil, err
+	}
+
+	// Reconstruct the owner's state from the label's index. The owner's state
+	// starts out knowing every version of the label, and is then advanced to
+	// the starting position advertised by the user.
+	owner := &algorithms.OwnerState{UpcomingVers: op.index}
+	if req.Start != nil {
+		owner.SetStarting(*req.Start)
+	}
+	op.monitor.Owner = owner
 
 	// Verify that, if some version of the label existed at `start`, that
 	// `GreatestVersion` is present and greater than or equal to that version.
-	if op.monitor.Owner.VerAtStarting > -1 {
-		if req.GreatestVersion == nil || int64(*req.GreatestVersion) < op.monitor.Owner.VerAtStarting {
+	verAtStarting := owner.VerAtStarting()
+	if verAtStarting > -1 {
+		if req.GreatestVersion == nil || int64(*req.GreatestVersion) < verAtStarting {
 			return nil, errors.New("version advertised is less than version at starting position")
 		}
 	}
@@ -280,9 +290,9 @@ func (t *Tree) OwnerMonitor(
 	// This ensures that the stopping condition is followed.
 	end := int64(0)
 	if req.GreatestVersion != nil {
-		end = int64(*req.GreatestVersion) - op.monitor.Owner.VerAtStarting
+		end = int64(*req.GreatestVersion) - verAtStarting
 	}
-	op.monitor.Owner.UpcomingVers = op.monitor.Owner.UpcomingVers[:end]
+	owner.UpcomingVers = owner.UpcomingVers[:end]
 
 	if err := op.monitor.ContactMonitor(); err != nil {
 		return nil, err

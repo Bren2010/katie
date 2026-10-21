@@ -339,6 +339,7 @@ func (u *updater) reloadTree(pos uint64) error {
 	} else if tree.treeHead.TreeSize <= pos {
 		return errors.New("reloaded tree does not contain new versions of label")
 	}
+	tree.now = u.tree.now
 
 	indices, err := u.tree.batchGetIndex([][]byte{u.label})
 	if err != nil {

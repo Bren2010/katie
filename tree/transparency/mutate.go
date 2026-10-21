@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/Bren2010/katie/tree/log"
 	"github.com/Bren2010/katie/tree/prefix"
@@ -31,7 +30,7 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 	// Decide on the timestamp for the new log entry. We do this so early
 	// because it affects which distinguished log entries exist, which affects
 	// which modifications are allowable.
-	timestamp := uint64(time.Now().UnixMilli())
+	timestamp := uint64(t.now().UnixMilli())
 	if n > 0 {
 		rightmost, err := provider.GetTimestamp(n - 1)
 		if err != nil {

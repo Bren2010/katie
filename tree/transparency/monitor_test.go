@@ -127,20 +127,20 @@ func TestOwnerInit(t *testing.T) {
 	tree, labels := generateRandomTree(t)
 
 	// Rejects non-distinguished starting log entry.
-	_, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 2})
+	_, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(2))})
 	if err.Error() != "requested starting position is not distinguished" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Rejects starting log entry greater than tree size.
-	_, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 200})
+	_, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(200))})
 	if err.Error() != "requested starting position is not distinguished" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Accepts distinguished log entry 0, and restricts data provided to
 	// versions that existed at that point.
-	res, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 0})
+	res, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(0))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestOwnerInit(t *testing.T) {
 
 	// Accepts distinguished log entry 3, and restricts data provided to
 	// versions that existed at that point.
-	res, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: 3})
+	res, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(3))})
 	if err != nil {
 		t.Fatal(err)
 	}

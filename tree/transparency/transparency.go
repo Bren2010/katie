@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Bren2010/katie/db"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
@@ -57,6 +58,8 @@ type Tree struct {
 	updater     chan<- UpdateRequest
 	treeHead    *structs.TreeHead
 	auditorHead *structs.AuditorTreeHead
+
+	now func() time.Time // Returns the current time. Overridden in tests.
 }
 
 var (
@@ -103,6 +106,8 @@ func NewTree(
 		updater:     updater,
 		treeHead:    treeHead,
 		auditorHead: auditorHead,
+
+		now: time.Now,
 	}, nil
 }
 
@@ -158,7 +163,8 @@ func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error
 		provider.AddRetained(nil, logEntries)
 	}
 
-	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
+	now := uint64(t.now().UnixMilli())
+	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, now, provider)
 }
 
 func (t *Tree) Search(

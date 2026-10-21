@@ -3,9 +3,9 @@ package transparency
 import (
 	"bytes"
 	"errors"
+	"time"
 
 	"github.com/Bren2010/katie/db"
-	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
@@ -20,6 +20,7 @@ type VerifyFunc[T any] func(res T) error
 type Client struct {
 	config *structs.PublicConfig
 	tx     db.ClientStore
+	now    func() time.Time // Returns the current time. Overridden in tests.
 }
 
 func NewClient(config *structs.PublicConfig, tx db.ClientStore) (*Client, error) {
@@ -42,6 +43,7 @@ func NewClient(config *structs.PublicConfig, tx db.ClientStore) (*Client, error)
 	return &Client{
 		config: config,
 		tx:     tx,
+		now:    time.Now,
 	}, nil
 }
 
@@ -149,7 +151,7 @@ func (c *Client) search(
 	req *structs.SearchRequest,
 ) VerifyFunc[*structs.SearchResponse] {
 	return func(res *structs.SearchResponse) error {
-		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Search)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Search)
 		if err != nil {
 			return err
 		}
@@ -254,7 +256,7 @@ func (c *Client) OwnerInit(label []byte) (
 		return nil, nil, err
 	}
 
-	req := &structs.OwnerInitRequest{Last: getLast(state), Label: label, Start: start}
+	req := &structs.OwnerInitRequest{Last: getLast(state), Label: label, Start: &start}
 	return req, c.ownerInit(state, labelState, req), nil
 }
 
@@ -264,7 +266,7 @@ func (c *Client) ownerInit(
 	req *structs.OwnerInitRequest,
 ) VerifyFunc[*structs.OwnerInitResponse] {
 	return func(res *structs.OwnerInitResponse) error {
-		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Init)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Init)
 		if err != nil {
 			return err
 		}
@@ -312,7 +314,7 @@ func (c *Client) ownerInit(
 		} else if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
 		}
-		return c.putLabelState(updated, req.Label, labelState, req.Start)
+		return c.putLabelState(updated, req.Label, labelState, ownerTerminal(labelState.Owner))
 	}
 }
 
@@ -376,7 +378,7 @@ func (c *Client) contactMonitor(
 		}
 
 		// Verify the proof.
-		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Monitor)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Monitor)
 		if err != nil {
 			return err
 		} else if err := v.addLabelState(labelState); err != nil {
@@ -388,7 +390,9 @@ func (c *Client) contactMonitor(
 		if err != nil {
 			return err
 		}
-		monitor.Contact = algorithms.NewContactState(labelState.Contact)
+		if err := monitor.SetContactState(labelState.Contact); err != nil {
+			return err
+		}
 		if err := monitor.ContactMonitor(); err != nil {
 			return err
 		}
@@ -426,7 +430,7 @@ func (c *Client) ownerMonitor(
 		}
 
 		// Verify the proof.
-		v, err := newVerifier(c.config, state, req.Last, res.FullTreeHead, res.Monitor)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Monitor)
 		if err != nil {
 			return err
 		} else if err := v.addLabelState(labelState); err != nil {
@@ -438,8 +442,11 @@ func (c *Client) ownerMonitor(
 		if err != nil {
 			return err
 		}
-		monitor.Contact = algorithms.NewContactState(labelState.Contact)
-		monitor.Owner = algorithms.NewOwnerState(labelState.Owner)
+		if err := monitor.SetContactState(labelState.Contact); err != nil {
+			return err
+		} else if err := monitor.SetOwnerState(labelState.Owner); err != nil {
+			return err
+		}
 		if err := monitor.ContactMonitor(); err != nil {
 			return err
 		} else if err := monitor.OwnerMonitor(); err != nil {
@@ -456,7 +463,7 @@ func (c *Client) ownerMonitor(
 		if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
 		}
-		return c.putLabelState(updated, req.Label, labelState, *labelState.Owner.Starting) // TODO: Verify non-nil
+		return c.putLabelState(updated, req.Label, labelState, ownerTerminal(labelState.Owner))
 	}
 }
 
@@ -571,7 +578,7 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 	}
 
 	// Verify the expected number of entries is present in res.BinaryLadder.
-	v, err := newVerifier(sv.client.config, sv.state, getLast(sv.state), res.FullTreeHead, res.Update)
+	v, err := newVerifier(sv.client.config, sv.state, res.FullTreeHead, sv.client.now(), getLast(sv.state), res.Update)
 	if err != nil {
 		return err
 	} else if err := v.addLabelState(sv.labelState); err != nil {
@@ -590,8 +597,11 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 	if err != nil {
 		return err
 	}
-	monitor.Contact = algorithms.NewContactState(sv.labelState.Contact)
-	monitor.Owner = algorithms.NewOwnerState(sv.labelState.Owner)
+	if err := monitor.SetContactState(sv.labelState.Contact); err != nil {
+		return err
+	} else if err := monitor.SetOwnerState(sv.labelState.Owner); err != nil {
+		return err
+	}
 	if err := monitor.Update(res.Position, len(res.Info)); err != nil {
 		return err
 	}
@@ -608,5 +618,5 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 		return err
 	}
 
-	return sv.client.putLabelState(updated, sv.req.Label, sv.labelState, *sv.labelState.Owner.Starting) // TODO: Verify non-nil
+	return sv.client.putLabelState(updated, sv.req.Label, sv.labelState, ownerTerminal(sv.labelState.Owner))
 }
