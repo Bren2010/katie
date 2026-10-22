@@ -13,6 +13,8 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/wire"
 )
 
+// LabelValue is a request to add a new version of a label to the tree, given as
+// input to Tree.Mutate. Version counters are assigned automatically.
 type LabelValue struct {
 	Label []byte
 	Value structs.UpdateValue
@@ -104,6 +106,8 @@ func NewTree(
 	}, nil
 }
 
+// TreeHead returns the most recently issued tree head, or nil if the tree is
+// empty and no tree head has been issued yet.
 func (t *Tree) TreeHead() *structs.TreeHead { return t.treeHead }
 
 func (t *Tree) n() uint64 { return t.treeHead.TreeSize }
@@ -158,6 +162,12 @@ func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error
 	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
 }
 
+// Search looks up a requested version of a label. It returns the corresponding
+// value and a proof that the search was executed correctly.
+//
+// If `req.Version` is nil, a greatest-version search is performed for the most
+// recent version of the label. Otherwise, a fixed-version search is performed
+// for the indicated version.
 func (t *Tree) Search(
 	ctx context.Context,
 	req *structs.SearchRequest,
