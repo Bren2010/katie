@@ -54,12 +54,14 @@ func (ts TransparencyStore) batchGet[K any](keys []K, convert func(key K) string
 		}
 	}
 
-	results, err := ts.kv.BatchGet(ts.ctx, converted)
-	if err != nil {
-		return nil, err
-	}
-	for i, value := range results {
-		out[indices[i]] = value
+	if len(converted) > 0 {
+		results, err := ts.kv.BatchGet(ts.ctx, converted)
+		if err != nil {
+			return nil, err
+		}
+		for i, value := range results {
+			out[indices[i]] = value
+		}
 	}
 
 	return out, nil

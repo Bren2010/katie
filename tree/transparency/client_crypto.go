@@ -1,11 +1,9 @@
 package transparency
 
 import (
-	"bytes"
 	"cmp"
 	"errors"
 	"slices"
-	"time"
 
 	"github.com/Bren2010/katie/crypto/commitments"
 	"github.com/Bren2010/katie/tree/log"
@@ -20,25 +18,21 @@ type verifier struct {
 	config *structs.PublicConfig
 	state  *structs.ClientState
 	fth    structs.FullTreeHead
-	now    uint64 // Local time the response was received, in milliseconds.
 
 	handle   *algorithms.ReceivedProofHandle
 	provider *algorithms.DataProvider
-
-	n  uint64
-	nP *uint64
-	m  *uint64
 }
 
 func newVerifier(
 	config *structs.PublicConfig,
 	state *structs.ClientState,
 	fth structs.FullTreeHead,
-	now time.Time,
-	last *uint64,
 	proof structs.CombinedTreeProof,
 ) (*verifier, error) {
-	// Set up ProofHandle and DataProvider.
+	if fth.TreeHead == nil && state == nil {
+		return nil, errors.New("no tree head found")
+	}
+
 	handle := algorithms.NewReceivedProofHandle(config.Suite, proof)
 	provider := algorithms.NewDataProvider(config.Suite, handle)
 	if state != nil {
@@ -48,51 +42,43 @@ func newVerifier(
 		}
 	}
 
-	// Determine tree sizes.
-	var n uint64
-	if fth.TreeHead != nil {
-		n = fth.TreeHead.TreeSize
-	} else if last != nil {
-		n = *last
-	} else {
-		return nil, errors.New("no tree head was provided when required")
+	return &verifier{config, state, fth, handle, provider}, nil
+}
+
+func (v *verifier) n() uint64 {
+	if v.fth.TreeHead != nil {
+		return v.fth.TreeHead.TreeSize
 	}
+	return *v.m()
+}
 
-	var nP *uint64
-	if fth.AuditorTreeHead != nil {
-		nP = &fth.AuditorTreeHead.TreeSize
+func (v *verifier) nP() *uint64 {
+	if v.fth.AuditorTreeHead != nil {
+		return &v.fth.AuditorTreeHead.TreeSize
 	}
-
-	return &verifier{config, state, fth, uint64(now.UnixMilli()), handle, provider, n, nP, last}, nil
+	return nil
 }
 
-func (v *verifier) updateView() error {
-	return algorithms.UpdateView(v.config, v.n, v.m, v.now, v.provider)
-}
-
-func (v *verifier) greatestVersionSearch(ver uint32) (uint64, error) {
-	return algorithms.GreatestVersionSearch(v.config, ver, v.n, v.provider)
-}
-
-func (v *verifier) fixedVersionSearch(ver uint32) (uint64, error) {
-	return algorithms.FixedVersionSearch(v.config, ver, v.n, v.provider)
-}
-
-func (v *verifier) monitor() (*algorithms.Monitor, error) {
-	return algorithms.NewMonitor(v.config, v.n, v.provider)
-}
-
-func (v *verifier) rightmostDistinguished() (*uint64, error) {
-	return algorithms.RightmostDistinguished(v.config, v.n, v.provider)
+func (v *verifier) m() *uint64 {
+	if v.state != nil {
+		return &v.state.TreeHead.TreeSize
+	}
+	return nil
 }
 
 // addLabelState adds all of the retained VRF outputs and commitments to the
-// ProofHandle so that they can be used in proof verification. It also ensures,
-// if other VRF outputs / commitments were provided in the query response, that
-// those are consistent with what we've retained.
-func (v *verifier) addLabelState(state *structs.ClientLabelState) error {
+// ProofHandle so that they can be used in proof verification. Manually computed
+// commitments are provided in `manual`.
+func (v *verifier) addLabelState(
+	state *structs.ClientLabelState,
+	manual map[uint32][]byte,
+) error {
 	for _, entry := range state.Versions {
-		err := v.handle.AddVersion(entry.Version, entry.VrfOutput, entry.Commitment)
+		commitment := entry.Commitment
+		if commitment == nil {
+			commitment = manual[entry.Version]
+		}
+		err := v.handle.AddVersion(entry.Version, entry.VrfOutput, commitment)
 		if err != nil {
 			return err
 		}
@@ -101,7 +87,7 @@ func (v *verifier) addLabelState(state *structs.ClientLabelState) error {
 }
 
 // processLadder converts all of the VRF proofs in `ladder` into VRF outputs and
-// adds them to the ProofHandle. Any manually-computed commitments that should
+// adds them to the ProofHandle. Any manually computed commitments that should
 // be used for a label version are provided in `manual`.
 func (v *verifier) processLadder(
 	label []byte,
@@ -138,18 +124,43 @@ func (v *verifier) processLadder(
 	return nil
 }
 
+func (v *verifier) updateView(now uint64) error {
+	if err := algorithms.UpdateView(v.config, v.n(), v.m(), v.provider); err != nil {
+		return err
+	}
+	return algorithms.VerifyFreshness(v.config, v.n(), now, v.provider)
+}
+
+func (v *verifier) greatestVersionSearch(ver uint32) (uint64, error) {
+	return algorithms.GreatestVersionSearch(v.config, ver, v.n(), v.provider)
+}
+
+func (v *verifier) fixedVersionSearch(ver uint32) (uint64, error) {
+	return algorithms.FixedVersionSearch(v.config, ver, v.n(), v.provider)
+}
+
+func (v *verifier) monitor() (*algorithms.Monitor, error) {
+	return algorithms.NewMonitor(v.config, v.n(), v.provider)
+}
+
+func (v *verifier) rightmostDistinguished() (*uint64, error) {
+	return algorithms.RightmostDistinguished(v.config, v.n(), v.provider)
+}
+
+// TODO: What about monitoring?
+
 func (v *verifier) verifyTreeHead(root, rootP []byte) error {
 	if v.fth.TreeHead == nil {
 		if v.state == nil {
 			return errors.New("same tree head not allowed when client has no state")
 		}
 		// Note: Verifying that the rightmost timestamp is within the bounds set
-		// by MaxAhead and MaxBehind is done in algorithms.UpdateView().
+		// by MaxAhead and MaxBehind is done in updateView().
 		return nil
 	}
 
 	// Verify the size and signature on the tree head.
-	if v.state != nil && v.state.TreeHead.TreeSize <= v.n {
+	if v.m != nil && v.n <= *v.m {
 		return errors.New("provided tree size is not greater than advertised")
 	}
 	tbs, err := structs.Marshal(&structs.TreeHeadTBS{
@@ -234,15 +245,20 @@ func (v *verifier) finish() (*structs.ClientState, error) {
 		return nil, err
 	}
 
-	// Compute and return the updated client state.
+	// Compute and return the updated client state. If the Transparency Log
+	// reused the previous tree head, the client keeps the previous tree head
+	// and auditor tree head. Note that verifyTreeHead has already checked that
+	// the client has state in that case.
 	updated := &structs.ClientState{
-		TreeHead:        v.state.TreeHead,
-		AuditorTreeHead: v.fth.AuditorTreeHead,
-		FullSubtrees:    result.FullSubtrees,
-		LogEntries:      result.LogEntries,
+		FullSubtrees: result.FullSubtrees,
+		LogEntries:   result.LogEntries,
 	}
 	if v.fth.TreeHead != nil {
 		updated.TreeHead = *v.fth.TreeHead
+		updated.AuditorTreeHead = v.fth.AuditorTreeHead
+	} else {
+		updated.TreeHead = v.state.TreeHead
+		updated.AuditorTreeHead = v.state.AuditorTreeHead
 	}
 	return updated, nil
 }
@@ -292,30 +308,40 @@ func greatestVersion(owner *structs.LabelOwnerState) *uint32 {
 }
 
 // ownerTerminal returns the `terminal` value that an owned label is stored
-// with, for the purpose of determining when it is stale. This is the owner's
-// starting position or, if the owner hasn't verified any distinguished log
-// entries yet, zero so that the label is always considered stale.
+// with, for the purpose of determining when it is stale. This is one past the
+// owner's starting position, so that the label becomes stale once a
+// distinguished log entry to the right of the starting position is known. If
+// the owner hasn't verified any distinguished log entries yet, it is zero so
+// that the label is always considered stale.
 func ownerTerminal(owner *structs.LabelOwnerState) uint64 {
 	if owner.Starting == nil {
 		return 0
 	}
-	return *owner.Starting
+	return *owner.Starting + 1
+}
+
+// labelTerminal returns the `terminal` value that a label is stored with, for
+// the purpose of determining when it is stale. A label is stale once the
+// client knows of a distinguished log entry at or to the right of `terminal`.
+// For contact monitoring state, this is the leftmost position in the
+// monitoring map; for owner state, it is given by ownerTerminal. If the label
+// has both, the lesser of the two is used.
+func labelTerminal(state *structs.ClientLabelState) uint64 {
+	terminal := ^uint64(0)
+	if state.Owner != nil {
+		terminal = ownerTerminal(state.Owner)
+	}
+	for _, entry := range state.Contact {
+		terminal = min(terminal, entry.Position)
+	}
+	return terminal
 }
 
 func parseLabelState(config *structs.PublicConfig, raw []byte) (*structs.ClientLabelState, error) {
 	if raw == nil {
 		return &structs.ClientLabelState{}, nil
 	}
-
-	buf := bytes.NewBuffer(raw)
-	state, err := structs.NewClientLabelState(config.Suite, buf)
-	if err != nil {
-		return nil, err
-	} else if buf.Len() != 0 {
-		return nil, errors.New("unexpected data appended to client label state")
-	}
-
-	return state, nil
+	return structs.UnmarshalWith(raw, structs.NewClientLabelState, config.Suite)
 }
 
 // verifyUpdateValue checks that, if Third-Party Management is used, that the
@@ -390,18 +416,19 @@ func simplifyMonitoringMap(ptrs map[uint64]uint32, n uint64) {
 	}
 }
 
-// updateContactState is used specifically after Search operations. It computes
-// the rightmost terminal log entry for the search, and removes any map entries
-// that no longer need to be monitored as a result of this search.
+// updateContactState is used specifically after Search operations. It adds the
+// terminal log entry `x` of the search for version `ver` to the contact
+// monitoring map, and removes any map entries that no longer need to be
+// monitored as a result of this search.
 func updateContactState( // TODO: Can we replace this with ContactState.Set?
 	state *structs.ClientLabelState,
 	x, n uint64,
 	ver uint32,
-) (uint64, error) {
+) error {
 	ptrs := make(map[uint64]uint32, len(state.Contact))
 	for _, entry := range state.Contact {
 		if _, ok := ptrs[entry.Position]; ok {
-			return 0, errors.New("contact monitoring state has duplicate position")
+			return errors.New("contact monitoring state has duplicate position")
 		}
 		ptrs[entry.Position] = entry.Version
 	}
@@ -413,7 +440,6 @@ func updateContactState( // TODO: Can we replace this with ContactState.Set?
 			break
 		}
 		ptrs[pos] = ver
-		x = pos
 	}
 	simplifyMonitoringMap(ptrs, n)
 
@@ -425,7 +451,7 @@ func updateContactState( // TODO: Can we replace this with ContactState.Set?
 		return cmp.Compare(a.Position, b.Position)
 	})
 	state.Contact = entries
-	return x, nil
+	return nil
 }
 
 // updateRetainedVersions recomputes the set of VRF outputs and commitments that

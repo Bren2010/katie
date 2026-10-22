@@ -2,7 +2,6 @@
 package transparency
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"time"
@@ -82,21 +81,15 @@ func NewTree(
 		auditorHead *structs.AuditorTreeHead
 	)
 	if rawTreeHead != nil {
-		buf := bytes.NewBuffer(rawTreeHead)
-		treeHead, err = structs.NewTreeHead(buf)
+		treeHead, err = structs.Unmarshal(rawTreeHead, structs.NewTreeHead)
 		if err != nil {
 			return nil, err
-		} else if buf.Len() != 0 {
-			return nil, errors.New("unexpected data appended to tree head")
 		}
 	}
 	if config.Mode == structs.ThirdPartyAuditing && rawAuditor != nil {
-		buf := bytes.NewBuffer(rawAuditor)
-		auditorHead, err = structs.NewAuditorTreeHead(buf)
+		auditorHead, err = structs.Unmarshal(rawAuditor, structs.NewAuditorTreeHead)
 		if err != nil {
 			return nil, err
-		} else if buf.Len() != 0 {
-			return nil, errors.New("unexpected data appended to auditor tree head")
 		}
 	}
 
@@ -113,30 +106,21 @@ func NewTree(
 
 func (t *Tree) TreeHead() *structs.TreeHead { return t.treeHead }
 
-func (t *Tree) fullTreeHead(last *uint64) (fth *structs.FullTreeHead, n uint64, nP, m *uint64, err error) {
+func (t *Tree) fullTreeHead(last *uint64) (*structs.FullTreeHead, error) {
 	if t.treeHead == nil {
-		return nil, 0, nil, nil, errors.New("can not operate on an empty tree")
+		return nil, errors.New("can not operate on an empty tree")
 	} else if last != nil {
 		if *last == t.treeHead.TreeSize {
-			return &structs.FullTreeHead{}, t.treeHead.TreeSize, nil, last, nil
+			return &structs.FullTreeHead{}, nil
 		} else if *last > t.treeHead.TreeSize {
-			return nil, 0, nil, nil, errors.New("tree size advertised by user is greater than current tree size")
+			return nil, errors.New("tree size advertised by user is greater than current tree size")
 		}
 	}
-
-	fth = &structs.FullTreeHead{TreeHead: t.treeHead, AuditorTreeHead: t.auditorHead}
-	n = t.treeHead.TreeSize
-	if t.auditorHead != nil {
-		nP = &t.auditorHead.TreeSize
-	}
-	if last != nil {
-		m = last
-	}
-	return
+	return &structs.FullTreeHead{TreeHead: t.treeHead, AuditorTreeHead: t.auditorHead}, nil
 }
 
 func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error {
-	if last != nil { // Load frontier log entries.
+	if last != nil { // Load the log entries retained by the user.
 		frontier := math.Frontier(*last)
 
 		results, err := t.tx.BatchGet(frontier)
@@ -146,77 +130,74 @@ func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error
 
 		logEntries := make(map[uint64]structs.LogEntry)
 		for i, pos := range frontier {
-			raw := results[i]
-			if raw == nil {
+			if results[i] == nil {
 				return errors.New("expected frontier log entry not found")
 			}
-			buf := bytes.NewBuffer(raw)
-			entry, err := structs.NewLogEntry(t.config.Suite, buf)
+			entry, err := structs.UnmarshalWith(results[i], structs.NewLogEntry, t.config.Suite)
 			if err != nil {
 				return err
-			} else if buf.Len() != 0 {
-				return errors.New("unexpected data appended to log entry")
 			}
 			logEntries[pos] = *entry
 		}
 
+		// Add the parsed frontier log entries as retained state. The retained
+		// full subtrees don't need to be added since they'll never be needed by
+		// the DataProvider.
 		provider.AddRetained(nil, logEntries)
 	}
 
-	now := uint64(t.now().UnixMilli())
-	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, now, provider)
+	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
 }
 
 func (t *Tree) Search(
 	ctx context.Context,
 	req *structs.SearchRequest,
 ) (*structs.SearchResponse, error) {
-	fth, n, nP, m, err := t.fullTreeHead(req.Last)
+	fth, err := t.fullTreeHead(req.Last)
 	if err != nil {
 		return nil, err
 	}
 
-	// Load label index and determine greatest version that exists, if any.
+	// Load label index and determine the target version of the search. The
+	// protocol doesn't support negative search results, so an error is returned
+	// if the requested label or version doesn't exist.
 	indices, err := t.batchGetIndex([][]byte{req.Label})
 	if err != nil {
 		return nil, err
 	}
-	greatest := len(indices[0]) - 1
-
-	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, indices[0])
-
-	// Determine which versions we will need VRF outputs for, and also load the
-	// target version of the label.
-	var (
-		ladder          []uint32
-		openingAndValue *structs.OpeningAndValue
-	)
+	greatest := int64(len(indices[0])) - 1
+	var target uint32
 	if req.Version == nil {
 		if greatest < 0 {
-			ladder = []uint32{0}
-			openingAndValue, err = t.getVersion(req.Label, 0)
-		} else {
-			ladder = math.SearchBinaryLadder(uint32(greatest), uint32(greatest), nil, nil)
-			openingAndValue, err = t.getVersion(req.Label, uint32(greatest))
+			return nil, algorithms.ErrLabelNotFound
 		}
+		target = uint32(greatest)
+	} else if int64(*req.Version) > greatest {
+		return nil, algorithms.ErrLabelNotFound
 	} else {
-		ladder = math.SearchBinaryLadder(*req.Version, *req.Version, nil, nil)
-		openingAndValue, err = t.getVersion(req.Label, *req.Version)
+		target = *req.Version
 	}
+	openingAndValue, err := t.getVersion(req.Label, target)
 	if err != nil {
 		return nil, err
 	}
 
-	// Compute VRF outputs and proofs for ladder.
-	steps := make([]structs.BinaryLadderStep, len(ladder))
+	// Compute the VRF output and proof for each version in the binary ladder.
+	// A commitment is provided for every version that exists, other than the
+	// target version, which the user computes from the opening and value.
+	ladder := math.SearchBinaryLadder(target, target, nil, nil)
+	steps, vrfOutputs, err := t.getBinaryLadder(req.Label, ladder, greatest, n-1)
+	if err != nil {
+		return nil, err
+	}
+	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, indices[0])
 	for i, ver := range ladder {
-		vrfOutput, proof, err := t.computeVrfOutput(req.Label, ver)
-		if err != nil {
-			return nil, err
-		} else if err := handle.AddVersion(ver, vrfOutput); err != nil {
+		if ver == target {
+			steps[i].Commitment = nil
+		}
+		if err := handle.AddVersion(ver, vrfOutputs[i]); err != nil {
 			return nil, err
 		}
-		steps[i] = structs.BinaryLadderStep{Proof: proof}
 	}
 
 	// Execute the algorithm to update the user's view of the tree, and then
@@ -226,15 +207,11 @@ func (t *Tree) Search(
 		return nil, err
 	}
 	if req.Version == nil {
-		if greatest < 0 {
-			_, err = algorithms.GreatestVersionSearch(t.config.Public(), 0, t.treeHead.TreeSize, provider)
-		} else {
-			_, err = algorithms.GreatestVersionSearch(t.config.Public(), uint32(greatest), t.treeHead.TreeSize, provider)
-		}
+		_, err = algorithms.GreatestVersionSearch(t.config.Public(), target, n, provider)
 	} else {
-		_, err = algorithms.FixedVersionSearch(t.config.Public(), *req.Version, t.treeHead.TreeSize, provider)
+		_, err = algorithms.FixedVersionSearch(t.config.Public(), target, n, provider)
 	}
-	if err != nil && err != algorithms.ErrLabelNotFound {
+	if err != nil {
 		return nil, err
 	}
 	combinedProof, err := provider.Output(n, nP, m)
@@ -242,26 +219,10 @@ func (t *Tree) Search(
 		return nil, err
 	}
 
-	// Populate commitment field of appropriate BinaryLadderStep structures.
-	for i, ver := range ladder {
-		populate := req.Version == nil && int(ver) != greatest ||
-			req.Version != nil && ver != *req.Version
-
-		if populate {
-			steps[i].Commitment = handle.GetCommitment(ver)
-		}
-	}
-
 	// Put together final SearchResponse structure.
 	var outputVer *uint32
 	if req.Version == nil {
-		var ver uint32
-		if greatest < 0 {
-			ver = 0
-		} else {
-			ver = uint32(greatest)
-		}
-		outputVer = &ver
+		outputVer = &target
 	}
 	return &structs.SearchResponse{
 		FullTreeHead: *fth,

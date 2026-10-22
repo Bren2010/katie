@@ -62,14 +62,25 @@ func allLadderVersions(versions []uint32) []uint32 {
 }
 
 // getBinaryLadder returns the binary ladder steps corresponding to the
-// requested versions. `label` is the label that the binary ladder is for,
-// `greatest` is the greatest version of `label` that exists, and `n` is the
-// size of the tree.
-func (t *Tree) getBinaryLadder(label []byte, versions []uint32, greatest int64, n uint64) ([]structs.BinaryLadderStep, error) {
+// requested versions, along with the VRF output for each version. `label` is
+// the label that the binary ladder is for, `greatest` is the greatest version
+// of `label` that exists as of log entry `x` (or -1 if none), and the
+// commitment for each version up to `greatest` is looked up in the prefix tree
+// of log entry `x`.
+func (t *Tree) getBinaryLadder(
+	label []byte,
+	versions []uint32,
+	greatest int64,
+	x uint64,
+) ([]structs.BinaryLadderStep, [][]byte, error) {
 	var (
-		// Contains the VRF output for each version. Used to lookup the
-		// commitment to the label's value at that version.
-		vrfOutputs = make([][]byte, 0, len(versions))
+		// Contains the VRF output for each version.
+		vrfOutputs = make([][]byte, len(versions))
+		// Contains the index in `versions` of each version that exists, and
+		// the VRF output for each. Used to lookup the commitment to the
+		// label's value at those versions.
+		existing       []int
+		existingOutput [][]byte
 
 		// Contains the list of BinaryLadderStep structures to output.
 		out = make([]structs.BinaryLadderStep, len(versions))
@@ -77,29 +88,37 @@ func (t *Tree) getBinaryLadder(label []byte, versions []uint32, greatest int64, 
 	for i, ver := range versions {
 		vrfOutput, proof, err := t.computeVrfOutput(label, ver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if int64(ver) <= greatest { // Only look up existing versions.
-			vrfOutputs = append(vrfOutputs, vrfOutput)
+			existing = append(existing, i)
+			existingOutput = append(existingOutput, vrfOutput)
 		}
+		vrfOutputs[i] = vrfOutput
 		out[i].Proof = proof
 	}
 
 	// Search the prefix tree to learn the value commitment for versions that we
 	// expect to exist.
+	if len(existing) == 0 {
+		return out, vrfOutputs, nil
+	}
 	prefixTree := prefix.NewTree(t.config.Suite, t.tx.PrefixStore())
 	results, err := prefixTree.Search([]prefix.PrefixSearch{{
-		Version:    n,
-		VrfOutputs: vrfOutputs,
+		Version:    x + 1,
+		VrfOutputs: existingOutput,
 	}})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i, commitment := range results[0].Commitments {
-		out[i].Commitment = commitment
+		if commitment == nil {
+			return nil, nil, errors.New("expected version of label not found in prefix tree")
+		}
+		out[existing[i]].Commitment = commitment
 	}
 
-	return out, nil
+	return out, vrfOutputs, nil
 }
 
 type monitorOp struct {
@@ -209,15 +228,15 @@ func (t *Tree) OwnerInit(
 	}
 	// Fetch the VRF proof and value commitment for all versions that may appear
 	// in a binary ladder for any version in `versions`.
-	greatestAtStart := int64(-1)
+	greatestAtStart, start := int64(-1), uint64(0)
 	if req.Start != nil {
-		greatestAtStart = state.GreatestVersionAt(*req.Start)
+		greatestAtStart, start = state.GreatestVersionAt(*req.Start), *req.Start
 	}
-	binaryLadder, err := t.getBinaryLadder(
+	binaryLadder, _, err := t.getBinaryLadder(
 		req.Label,
 		allLadderVersions(versions),
 		greatestAtStart,
-		op.n,
+		start,
 	)
 	if err != nil {
 		return nil, err

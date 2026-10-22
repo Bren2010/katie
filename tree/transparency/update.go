@@ -77,6 +77,21 @@ func updateLadderVersions(startVer, endVer uint32) []uint32 {
 	return versions
 }
 
+// validateUpdate checks the greatest version of the label advertised by the
+// user in an UpdateRequest, `greatest`, against the label's index. `values` is
+// the number of new versions that the user requested be created.
+func validateUpdate(index []uint64, greatest *uint32, values int) error {
+	if greatest != nil && int64(*greatest) >= int64(len(index)) {
+		return errors.New("advertised greatest version of label is greater than actual greatest version")
+	}
+	upToDate := greatest == nil && len(index) == 0 ||
+		greatest != nil && int64(*greatest) == int64(len(index))-1
+	if upToDate && values == 0 {
+		return errors.New("update request must contain values if greatest version of label is current")
+	}
+	return nil
+}
+
 type updater struct {
 	tree *Tree
 	ctx  context.Context
@@ -107,6 +122,8 @@ func (u *updater) setRequest(req *structs.UpdateRequest) error {
 	indices, err := u.tree.batchGetIndex([][]byte{req.Label})
 	if err != nil {
 		return err
+	} else if err := validateUpdate(indices[0], req.GreatestVersion, len(req.Values)); err != nil {
+		return err
 	}
 
 	u.last = req.Last
@@ -121,7 +138,9 @@ func (u *updater) setRequest(req *structs.UpdateRequest) error {
 }
 
 func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
-	// TODO: Sequence padding versions.
+	if len(req.Values) == 0 && req.SignedVersion != 0 {
+		return errors.New("signed version must be zero if no values are provided")
+	}
 
 	// Verify service operator signatures.
 	for i, val := range req.Values {
@@ -140,12 +159,24 @@ func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
 		}
 	}
 
-	// Load index and populate updater state.
+	// Load index and validate the request against it.
 	indices, err := u.tree.batchGetIndex([][]byte{req.Label})
 	if err != nil {
 		return err
+	} else if err := validateUpdate(indices[0], req.GreatestVersion, len(req.Values)); err != nil {
+		return err
+	}
+	if len(req.Values) > 0 {
+		next := uint64(len(indices[0]))
+		if uint64(req.SignedVersion) < next {
+			return errors.New("signed version is less than next version of label")
+		} else if uint64(req.SignedVersion) > next {
+			// TODO: Sequence padding versions (finding #8).
+			return errors.New("skipping versions of a label is not yet supported")
+		}
 	}
 
+	// Populate updater state.
 	u.last = req.Last
 	u.label = req.Label
 	u.values = req.Values
@@ -246,11 +277,12 @@ func (u *updater) process() {
 func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 	t, pos := u.tree, u.index[u.ver]
 
+	startVer := u.ver
 	values, info, err := u.infos(pos, withValues)
 	if err != nil {
 		return nil, err
 	}
-	ladder, err := u.ladder(u.ver-int64(len(info)), u.ver-1)
+	ladder, err := u.ladder(startVer, u.ver-1, pos)
 	if err != nil {
 		return nil, err
 	}
@@ -270,13 +302,23 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	// monitor.Owner = &algorithms.OwnerState{
-	// 	VerAtStarting:
-	// 	UpcomingVers: ,
-	// }
-	// TODO: populate owner state
+	// The label owner's state contains every version of the label prior to
+	// the ones being reported in this response. The owner's starting position
+	// isn't known, but it doesn't affect the proof: every log entry that the
+	// update algorithm inspects is to the right of the owner's starting
+	// position, and is skipped based on the position of the previous greatest
+	// version of the label.
+	monitor.Owner = &algorithms.OwnerState{UpcomingVers: u.index[:startVer]}
 	if err := monitor.Update(pos, len(info)); err != nil {
 		return nil, err
+	}
+	for ver := range handle.RequiredVersions() {
+		vrfOutput, _, err := t.computeVrfOutput(u.label, ver)
+		if err != nil {
+			return nil, err
+		} else if err := handle.AddVersion(ver, vrfOutput); err != nil {
+			return nil, err
+		}
 	}
 	proof, err := provider.Output(n, nP, m)
 	if err != nil {
@@ -323,11 +365,12 @@ func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []st
 
 // ladder returns the binary ladder steps for an Update operation where
 // `startVer` was the first new version inserted and `endVer` was the last new
-// version inserted. `startVer` and `endVer` are the same if only one version
-// was inserted.
-func (u *updater) ladder(startVer, endVer int64) ([]structs.BinaryLadderStep, error) {
+// version inserted, in log entry `pos`. `startVer` and `endVer` are the same if
+// only one version was inserted.
+func (u *updater) ladder(startVer, endVer int64, pos uint64) ([]structs.BinaryLadderStep, error) {
 	versions := updateLadderVersions(uint32(startVer), uint32(endVer))
-	return u.tree.getBinaryLadder(u.label, versions, startVer-1, u.tree.treeHead.TreeSize)
+	steps, _, err := u.tree.getBinaryLadder(u.label, versions, startVer-1, pos)
+	return steps, err
 }
 
 // reloadTree refreshes the `tree` and `index` fields of `u` to cover new

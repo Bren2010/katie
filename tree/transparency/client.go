@@ -1,7 +1,6 @@
 package transparency
 
 import (
-	"bytes"
 	"errors"
 	"time"
 
@@ -54,16 +53,7 @@ func (c *Client) getState() (*structs.ClientState, error) {
 	} else if raw == nil {
 		return nil, nil
 	}
-
-	buf := bytes.NewBuffer(raw)
-	state, err := structs.NewClientState(c.config, buf)
-	if err != nil {
-		return nil, err
-	} else if buf.Len() != 0 {
-		return nil, errors.New("unexpected data appended to client state")
-	}
-
-	return state, nil
+	return structs.UnmarshalWith(raw, structs.NewClientState, c.config)
 }
 
 func (c *Client) getLabelState(label []byte) (*structs.ClientLabelState, error) {
@@ -224,13 +214,12 @@ func (c *Client) search(
 		} else if err := v.addLabelState(labelState); err != nil {
 			return err
 		}
-		terminal, err = updateContactState(labelState, terminal, v.n, target)
-		if err != nil {
+		if err := updateContactState(labelState, terminal, v.n, target); err != nil {
 			return err
 		} else if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
 		}
-		return c.putLabelState(updated, req.Label, labelState, terminal)
+		return c.putLabelState(updated, req.Label, labelState, labelTerminal(labelState))
 	}
 }
 
@@ -314,7 +303,7 @@ func (c *Client) ownerInit(
 		} else if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
 		}
-		return c.putLabelState(updated, req.Label, labelState, ownerTerminal(labelState.Owner))
+		return c.putLabelState(updated, req.Label, labelState, labelTerminal(labelState))
 	}
 }
 
@@ -407,14 +396,7 @@ func (c *Client) contactMonitor(
 			return err
 		}
 
-		terminal, err := v.rightmostDistinguished()
-		if err != nil {
-			return err
-		} else if terminal == nil {
-			return errors.New("unable to compute rightmost distinguished log entry")
-		}
-
-		return c.putLabelState(updated, req.Label, labelState, *terminal)
+		return c.putLabelState(updated, req.Label, labelState, labelTerminal(labelState))
 	}
 }
 
@@ -463,7 +445,7 @@ func (c *Client) ownerMonitor(
 		if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
 		}
-		return c.putLabelState(updated, req.Label, labelState, ownerTerminal(labelState.Owner))
+		return c.putLabelState(updated, req.Label, labelState, labelTerminal(labelState))
 	}
 }
 
@@ -502,6 +484,7 @@ func (c *Client) Update(label []byte, values [][]byte) (
 		state:      state,
 		labelState: labelState,
 		req:        req,
+		pending:    labelValues,
 	}
 	return req, verifier, nil
 }
@@ -513,6 +496,11 @@ type StreamVerifier struct {
 	state      *structs.ClientState
 	labelState *structs.ClientLabelState
 	req        *structs.UpdateRequest
+
+	// pending contains the values from the UpdateRequest that the Transparency
+	// Log has not yet indicated were created. It is cleared once an
+	// UpdateResponse indicates that they were.
+	pending []structs.LabelValue
 }
 
 func (sv *StreamVerifier) verifyValues(
@@ -560,7 +548,7 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 		err         error
 	)
 	if len(res.Values) == 0 {
-		startVer, commitments, err = sv.verifyValues(sv.req.Values, res)
+		startVer, commitments, err = sv.verifyValues(sv.pending, res)
 	} else {
 		startVer, commitments, err = sv.verifyValues(res.Values, res)
 	}
@@ -568,16 +556,20 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 		return err
 	}
 
-	// Verify that no commitment is provided for a version greater than or equal
-	// to `startVer`.
+	// Verify that the expected number of entries is present in
+	// res.BinaryLadder, and that no commitment is provided for a version
+	// greater than or equal to `startVer`.
 	ladder := updateLadderVersions(startVer, startVer+uint32(len(res.Info)-1))
+	if len(res.BinaryLadder) != len(ladder) {
+		return errors.New("incorrect number of binary ladder steps provided")
+	}
 	for i, ver := range ladder {
 		if ver >= startVer && res.BinaryLadder[i].Commitment != nil {
 			return errors.New("commitment provided when not expected")
 		}
 	}
 
-	// Verify the expected number of entries is present in res.BinaryLadder.
+	// Verify the binary ladder and the proof.
 	v, err := newVerifier(sv.client.config, sv.state, res.FullTreeHead, sv.client.now(), getLast(sv.state), res.Update)
 	if err != nil {
 		return err
@@ -610,13 +602,18 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 		return err
 	}
 
-	// Update the global and label-specific state.
+	// Update the global and label-specific state. If the values in our
+	// request were created by this response, any later responses in the stream
+	// must contain their own values.
 	sv.state = updated
+	if len(res.Values) == 0 {
+		sv.pending = nil
+	}
 	sv.labelState.Contact = monitor.Contact.Struct()
 	sv.labelState.Owner = monitor.Owner.Struct()
 	if err := updateRetainedVersions(sv.labelState, v.handle); err != nil {
 		return err
 	}
 
-	return sv.client.putLabelState(updated, sv.req.Label, sv.labelState, ownerTerminal(sv.labelState.Owner))
+	return sv.client.putLabelState(updated, sv.req.Label, sv.labelState, labelTerminal(sv.labelState))
 }

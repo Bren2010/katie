@@ -77,20 +77,9 @@ func (t *Tree) getVersion(label []byte, ver uint32) (*structs.OpeningAndValue, e
 	if err != nil {
 		return nil, err
 	} else if raw == nil {
-		// Returning a zero value for the commitment opening ensures that the
-		// SearchResponse doesn't end up getting serialized wrong when a search
-		// produces a non-inclusion proof.
-		size := t.config.Suite.CommitmentOpeningSize()
-		return &structs.OpeningAndValue{Opening: make([]byte, size)}, nil
+		return nil, errors.New("requested version of label not found")
 	}
-	buf := bytes.NewBuffer(raw)
-	labelValue, err := structs.NewOpeningAndValue(t.config.Public(), buf)
-	if err != nil {
-		return nil, err
-	} else if buf.Len() != 0 {
-		return nil, errors.New("unexpected data appended to label value")
-	}
-	return labelValue, nil
+	return structs.UnmarshalWith(raw, structs.NewOpeningAndValue, t.config.Public())
 }
 
 // putVersion generates a new commitment opening and sets the given

@@ -188,7 +188,7 @@ func TestSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifySearchResponse(t, res, true, nil, []byte{1}, 1, 6, []uint32{1, 2})
+	verifySearchResponse(t, res, true, nil, []byte{1}, 1, 6, []uint32{1})
 
 	// Tree size less than current, fixed version search.
 	size = tree.treeHead.TreeSize - 1
@@ -196,7 +196,7 @@ func TestSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifySearchResponse(t, res, true, nil, []byte{1}, 1, 6, []uint32{1, 2})
+	verifySearchResponse(t, res, true, nil, []byte{1}, 1, 6, []uint32{1})
 
 	// Tree size equal to current, fixed version search.
 	size = tree.treeHead.TreeSize
@@ -204,5 +204,5 @@ func TestSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifySearchResponse(t, res, false, nil, []byte{1}, 1, 6, []uint32{1, 2})
+	verifySearchResponse(t, res, false, nil, []byte{1}, 1, 6, []uint32{1})
 }
