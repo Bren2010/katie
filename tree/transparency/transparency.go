@@ -106,6 +106,15 @@ func NewTree(
 
 func (t *Tree) TreeHead() *structs.TreeHead { return t.treeHead }
 
+func (t *Tree) n() uint64 { return t.treeHead.TreeSize }
+
+func (t *Tree) nP() *uint64 {
+	if t.auditorHead != nil {
+		return &t.auditorHead.TreeSize
+	}
+	return nil
+}
+
 func (t *Tree) fullTreeHead(last *uint64) (*structs.FullTreeHead, error) {
 	if t.treeHead == nil {
 		return nil, errors.New("can not operate on an empty tree")
@@ -153,19 +162,15 @@ func (t *Tree) Search(
 	ctx context.Context,
 	req *structs.SearchRequest,
 ) (*structs.SearchResponse, error) {
-	fth, err := t.fullTreeHead(req.Last)
-	if err != nil {
-		return nil, err
-	}
-
-	// Load label index and determine the target version of the search. The
-	// protocol doesn't support negative search results, so an error is returned
-	// if the requested label or version doesn't exist.
+	// Load label index and determine the greatest version that exists, if any.
 	indices, err := t.batchGetIndex([][]byte{req.Label})
 	if err != nil {
 		return nil, err
 	}
 	greatest := int64(len(indices[0])) - 1
+
+	// Determine the target version for our search / verify that the version
+	// requested by the user is acceptable.
 	var target uint32
 	if req.Version == nil {
 		if greatest < 0 {
@@ -177,57 +182,59 @@ func (t *Tree) Search(
 	} else {
 		target = *req.Version
 	}
-	openingAndValue, err := t.getVersion(req.Label, target)
+
+	// Execute the algorithm to update the user's view of the tree, and then
+	// either a greatest-version or fixed-version search.
+	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, indices[0])
+	provider := algorithms.NewDataProvider(t.config.Suite, handle)
+	if err := t.updateView(req.Last, provider); err != nil {
+		return nil, err
+	}
+	if req.Version == nil {
+		_, err = algorithms.GreatestVersionSearch(t.config.Public(), target, t.n(), provider)
+	} else {
+		_, err = algorithms.FixedVersionSearch(t.config.Public(), target, t.n(), provider)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	// Compute the VRF output and proof for each version in the binary ladder.
 	// A commitment is provided for every version that exists, other than the
-	// target version, which the user computes from the opening and value.
+	// target version, which the user computes themselves.
 	ladder := math.SearchBinaryLadder(target, target, nil, nil)
-	steps, vrfOutputs, err := t.getBinaryLadder(req.Label, ladder, greatest, n-1)
+	steps, ladderOutputs, err := t.getBinaryLadder(req.Label, ladder, greatest, t.n()-1)
 	if err != nil {
 		return nil, err
 	}
-	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, indices[0])
-	for i, ver := range ladder {
-		if ver == target {
-			steps[i].Commitment = nil
-		}
-		if err := handle.AddVersion(ver, vrfOutputs[i]); err != nil {
+	for ver := range handle.RequiredVersions() {
+		// TODO
+		if err := handle.AddVersion(ver, vrfOutput); err != nil {
 			return nil, err
 		}
 	}
 
-	// Execute the algorithm to update the user's view of the tree, and then
-	// either a greatest-version or fixed-version search.
-	provider := algorithms.NewDataProvider(t.config.Suite, handle)
-	if err := t.updateView(req.Last, provider); err != nil {
-		return nil, err
-	}
-	if req.Version == nil {
-		_, err = algorithms.GreatestVersionSearch(t.config.Public(), target, n, provider)
-	} else {
-		_, err = algorithms.FixedVersionSearch(t.config.Public(), target, n, provider)
-	}
+	// Assemble response.
+	fth, err := t.fullTreeHead(req.Last)
 	if err != nil {
 		return nil, err
 	}
-	combinedProof, err := provider.Output(n, nP, m)
+	var version *uint32
+	if req.Version == nil {
+		version = &target
+	}
+	openingAndValue, err := t.getVersion(req.Label, target)
 	if err != nil {
 		return nil, err
 	}
-
-	// Put together final SearchResponse structure.
-	var outputVer *uint32
-	if req.Version == nil {
-		outputVer = &target
+	combinedProof, err := provider.Output(t.n(), t.nP(), req.Last)
+	if err != nil {
+		return nil, err
 	}
 	return &structs.SearchResponse{
 		FullTreeHead: *fth,
 
-		Version: outputVer,
+		Version: version,
 		Opening: openingAndValue.Opening,
 		Value:   openingAndValue.Value,
 
