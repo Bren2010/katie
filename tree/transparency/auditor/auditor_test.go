@@ -46,7 +46,7 @@ func makeAuditor(t *testing.T) (
 			}
 		}
 
-		// Add to tree, check for TODO
+		// Add random labels to tree, to auditor
 		update, err := tree.Mutate(added, nil)
 		if err != nil {
 			t.Fatal(err)
