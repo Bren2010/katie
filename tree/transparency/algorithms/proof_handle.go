@@ -350,12 +350,9 @@ func (pph *ProducedProofHandle) getLogEntries(xs []uint64) ([]structs.LogEntry, 
 			if raw == nil {
 				return nil, errors.New("requested log entry not found")
 			}
-			buf := bytes.NewBuffer(raw)
-			entry, err := structs.NewLogEntry(pph.cs, buf)
+			entry, err := structs.UnmarshalWith(raw, structs.NewLogEntry, pph.cs)
 			if err != nil {
 				return nil, err
-			} else if buf.Len() != 0 {
-				return nil, errors.New("unexpected data appended to log entry")
 			}
 			pph.logEntries[missing[i]] = *entry
 		}

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"unsafe"
 )
@@ -22,6 +23,25 @@ func Marshal(x Marshaller) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// Unmarshal parses `raw` with `f`, returning an error if any data is left over.
+func Unmarshal[T any](raw []byte, f func(*bytes.Buffer) (T, error)) (T, error) {
+	var zero T
+	buf := bytes.NewBuffer(raw)
+	out, err := f(buf)
+	if err != nil {
+		return zero, err
+	} else if buf.Len() != 0 {
+		return zero, fmt.Errorf("unexpected data appended to %T", out)
+	}
+	return out, nil
+}
+
+// UnmarshalWith is like Unmarshal but for constructors that take an extra
+// leading argument, such as a cipher suite or public config.
+func UnmarshalWith[A, T any](raw []byte, f func(A, *bytes.Buffer) (T, error), a A) (T, error) {
+	return Unmarshal(raw, func(buf *bytes.Buffer) (T, error) { return f(a, buf) })
 }
 
 type numeric interface {
