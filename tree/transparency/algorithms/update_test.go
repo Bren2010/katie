@@ -36,7 +36,7 @@ func TestUpdate(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, now, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)
@@ -279,7 +279,7 @@ func TestUpdateVersionOmission(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, vec.pos, nil, now, provider); err != nil {
+		if err := UpdateView(public, vec.pos, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		_, err := GreatestVersionSearch(public, vec.prev, vec.pos, provider)
@@ -301,7 +301,7 @@ func TestUpdateVersionOmission(t *testing.T) {
 		handle = test.NewProofHandle(tsMap, vec.verMap)
 		provider = NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, now, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)
@@ -437,7 +437,7 @@ func TestUpdateContactState(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, now, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)
@@ -503,7 +503,7 @@ func TestUpdateMaxVersion(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, map[uint64]uint32{98: maxVer - 1, 99: maxVer})
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, now, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		monitor, err := NewMonitor(public, 100, provider)

@@ -26,7 +26,7 @@ func TestGreatestVersionSearch(t *testing.T) {
 		handle := test.NewProofHandle(vec.tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, now, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		res, err := GreatestVersionSearch(public, 1, 100, provider)
@@ -144,7 +144,7 @@ func TestFixedVersionSearch(t *testing.T) {
 		handle := test.NewProofHandle(vec.tsMap, vec.verMap)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, 100, nil, now, provider); err != nil {
+		if err := UpdateView(public, 100, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		res, err := FixedVersionSearch(public, 1, 100, provider)

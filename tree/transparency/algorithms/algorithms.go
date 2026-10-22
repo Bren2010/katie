@@ -117,21 +117,32 @@ func PreviousRightmost(config *structs.PublicConfig, n uint64, provider *DataPro
 }
 
 // UpdateView runs the algorithm from Section 4.2. The previous size of the tree
-// is `m`, the current size of the tree is `n`, and the current time according
-// to the local clock is `now`, in milliseconds since the Unix epoch.
-func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, now uint64, provider *DataProvider) error {
+// is `m` and the current size of the tree is `n`.
+//
+// Users must additionally call VerifyFreshness to check the rightmost log
+// entry's timestamp against their local clock.
+func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, provider *DataProvider) error {
 	if m != nil && *m > n {
 		return errors.New("new tree size is less than previous tree size")
 	} else if n == 0 {
 		return nil
 	}
-
 	for _, x := range math.UpdateView(n, m) {
 		if _, err := provider.GetTimestamp(x); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
+// VerifyFreshness verifies that the timestamp of the rightmost log entry in a
+// tree of size `n` is within the bounds set by MaxAhead and MaxBehind of the
+// local clock. `now` is the current time in milliseconds since the Unix
+// epoch.
+func VerifyFreshness(config *structs.PublicConfig, n, now uint64, provider *DataProvider) error {
+	if n == 0 {
+		return errors.New("unable to verify freshness of empty tree")
+	}
 	ts, err := provider.GetTimestamp(n - 1)
 	if err != nil {
 		return err
@@ -140,6 +151,5 @@ func UpdateView(config *structs.PublicConfig, n uint64, m *uint64, now uint64, p
 	} else if now > ts && now-ts > config.MaxBehind {
 		return errors.New("rightmost timestamp is too far behind local clock")
 	}
-
 	return nil
 }

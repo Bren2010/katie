@@ -22,7 +22,7 @@ func TestUpdateView(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, n, m, now, provider); err != nil {
+		if err := UpdateView(public, n, m, provider); err != nil {
 			return err
 		} else if err := handle.Verify(requests, nil, nil, nil); err != nil {
 			t.Fatal(err)
@@ -50,7 +50,7 @@ func TestUpdateView(t *testing.T) {
 	}
 
 	// Previous tree size is equal to current tree size
-	err = runTest(100, &prev, []uint64{99}, []uint64{now})
+	err = runTest(100, &prev, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestRightmostDistinguished(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, n, nil, now, provider); err != nil {
+		if err := UpdateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		res, err := RightmostDistinguished(public, n, provider)
@@ -139,7 +139,7 @@ func TestPreviousDistinguished(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, n, nil, now, provider); err != nil {
+		if err := UpdateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		res, err := PreviousRightmost(public, n, provider)

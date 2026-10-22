@@ -33,7 +33,7 @@ func TestWalkDistinguished(t *testing.T) {
 		handle := test.NewProofHandle(tsMap, nil)
 		provider := NewDataProvider(config.Suite, handle)
 
-		if err := UpdateView(public, n, nil, now, provider); err != nil {
+		if err := UpdateView(public, n, nil, provider); err != nil {
 			t.Fatal(err)
 		}
 		res, err := WalkDistinguished(public, stop, recent, n, provider)
