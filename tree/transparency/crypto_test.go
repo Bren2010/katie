@@ -17,12 +17,10 @@ func TestIndexEncoding(t *testing.T) {
 	if err := tree.putIndex([]byte("label"), input); err != nil {
 		t.Fatal(err)
 	}
-	output, err := tree.batchGetIndex([][]byte{[]byte("label")})
+	output, err := tree.getIndex([]byte("label"))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(output) != 1 {
-		t.Fatal("unexpected number of indices output")
-	} else if !slices.Equal(input, output[0]) {
+	} else if !slices.Equal(input, output) {
 		t.Fatal("input and output indices do not match")
 	}
 }

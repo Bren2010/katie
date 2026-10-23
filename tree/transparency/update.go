@@ -11,38 +11,6 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/wire"
 )
 
-func (t *Tree) Update(
-	ctx context.Context,
-	req *structs.UpdateRequest,
-) (<-chan wire.UpdateResponse, error) {
-	if t.config.Mode == structs.ThirdPartyManagement {
-		return nil, errors.New("update may not be called directly on third party manager")
-	}
-	up := newUpdater(t, ctx)
-	if err := up.setRequest(req); err != nil {
-		return nil, err
-	}
-	go up.process()
-
-	return up.ch, nil
-}
-
-func (t *Tree) ManagerUpdate(
-	ctx context.Context,
-	req *structs.ManagerUpdateRequest,
-) (<-chan wire.UpdateResponse, error) {
-	if t.config.Mode != structs.ThirdPartyManagement {
-		return nil, errors.New("manager update may not be called when not using third party management")
-	}
-	up := newUpdater(t, ctx)
-	if err := up.setManagerRequest(req); err != nil {
-		return nil, err
-	}
-	go up.process()
-
-	return up.ch, nil
-}
-
 // updateLadderVersions returns the set of versions that a VRF proof needs to be
 // provided for in an UpdateResponse, where the first version created in the
 // UpdateResponse is `startVer` and the final version created is `endVer`.
@@ -77,19 +45,36 @@ func updateLadderVersions(startVer, endVer uint32) []uint32 {
 	return versions
 }
 
-// validateUpdate checks the greatest version of the label advertised by the
-// user in an UpdateRequest, `greatest`, against the label's index. `values` is
-// the number of new versions that the user requested be created.
-func validateUpdate(index []uint64, greatest *uint32, values int) error {
-	if greatest != nil && int64(*greatest) >= int64(len(index)) {
-		return errors.New("advertised greatest version of label is greater than actual greatest version")
+func (t *Tree) Update(
+	ctx context.Context,
+	req *structs.UpdateRequest,
+) (<-chan wire.UpdateResponse, error) {
+	if t.config.Mode == structs.ThirdPartyManagement {
+		return nil, errors.New("update may not be called directly on third party manager")
 	}
-	upToDate := greatest == nil && len(index) == 0 ||
-		greatest != nil && int64(*greatest) == int64(len(index))-1
-	if upToDate && values == 0 {
-		return errors.New("update request must contain values if greatest version of label is current")
+	up := newUpdater(t, ctx)
+	if err := up.setRequest(req); err != nil {
+		return nil, err
 	}
-	return nil
+	go up.process()
+
+	return up.ch, nil
+}
+
+func (t *Tree) ManagerUpdate(
+	ctx context.Context,
+	req *structs.ManagerUpdateRequest,
+) (<-chan wire.UpdateResponse, error) {
+	if t.config.Mode != structs.ThirdPartyManagement {
+		return nil, errors.New("manager update may not be called when not using third party management")
+	}
+	up := newUpdater(t, ctx)
+	if err := up.setManagerRequest(req); err != nil {
+		return nil, err
+	}
+	go up.process()
+
+	return up.ch, nil
 }
 
 type updater struct {
@@ -115,25 +100,30 @@ func newUpdater(t *Tree, ctx context.Context) *updater {
 }
 
 func (u *updater) setRequest(req *structs.UpdateRequest) error {
-	values := make([]structs.UpdateValue, len(req.Values))
-	for i, val := range req.Values {
-		values[i] = structs.UpdateValue{Value: val.Value}
-	}
-	indices, err := u.tree.batchGetIndex([][]byte{req.Label})
+	// Load index and validate the request against it.
+	index, err := u.tree.getIndex(req.Label)
 	if err != nil {
 		return err
-	} else if err := validateUpdate(indices[0], req.GreatestVersion, len(req.Values)); err != nil {
-		return err
+	} else if req.GreatestVersion != nil {
+		if *req.GreatestVersion >= uint32(len(index)) {
+			return errors.New("advertised greatest version of label is greater than actual greatest version")
+		}
 	}
 
+	// Populate updater state.
 	u.last = req.Last
 	u.label = req.Label
-	u.values = values
-	u.index = indices[0]
+	u.values = make([]structs.UpdateValue, len(req.Values))
+	for i, val := range req.Values {
+		u.values[i] = structs.UpdateValue{Value: val.Value}
+	}
+
+	u.index = index
 	u.ver = 0
 	if req.GreatestVersion != nil {
 		u.ver = int64(*req.GreatestVersion) + 1
 	}
+
 	return nil
 }
 
@@ -144,35 +134,25 @@ func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
 
 	// Verify service operator signatures.
 	for i, val := range req.Values {
-		tbs, err := structs.Marshal(&structs.UpdateTBS{
-			Config:  u.tree.config.Public(),
-			Label:   req.Label,
-			Version: req.SignedVersion + uint32(i),
-			Value:   val.Value,
-		})
+		signedVer := int64(req.SignedVersion) + int64(i)
+		if signedVer >= 1<<32 {
+			return errors.New("signed version overflows")
+		}
+		err := u.tree.verifyServiceSignature(req.Label, uint32(signedVer), val)
 		if err != nil {
 			return err
-		}
-		ok := u.tree.config.LeafPublicKey.Verify(tbs, val.Signature)
-		if !ok {
-			return errors.New("leaf signature verification failed")
 		}
 	}
 
 	// Load index and validate the request against it.
-	indices, err := u.tree.batchGetIndex([][]byte{req.Label})
+	index, err := u.tree.getIndex(req.Label)
 	if err != nil {
 		return err
-	} else if err := validateUpdate(indices[0], req.GreatestVersion, len(req.Values)); err != nil {
-		return err
-	}
-	if len(req.Values) > 0 {
-		next := uint64(len(indices[0]))
-		if uint64(req.SignedVersion) < next {
-			return errors.New("signed version is less than next version of label")
-		} else if uint64(req.SignedVersion) > next {
-			// TODO: Sequence padding versions (finding #8).
-			return errors.New("skipping versions of a label is not yet supported")
+	} else if req.SignedVersion < uint32(len(index)) {
+		return errors.New("signed version is less than next version of label")
+	} else if req.GreatestVersion != nil {
+		if *req.GreatestVersion >= uint32(len(index)) {
+			return errors.New("advertised greatest version of label is greater than actual greatest version")
 		}
 	}
 
@@ -181,11 +161,13 @@ func (u *updater) setManagerRequest(req *structs.ManagerUpdateRequest) error {
 	u.label = req.Label
 	u.values = req.Values
 	u.signedVer = &req.SignedVersion
-	u.index = indices[0]
+
+	u.index = index
 	u.ver = 0
 	if req.GreatestVersion != nil {
 		u.ver = int64(*req.GreatestVersion) + 1
 	}
+
 	return nil
 }
 
@@ -201,37 +183,27 @@ func (u *updater) send(res wire.UpdateResponse) bool {
 func (u *updater) process() {
 	defer close(u.ch)
 
-	// If the greatest version that was advertised by the user is less than the
-	// actual greatest version, first push out UpdateResponses for the
-	// unknown versions.
-	for u.ver < int64(len(u.index)) {
-		out, err := u.next(true)
-		if ok := u.send(wire.UpdateResponse{Out: out, Err: err}); !ok {
-			return
-		} else if err != nil {
-			return
-		}
-
-		last := u.tree.treeHead.TreeSize
-		u.last = &last
+	// First, push out UpdateResponses for versions of the label the user
+	// doesn't know about, if any.
+	if ok := u.sync(nil); !ok {
+		return
 	}
 
 	// Submit new versions to be sequenced and reload the tree once they are.
 	if len(u.values) == 0 {
 		return
 	} else if u.tree.updater == nil {
-		u.send(wire.UpdateResponse{
-			Err: errors.New("transparency tree does not support user-submitted label updates"),
-		})
+		err := errors.New("transparency tree does not support user-submitted label updates")
+		u.send(wire.UpdateResponse{Err: err})
 		return
 	}
-	res := make(chan uint64, 1)
+	ch := make(chan UpdateResponse, 1)
 	req := UpdateRequest{
 		Label:           u.label,
 		StartingVersion: u.signedVer,
 		Values:          u.values,
 
-		Response: res,
+		Response: ch,
 	}
 	select {
 	case u.tree.updater <- req:
@@ -239,79 +211,77 @@ func (u *updater) process() {
 		return
 	}
 
-	var (
-		pos uint64
-		ok  bool
-	)
+	var res UpdateResponse
 	select {
-	case pos, ok = <-res:
-		if !ok {
-			u.send(wire.UpdateResponse{
-				Err: errors.New("failed to sequence requested new versions of label"),
-			})
-			return
-		}
+	case res = <-ch:
 	case <-u.ctx.Done():
 		return
 	}
-	if err := u.reloadTree(pos); err != nil {
+	if res.Err != nil {
+		u.send(wire.UpdateResponse{Err: res.Err})
+		return
+	} else if err := u.reloadTree(res.Pos); err != nil {
 		u.send(wire.UpdateResponse{Err: err})
 		return
 	}
 
-	// Push out the UpdateResponse for our new version of the label, and any
-	// others that were created concurrently.
+	// Push out remaining UpdateResponses.
+	u.sync(&res.Pos)
+}
+
+// sync pushes all outstanding UpdateResponses to the user.
+func (u *updater) sync(pos *uint64) bool {
 	for u.ver < int64(len(u.index)) {
-		out, err := u.next(u.index[u.ver] != pos)
+		out, err := u.next(pos != nil && *pos != u.index[u.ver])
 		if ok := u.send(wire.UpdateResponse{Out: out, Err: err}); !ok {
-			return
+			return false
 		} else if err != nil {
-			return
+			return false
 		}
 
-		last := u.tree.treeHead.TreeSize
+		last := u.tree.n()
 		u.last = &last
+		u.ver += int64(len(out.Values))
 	}
+
+	return true
 }
 
 func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 	t, pos := u.tree, u.index[u.ver]
+
+	fth, err := t.fullTreeHead(u.last)
+	if err != nil {
+		return nil, err
+	}
 
 	startVer := u.ver
 	values, info, err := u.infos(pos, withValues)
 	if err != nil {
 		return nil, err
 	}
-	ladder, err := u.ladder(startVer, u.ver-1, pos)
+	ladder, err := u.ladder(startVer, startVer+int64(len(info))-1, pos)
 	if err != nil {
 		return nil, err
 	}
 
-	fth, n, nP, m, err := t.fullTreeHead(u.last)
-	if err != nil {
-		return nil, err
-	}
-
+	// Execute the algorithm to update the user's view of the tree, followed by
+	// the update algorithm.
 	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, u.index)
 	provider := algorithms.NewDataProvider(t.config.Suite, handle)
-
 	if err := t.updateView(u.last, provider); err != nil {
 		return nil, err
 	}
-	monitor, err := algorithms.NewMonitor(t.config.Public(), n, provider)
+	monitor, err := algorithms.NewMonitor(t.config.Public(), t.n(), provider)
 	if err != nil {
 		return nil, err
 	}
-	// The label owner's state contains every version of the label prior to
-	// the ones being reported in this response. The owner's starting position
-	// isn't known, but it doesn't affect the proof: every log entry that the
-	// update algorithm inspects is to the right of the owner's starting
-	// position, and is skipped based on the position of the previous greatest
-	// version of the label.
 	monitor.Owner = &algorithms.OwnerState{UpcomingVers: u.index[:startVer]}
 	if err := monitor.Update(pos, len(info)); err != nil {
 		return nil, err
 	}
+
+	// Produce final CombinedTreeProof.
 	for ver := range handle.RequiredVersions() {
 		vrfOutput, _, err := t.computeVrfOutput(u.label, ver)
 		if err != nil {
@@ -320,11 +290,10 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 			return nil, err
 		}
 	}
-	proof, err := provider.Output(n, nP, m)
+	proof, err := provider.Output(t.n(), t.nP(), u.last)
 	if err != nil {
 		return nil, err
 	}
-
 	return &structs.UpdateResponse{
 		FullTreeHead: *fth,
 
@@ -341,16 +310,23 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 // the log entry at `pos`. If `withValues` is true, it also returns the value
 // for each version.
 func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []structs.UpdateInfo, error) {
+	var vers []uint32
+	for i := u.ver; i < int64(len(u.index)) && u.index[i] == pos; i++ {
+		if i >= 1<<32 {
+			return nil, nil, errors.New("version counter overflow")
+		}
+		vers = append(vers, uint32(i))
+	}
+	results, err := u.tree.batchGetVersion(u.label, vers)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var (
 		values []structs.LabelValue
 		info   []structs.UpdateInfo
 	)
-
-	for ; u.ver < int64(len(u.index)) && u.index[u.ver] == pos; u.ver++ {
-		res, err := u.tree.getVersion(u.label, uint32(u.ver))
-		if err != nil {
-			return nil, nil, err
-		}
+	for _, res := range results {
 		if withValues {
 			values = append(values, structs.LabelValue{Value: res.Value.Value})
 		}
@@ -359,7 +335,6 @@ func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []st
 			UpdateSuffix: res.Value.UpdateSuffix,
 		})
 	}
-
 	return values, info, nil
 }
 
@@ -368,6 +343,9 @@ func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []st
 // version inserted, in log entry `pos`. `startVer` and `endVer` are the same if
 // only one version was inserted.
 func (u *updater) ladder(startVer, endVer int64, pos uint64) ([]structs.BinaryLadderStep, error) {
+	if startVer > endVer || endVer >= 1<<32 {
+		return nil, errors.New("version counter overflow")
+	}
 	versions := updateLadderVersions(uint32(startVer), uint32(endVer))
 	steps, _, err := u.tree.getBinaryLadder(u.label, versions, startVer-1, pos)
 	return steps, err
@@ -379,17 +357,15 @@ func (u *updater) reloadTree(pos uint64) error {
 	tree, err := NewTree(u.tree.config, u.tree.tx, u.tree.updater)
 	if err != nil {
 		return err
-	} else if tree.treeHead.TreeSize <= pos {
+	} else if tree.n() <= pos {
 		return errors.New("reloaded tree does not contain new versions of label")
 	}
 	tree.now = u.tree.now
 
-	indices, err := u.tree.batchGetIndex([][]byte{u.label})
+	index, err := u.tree.getIndex(u.label)
 	if err != nil {
 		return err
-	}
-	index := indices[0]
-	if len(index) == 0 || index[len(index)-1] < pos {
+	} else if len(index) == 0 || index[len(index)-1] < pos {
 		return errors.New("reloaded index does not contain new versions of label")
 	}
 

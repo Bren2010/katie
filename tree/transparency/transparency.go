@@ -44,11 +44,19 @@ type UpdateRequest struct {
 	// version counters should be assigned.
 	Values []structs.UpdateValue
 
-	// Once the new versions of the label are created, the log entry where the
-	// new versions were inserted is sent over `Response`. If creating the new
-	// versions fails, `Response` is closed with no value sent. This channel
-	// should have a buffer size of 1 to prevent blocking writes.
-	Response chan<- uint64
+	// Response is where the result of processing the request is sent. This
+	// channel should have a buffer size of 1 to prevent blocking writes.
+	Response chan<- UpdateResponse
+}
+
+// UpdateResponse contains the Transparency Log's response to an UpdateRequest.
+type UpdateResponse struct {
+	// Pos contains the position of the log entry where the new versions of the
+	// label were inserted, if successful.
+	Pos uint64
+	// Err contains any error encountered while processing. If Err is non-nil,
+	// then the new versions of the label were not created.
+	Err error
 }
 
 // Tree is an implementation of a Transparency Tree that handles all state
@@ -172,15 +180,20 @@ func (t *Tree) Search(
 	ctx context.Context,
 	req *structs.SearchRequest,
 ) (*structs.SearchResponse, error) {
-	// Load label index and determine the greatest version that exists, if any.
-	indices, err := t.batchGetIndex([][]byte{req.Label})
+	fth, err := t.fullTreeHead(req.Last)
 	if err != nil {
 		return nil, err
 	}
-	greatest := int64(len(indices[0])) - 1
+
+	// Load label index and determine the greatest version that exists, if any.
+	index, err := t.getIndex(req.Label)
+	if err != nil {
+		return nil, err
+	}
+	greatest := int64(len(index)) - 1
 
 	// Determine the target version for our search / verify that the version
-	// requested by the user is acceptable.
+	// requested by the user is acceptable and exists.
 	var target uint32
 	if req.Version == nil {
 		if greatest < 0 {
@@ -191,6 +204,10 @@ func (t *Tree) Search(
 		return nil, algorithms.ErrLabelNotFound
 	} else {
 		target = *req.Version
+	}
+	openingAndValue, err := t.getVersion(req.Label, target)
+	if err != nil {
+		return nil, err
 	}
 
 	// Execute the algorithm to update the user's view of the tree, and then
@@ -225,17 +242,9 @@ func (t *Tree) Search(
 	}
 
 	// Assemble response.
-	fth, err := t.fullTreeHead(req.Last)
-	if err != nil {
-		return nil, err
-	}
 	var version *uint32
 	if req.Version == nil {
 		version = &target
-	}
-	openingAndValue, err := t.getVersion(req.Label, target)
-	if err != nil {
-		return nil, err
 	}
 	combinedProof, err := provider.Output(t.n(), t.nP(), req.Last)
 	if err != nil {

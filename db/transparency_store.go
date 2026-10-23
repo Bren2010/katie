@@ -111,22 +111,20 @@ func (ts TransparencyStore) DeleteIndex(label []byte) {
 	ts.delete(indexK(label))
 }
 
-func versionK(label []byte, ver uint32) string {
-	return versionPrefix + fmt.Sprintf("%x:%v", label, ver)
+func versionK(label []byte) func(ver uint32) string {
+	return func(ver uint32) string {
+		return versionPrefix + fmt.Sprintf("%x:%v", label, ver)
+	}
 }
 
-func (ts TransparencyStore) GetVersion(label []byte, ver uint32) ([]byte, error) {
-	res, err := ts.batchGet([]string{versionK(label, ver)}, noop)
-	if err != nil {
-		return nil, err
-	}
-	return res[0], nil
+func (ts TransparencyStore) BatchGetVersion(label []byte, vers []uint32) ([][]byte, error) {
+	return ts.batchGet(vers, versionK(label))
 }
 func (ts TransparencyStore) PutVersion(label []byte, ver uint32, data []byte) {
-	ts.put(versionK(label, ver), data)
+	ts.put(versionK(label)(ver), data)
 }
 func (ts TransparencyStore) DeleteVersion(label []byte, ver uint32) {
-	ts.delete(versionK(label, ver))
+	ts.delete(versionK(label)(ver))
 }
 
 func transparencyK(key uint64) string { return transparencyPrefix + fmt.Sprint(key) }
