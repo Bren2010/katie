@@ -10,7 +10,7 @@ import (
 )
 
 func TestAddLabel(t *testing.T) {
-	store, kv := memStoreCounting()
+	store, kv := test.MemStoreCounting()
 
 	var (
 		label1 = []byte("label")
@@ -80,7 +80,7 @@ func TestAddLabel(t *testing.T) {
 }
 
 func TestRemoveLabel(t *testing.T) {
-	store, kv := memStoreCounting()
+	store, kv := test.MemStoreCounting()
 
 	var label = []byte("label")
 
@@ -115,7 +115,7 @@ func TestRemoveLabel(t *testing.T) {
 }
 
 func TestRemoveLabelTooSoon(t *testing.T) {
-	store := memStore()
+	store := test.MemStore()
 
 	var label = []byte("label")
 
@@ -142,7 +142,7 @@ func TestRemoveLabelTooSoon(t *testing.T) {
 }
 
 func TestAddRemoveSameLabel(t *testing.T) {
-	store, kv := memStoreCounting()
+	store, kv := test.MemStoreCounting()
 
 	var label = []byte("label")
 
@@ -189,7 +189,7 @@ func TestAddRemoveSameLabel(t *testing.T) {
 // TestEmptyMutation checks that a log entry can be added without modifying the
 // prefix tree.
 func TestEmptyMutation(t *testing.T) {
-	store, kv := memStoreCounting()
+	store, kv := test.MemStoreCounting()
 
 	var label = []byte("label")
 
@@ -222,7 +222,7 @@ func TestEmptyMutation(t *testing.T) {
 // the previous distinguished log entry is one that the Third-Party Auditor has
 // processed, because the auditor would reject the removal otherwise.
 func TestRemoveLabelBeforeAuditorStart(t *testing.T) {
-	store := memStore()
+	store := test.MemStore()
 
 	var label = []byte("label")
 
