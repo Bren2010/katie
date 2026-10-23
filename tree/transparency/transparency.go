@@ -212,7 +212,7 @@ func (t *Tree) Search(
 
 	// Execute the algorithm to update the user's view of the tree, and then
 	// either a greatest-version or fixed-version search.
-	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, indices[0])
+	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, index)
 	provider := algorithms.NewDataProvider(t.config.Suite, handle)
 	if err := t.updateView(req.Last, provider); err != nil {
 		return nil, err
@@ -230,15 +230,12 @@ func (t *Tree) Search(
 	// A commitment is provided for every version that exists, other than the
 	// target version, which the user computes themselves.
 	ladder := math.SearchBinaryLadder(target, target, nil, nil)
-	steps, ladderOutputs, err := t.getBinaryLadder(req.Label, ladder, greatest, t.n()-1)
+	steps, vrfOutputs, err := t.getBinaryLadder(req.Label, ladder, greatest, t.n()-1)
 	if err != nil {
 		return nil, err
 	}
-	for ver := range handle.RequiredVersions() {
-		// TODO
-		if err := handle.AddVersion(ver, vrfOutput); err != nil {
-			return nil, err
-		}
+	if err := t.addRequiredVersions(handle, req.Label, vrfOutputs); err != nil {
+		return nil, err
 	}
 
 	// Assemble response.

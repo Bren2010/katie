@@ -146,9 +146,9 @@ func (t *Tree) computeVrfOutput(label []byte, ver uint32) ([]byte, []byte, error
 }
 
 // getBinaryLadder returns the binary ladder steps corresponding to the
-// requested versions and the VRF output for each version. `label` is the label
-// that the binary ladder is for, and `greatest` is the greatest version of
-// `label` that exists as of log entry `x` (or -1 if none).
+// requested versions and a map from each version to its VRF output. `label` is
+// the label that the binary ladder is for, and `greatest` is the greatest
+// version of `label` that exists as of log entry `x` (or -1 if none).
 //
 // The commitment for each version up to `greatest` is looked up in the prefix
 // tree of log entry `x`.
@@ -157,10 +157,10 @@ func (t *Tree) getBinaryLadder(
 	versions []uint32,
 	greatest int64,
 	x uint64,
-) ([]structs.BinaryLadderStep, [][]byte, error) {
+) ([]structs.BinaryLadderStep, map[uint32][]byte, error) {
 	var (
 		// Contains the VRF output for each version.
-		vrfOutputs = make([][]byte, len(versions))
+		vrfOutputs = make(map[uint32][]byte, len(versions))
 
 		// Contains the index in `versions` of each version that exists, and
 		// the VRF output for each. Used to lookup the commitment to the
@@ -180,7 +180,7 @@ func (t *Tree) getBinaryLadder(
 			existing = append(existing, i)
 			existingOutputs = append(existingOutputs, vrfOutput)
 		}
-		vrfOutputs[i] = vrfOutput
+		vrfOutputs[ver] = vrfOutput
 		out[i].Proof = proof
 	}
 
@@ -205,6 +205,30 @@ func (t *Tree) getBinaryLadder(
 	}
 
 	return out, vrfOutputs, nil
+}
+
+// addRequiredVersions provides `handle` with the VRF output of each version of
+// `label` that it requires. Outputs in `known` are used where available, rather
+// than being recomputed.
+func (t *Tree) addRequiredVersions(
+	handle *algorithms.ProducedProofHandle,
+	label []byte,
+	known map[uint32][]byte,
+) error {
+	for ver := range handle.RequiredVersions() {
+		vrfOutput, ok := known[ver]
+		if !ok {
+			var err error
+			vrfOutput, _, err = t.computeVrfOutput(label, ver)
+			if err != nil {
+				return err
+			}
+		}
+		if err := handle.AddVersion(ver, vrfOutput); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // verifyServiceSignature verifies a leaf signature from the Service Operator.

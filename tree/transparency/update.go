@@ -232,7 +232,7 @@ func (u *updater) process() {
 // sync pushes all outstanding UpdateResponses to the user.
 func (u *updater) sync(pos *uint64) bool {
 	for u.ver < int64(len(u.index)) {
-		out, err := u.next(pos != nil && *pos != u.index[u.ver])
+		out, err := u.next(pos == nil || *pos != u.index[u.ver])
 		if ok := u.send(wire.UpdateResponse{Out: out, Err: err}); !ok {
 			return false
 		} else if err != nil {
@@ -255,12 +255,11 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 		return nil, err
 	}
 
-	startVer := u.ver
 	values, info, err := u.infos(pos, withValues)
 	if err != nil {
 		return nil, err
 	}
-	ladder, err := u.ladder(startVer, startVer+int64(len(info))-1, pos)
+	ladder, vrfOutputs, err := u.ladder(u.ver, u.ver+int64(len(info))-1, pos)
 	if err != nil {
 		return nil, err
 	}
@@ -276,19 +275,14 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	monitor.Owner = &algorithms.OwnerState{UpcomingVers: u.index[:startVer]}
+	monitor.Owner = &algorithms.OwnerState{UpcomingVers: u.index[:u.ver]}
 	if err := monitor.Update(pos, len(info)); err != nil {
 		return nil, err
 	}
 
 	// Produce final CombinedTreeProof.
-	for ver := range handle.RequiredVersions() {
-		vrfOutput, _, err := t.computeVrfOutput(u.label, ver)
-		if err != nil {
-			return nil, err
-		} else if err := handle.AddVersion(ver, vrfOutput); err != nil {
-			return nil, err
-		}
+	if err := t.addRequiredVersions(handle, u.label, vrfOutputs); err != nil {
+		return nil, err
 	}
 	proof, err := provider.Output(t.n(), t.nP(), u.last)
 	if err != nil {
@@ -309,7 +303,10 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 // infos returns the UpdateInfo structures for all of the versions inserted in
 // the log entry at `pos`. If `withValues` is true, it also returns the value
 // for each version.
-func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []structs.UpdateInfo, error) {
+func (u *updater) infos(
+	pos uint64,
+	withValues bool,
+) ([]structs.LabelValue, []structs.UpdateInfo, error) {
 	var vers []uint32
 	for i := u.ver; i < int64(len(u.index)) && u.index[i] == pos; i++ {
 		if i >= 1<<32 {
@@ -341,14 +338,18 @@ func (u *updater) infos(pos uint64, withValues bool) ([]structs.LabelValue, []st
 // ladder returns the binary ladder steps for an Update operation where
 // `startVer` was the first new version inserted and `endVer` was the last new
 // version inserted, in log entry `pos`. `startVer` and `endVer` are the same if
-// only one version was inserted.
-func (u *updater) ladder(startVer, endVer int64, pos uint64) ([]structs.BinaryLadderStep, error) {
+// only one version was inserted. It also returns the VRF output of each version
+// in the ladder.
+func (u *updater) ladder(
+	startVer,
+	endVer int64,
+	pos uint64,
+) ([]structs.BinaryLadderStep, map[uint32][]byte, error) {
 	if startVer > endVer || endVer >= 1<<32 {
-		return nil, errors.New("version counter overflow")
+		return nil, nil, errors.New("version counter overflow")
 	}
 	versions := updateLadderVersions(uint32(startVer), uint32(endVer))
-	steps, _, err := u.tree.getBinaryLadder(u.label, versions, startVer-1, pos)
-	return steps, err
+	return u.tree.getBinaryLadder(u.label, versions, startVer-1, pos)
 }
 
 // reloadTree refreshes the `tree` and `index` fields of `u` to cover new
