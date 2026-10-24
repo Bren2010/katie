@@ -4,6 +4,7 @@ package transparency
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Bren2010/katie/db"
@@ -68,6 +69,12 @@ type Tree struct {
 	treeHead    *structs.TreeHead
 	auditorHead *structs.AuditorTreeHead
 
+	// commitErr is set if committing to the database failed. The commit may
+	// or may not have been persisted, so the in-memory state of the Tree can
+	// no longer be trusted and all further writes are refused. A new Tree must
+	// be created to reload the state from the database.
+	commitErr error
+
 	now func() time.Time // Returns the current time. Overridden in tests.
 }
 
@@ -118,7 +125,12 @@ func NewTree(
 // empty and no tree head has been issued yet.
 func (t *Tree) TreeHead() *structs.TreeHead { return t.treeHead }
 
-func (t *Tree) n() uint64 { return t.treeHead.TreeSize }
+func (t *Tree) n() uint64 {
+	if t.treeHead != nil {
+		return t.treeHead.TreeSize
+	}
+	return 0
+}
 
 func (t *Tree) nP() *uint64 {
 	if t.auditorHead != nil {
@@ -127,13 +139,32 @@ func (t *Tree) nP() *uint64 {
 	return nil
 }
 
+// checkWritable returns an error if the Tree is not allowed to write to the
+// database because a previous commit failed.
+func (t *Tree) checkWritable() error {
+	if t.commitErr != nil {
+		return fmt.Errorf("refusing to write after failed commit, tree must be reloaded: %w", t.commitErr)
+	}
+	return nil
+}
+
+// commit commits all buffered changes to the database. If this fails, the Tree
+// refuses all further writes.
+func (t *Tree) commit() error {
+	if err := t.tx.Commit(); err != nil {
+		t.commitErr = err
+		return err
+	}
+	return nil
+}
+
 func (t *Tree) fullTreeHead(last *uint64) (*structs.FullTreeHead, error) {
 	if t.treeHead == nil {
 		return nil, errors.New("can not operate on an empty tree")
 	} else if last != nil {
-		if *last == t.treeHead.TreeSize {
+		if *last == t.n() {
 			return &structs.FullTreeHead{}, nil
-		} else if *last > t.treeHead.TreeSize {
+		} else if *last > t.n() {
 			return nil, errors.New("tree size advertised by user is greater than current tree size")
 		}
 	}
@@ -167,7 +198,7 @@ func (t *Tree) updateView(last *uint64, provider *algorithms.DataProvider) error
 		provider.AddRetained(nil, logEntries)
 	}
 
-	return algorithms.UpdateView(t.config.Public(), t.treeHead.TreeSize, last, provider)
+	return algorithms.UpdateView(t.config.Public(), t.n(), last, provider)
 }
 
 // Search looks up a requested version of a label. It returns the corresponding

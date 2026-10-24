@@ -2,6 +2,7 @@ package transparency
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -256,5 +257,107 @@ func TestRemoveLabelBeforeAuditorStart(t *testing.T) {
 	}
 	if _, err := tree.Mutate(nil, [][]byte{label}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMutateRollback checks that a failed mutation leaves no trace in the
+// database, even if some of its changes were written before it failed.
+func TestMutateRollback(t *testing.T) {
+	store, kv := test.MemStoreCounting()
+
+	var label = []byte("label")
+
+	tree, err := NewTree(test.Config(t), store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		_, err = tree.Mutate([]LabelValue{
+			{Label: label, Value: structs.UpdateValue{Value: []byte{byte(i)}}},
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Removing the label fails because it was modified too recently. Labels
+	// are processed in a random order, so with this many additions, some are
+	// almost certainly written before the removal fails.
+	newLabels := test.RandomLabels(20)
+	add := make([]LabelValue, len(newLabels))
+	for i, newLabel := range newLabels {
+		add[i] = LabelValue{Label: newLabel, Value: structs.UpdateValue{Value: []byte("new")}}
+	}
+	if _, err := tree.Mutate(add, [][]byte{label}); err == nil {
+		t.Fatal("expected error")
+	}
+
+	// None of the additions are visible, or committed by the next mutation.
+	indices, err := tree.batchGetIndex(newLabels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, index := range indices {
+		if len(index) != 0 {
+			t.Fatal("index from failed mutation is visible")
+		}
+	}
+	if _, err := tree.Mutate(nil, nil); err != nil {
+		t.Fatal(err)
+	} else if kv.Count("i") != 1 {
+		t.Fatal("unexpected number of indices")
+	} else if kv.Count("v") != 3 {
+		t.Fatal("unexpected number of label versions")
+	} else if kv.Count("t") != 4 {
+		t.Fatal("unexpected number of log entries written")
+	}
+}
+
+// TestMutateFailedCommit checks that a Tree refuses to write after a commit
+// fails, and that a reloaded Tree can continue from the committed state.
+func TestMutateFailedCommit(t *testing.T) {
+	store, kv := test.MemStoreCounting()
+
+	var label = []byte("label")
+
+	tree, err := NewTree(test.Config(t), store, nil)
+	if err != nil {
+		t.Fatal(err)
+	} else if _, err := tree.Mutate(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	kv.CommitErr = errors.New("commit failed")
+	_, err = tree.Mutate([]LabelValue{
+		{Label: label, Value: structs.UpdateValue{Value: []byte("version 0")}},
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "commit failed") {
+		t.Fatalf("expected commit to fail, got: %v", err)
+	} else if tree.n() != 1 {
+		t.Fatal("tree size advanced after failed commit")
+	}
+
+	// Further writes are refused, even once the database recovers.
+	kv.CommitErr = nil
+	if _, err := tree.Mutate(nil, nil); err == nil || !strings.Contains(err.Error(), "reloaded") {
+		t.Fatalf("expected write to be refused, got: %v", err)
+	}
+
+	// A reloaded tree doesn't see the failed mutation, and can be written to.
+	reloaded, err := NewTree(test.Config(t), store, nil)
+	if err != nil {
+		t.Fatal(err)
+	} else if reloaded.n() != 1 {
+		t.Fatal("unexpected tree size after reload")
+	}
+	if index, err := reloaded.getIndex(label); err != nil {
+		t.Fatal(err)
+	} else if len(index) != 0 {
+		t.Fatal("label from failed mutation is visible")
+	}
+	if _, err := reloaded.Mutate(nil, nil); err != nil {
+		t.Fatal(err)
+	} else if reloaded.n() != 2 {
+		t.Fatal("unexpected tree size")
 	}
 }

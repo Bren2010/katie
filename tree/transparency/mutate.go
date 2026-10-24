@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/Bren2010/katie/tree/log"
@@ -18,11 +19,16 @@ import (
 // new log entry is added without modifying the prefix tree.
 //
 // It returns the AuditorUpdate structure for the Third-Party Auditor, if any.
+// If an error is returned, no changes are made to the tree.
 func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate, error) {
-	n := uint64(0)
-	if t.treeHead != nil {
-		n = t.treeHead.TreeSize
+	if err := t.checkWritable(); err != nil {
+		return nil, err
 	}
+	// Discard any changes that were buffered before an error. This is a no-op
+	// after a successful commit, since committing clears the buffer.
+	defer t.tx.Rollback()
+
+	n := t.n()
 
 	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, nil)
 	provider := algorithms.NewDataProvider(t.config.Suite, handle)
@@ -36,7 +42,7 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 		if err != nil {
 			return nil, err
 		} else if timestamp < rightmost {
-			return nil, errors.New("refusing to issue tree head: current timestamp is less than previous timestamp")
+			return nil, errors.New("refusing to issue tree head: current time is less than previous timestamp")
 		}
 	}
 
@@ -53,6 +59,8 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 	// to do to the prefix tree.
 	mutations, err := t.groupByLabel(add, remove)
 	if err != nil {
+		return nil, err
+	} else if err := t.checkMutationSize(mutations); err != nil {
 		return nil, err
 	}
 	var (
@@ -157,6 +165,38 @@ func (t *Tree) groupByLabel(add []LabelValue, remove [][]byte) ([]labelMutation,
 		}
 	}
 	return out, nil
+}
+
+// checkMutationSize returns an error if the requested mutations would produce
+// an AuditorUpdate that is too large to serialize. This is checked before
+// anything is written to the database.
+//
+// Every list in an AuditorUpdate, including those in its PrefixProof, is
+// prefixed with a uint32 count. Given `a` added and `r` removed prefix tree
+// entries:
+//   - At most `r` leaves are moved, since each removal can move at most one
+//     sibling leaf.
+//   - The PrefixProof has one search result per added, removed, or moved
+//     entry, so at most `a + 2r` results.
+//   - Each search result contributes at most one proof element per level of
+//     the prefix tree, and the prefix tree has at most 8*HashSize levels.
+//
+// So it suffices to check that `(a + 2r) * 8*HashSize` fits in a uint32.
+func (t *Tree) checkMutationSize(mutations []labelMutation) error {
+	var added, removed uint64
+	for _, mut := range mutations {
+		added += uint64(len(mut.add))
+		if mut.remove {
+			removed += uint64(len(mut.index))
+		}
+	}
+
+	maxDepth := 8 * uint64(t.config.Suite.HashSize())
+	maxEntries := uint64(math.MaxUint32) / maxDepth
+	if added > maxEntries || removed > maxEntries || added+2*removed > maxEntries {
+		return fmt.Errorf("too many changes to fit in an auditor update: %d added, %d removed", added, removed)
+	}
+	return nil
 }
 
 // mutateLabel performs the requested additions and removals for a single label.
@@ -271,7 +311,7 @@ func (t *Tree) issueTreeHead(n, timestamp uint64, prefixRoot []byte) error {
 		return err
 	}
 	t.tx.PutTreeHead(rawTreeHead)
-	if err := t.tx.Commit(); err != nil {
+	if err := t.commit(); err != nil {
 		return err
 	}
 

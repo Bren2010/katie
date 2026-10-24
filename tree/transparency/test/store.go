@@ -15,6 +15,9 @@ type CountingKV struct {
 	inner    db.KeyValueStore
 	treeHead []byte
 	data     map[string]struct{}
+
+	// CommitErr, if set, is returned by Commit without writing anything.
+	CommitErr error
 }
 
 func NewCountingKV() *CountingKV {
@@ -29,6 +32,9 @@ func (kv *CountingKV) BatchGet(ctx context.Context, keys []string) ([][]byte, er
 }
 
 func (kv *CountingKV) Commit(ctx context.Context, batch map[string][]byte, treeHead []byte) error {
+	if kv.CommitErr != nil {
+		return kv.CommitErr
+	}
 	if err := kv.inner.Commit(ctx, batch, treeHead); err != nil {
 		return err
 	}

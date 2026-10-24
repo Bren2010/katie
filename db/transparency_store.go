@@ -142,10 +142,17 @@ func (ts TransparencyStore) Delete(key uint64) {
 func (ts TransparencyStore) LogStore() LogStore       { return LogStore{store: ts} }
 func (ts TransparencyStore) PrefixStore() PrefixStore { return PrefixStore{store: ts} }
 
+// Commit writes all buffered changes to the underlying KeyValueStore. The
+// buffer is cleared afterwards, regardless of whether the commit succeeded.
+//
+// If Commit returns an error, the changes may or may not have been persisted.
+// The caller should discard any in-memory state derived from them and reload
+// from the database before writing again.
 func (ts TransparencyStore) Commit() error {
 	if ts.batch == nil {
 		panic("connection is read-only")
 	}
+	defer clear(ts.batch)
 
 	var treeHead []byte
 	batch := make(map[string][]byte)
@@ -169,6 +176,9 @@ func (ts TransparencyStore) Commit() error {
 
 	return ts.kv.Commit(ts.ctx, batch, treeHead)
 }
+
+// Rollback discards all buffered changes that have not been committed.
+func (ts TransparencyStore) Rollback() { clear(ts.batch) }
 
 // LogStore is used by a Log Tree to communicate with its database.
 type LogStore struct {

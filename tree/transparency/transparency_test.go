@@ -94,7 +94,7 @@ func TestSearch(t *testing.T) {
 	verifySearchResponse(t, res, true, &ver, []byte{6}, 6, 6, []uint32{6})
 
 	// Tree size less than current, greatest version search.
-	size := tree.treeHead.TreeSize - 1
+	size := tree.n() - 1
 	res, err = tree.Search(ctx, &structs.SearchRequest{Last: &size, Label: labels[0], Version: nil})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestSearch(t *testing.T) {
 	verifySearchResponse(t, res, true, &ver, []byte{6}, 6, 6, []uint32{6})
 
 	// Tree size equal to current, greatest version search.
-	size = tree.treeHead.TreeSize
+	size = tree.n()
 	res, err = tree.Search(ctx, &structs.SearchRequest{Last: &size, Label: labels[0], Version: nil})
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestSearch(t *testing.T) {
 	verifySearchResponse(t, res, true, nil, []byte{1}, 1, 6, []uint32{1})
 
 	// Tree size less than current, fixed version search.
-	size = tree.treeHead.TreeSize - 1
+	size = tree.n() - 1
 	res, err = tree.Search(ctx, &structs.SearchRequest{Last: &size, Label: labels[0], Version: &ver})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestSearch(t *testing.T) {
 	verifySearchResponse(t, res, true, nil, []byte{1}, 1, 6, []uint32{1})
 
 	// Tree size equal to current, fixed version search.
-	size = tree.treeHead.TreeSize
+	size = tree.n()
 	res, err = tree.Search(ctx, &structs.SearchRequest{Last: &size, Label: labels[0], Version: &ver})
 	if err != nil {
 		t.Fatal(err)
