@@ -104,12 +104,19 @@ func verifyOwnerInitResponse(
 		t.Fatal("unexpected greatest versions provided")
 	}
 
+	// Commitments are expected for every version that exists at the starting
+	// position, which is the first entry of `greatestVers`.
+	greatestAtStart := int64(-1)
+	if len(greatestVers) > 0 {
+		greatestAtStart = int64(greatestVers[0])
+	}
+
 	ladder := allLadderVersions(greatestVers)
 	if len(res.BinaryLadder) != len(ladder) {
 		t.Fatal("unexpected number of binary ladder steps provided")
 	}
 	for i, ver := range ladder {
-		commitmentExpected := ver <= greatestVers[len(greatestVers)-1]
+		commitmentExpected := int64(ver) <= greatestAtStart
 		if commitmentExpected && res.BinaryLadder[i].Commitment == nil {
 			t.Fatal("commitment not provided when expected")
 		} else if !commitmentExpected && len(res.BinaryLadder[i].Commitment) > 0 {
@@ -126,8 +133,16 @@ func TestOwnerInit(t *testing.T) {
 	ctx := context.Background()
 	tree, labels := generateRandomTree(t)
 
+	// Accepts absent starting log entry, and provides only a binary ladder step
+	// for version 0 with no commitment.
+	res, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyOwnerInitResponse(t, res, nil)
+
 	// Rejects non-distinguished starting log entry.
-	_, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(2))})
+	_, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(2))})
 	if err.Error() != "requested starting position is not distinguished" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,7 +155,7 @@ func TestOwnerInit(t *testing.T) {
 
 	// Accepts distinguished log entry 0, and restricts data provided to
 	// versions that existed at that point.
-	res, err := tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(0))})
+	res, err = tree.OwnerInit(ctx, &structs.OwnerInitRequest{Label: labels[0], Start: new(uint64(0))})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 
 // verifyEntries verifies that the monitoring map entries presented in a request
 // are valid.
-func verifyEntries(entries []structs.MonitorMapEntry, index []uint64, n uint64) error { // TODO: Is this replaced by NewContactState?
+func verifyEntries(entries []structs.MonitorMapEntry, index []uint64, n uint64) error {
 	// Verify that `entries` is in ascending order by both `position` and
 	// `version`, and that no `position` or `version` is duplicate.
 	for i := 1; i < len(entries); i++ {
@@ -23,8 +23,8 @@ func verifyEntries(entries []structs.MonitorMapEntry, index []uint64, n uint64) 
 		}
 	}
 
-	// Verify that each `position` is on the (right) direct path of the first
-	// log entry to contain the associated `version` of the label.
+	// Verify that each `position` is on the right direct path of the first log
+	// entry to contain the associated `version` of the label.
 	for _, entry := range entries {
 		if int(entry.Version) >= len(index) {
 			return errors.New("unexpected version found in monitoring map")
@@ -61,14 +61,13 @@ func allLadderVersions(versions []uint32) []uint32 {
 }
 
 type monitorOp struct {
-	n       uint64
 	index   []uint64
 	monitor *algorithms.Monitor
-	finish  func() (*structs.FullTreeHead, *structs.CombinedTreeProof, error)
+	finish  func(map[uint32][]byte) (*structs.FullTreeHead, *structs.CombinedTreeProof, error)
 }
 
 func (t *Tree) startMonitor(last *uint64, label []byte) (*monitorOp, error) {
-	fth, n, nP, m, err := t.fullTreeHead(last)
+	fth, err := t.fullTreeHead(last)
 	if err != nil {
 		return nil, err
 	}
@@ -84,26 +83,19 @@ func (t *Tree) startMonitor(last *uint64, label []byte) (*monitorOp, error) {
 	if err := t.updateView(last, provider); err != nil {
 		return nil, err
 	}
-	monitor, err := algorithms.NewMonitor(t.config.Public(), n, provider)
+	monitor, err := algorithms.NewMonitor(t.config.Public(), t.n(), provider)
 	if err != nil {
 		return nil, err
 	}
 
 	return &monitorOp{
-		n:       n,
 		index:   index,
 		monitor: monitor,
-		finish: func() (*structs.FullTreeHead, *structs.CombinedTreeProof, error) {
-			for ver := range handle.RequiredVersions() {
-				vrfOutput, _, err := t.computeVrfOutput(label, ver)
-				if err != nil {
-					return nil, nil, err
-				} else if err := handle.AddVersion(ver, vrfOutput); err != nil {
-					return nil, nil, err
-				}
+		finish: func(vrfOutputs map[uint32][]byte) (*structs.FullTreeHead, *structs.CombinedTreeProof, error) {
+			if err := t.addRequiredVersions(handle, label, vrfOutputs); err != nil {
+				return nil, nil, err
 			}
-
-			proof, err := provider.Output(n, nP, m)
+			proof, err := provider.Output(t.n(), t.nP(), last)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -121,16 +113,15 @@ func (t *Tree) ContactMonitor(
 		return nil, err
 	}
 
-	if err := verifyEntries(req.Entries, op.index, op.n); err != nil {
+	if err := verifyEntries(req.Entries, op.index, t.n()); err != nil {
 		return nil, err
 	} else if err := op.monitor.SetContactState(req.Entries); err != nil {
 		return nil, err
-	}
-	if err := op.monitor.ContactMonitor(); err != nil {
+	} else if err := op.monitor.ContactMonitor(); err != nil {
 		return nil, err
 	}
 
-	fth, combinedProof, err := op.finish()
+	fth, combinedProof, err := op.finish(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -166,11 +157,16 @@ func (t *Tree) OwnerInit(
 	}
 	// Fetch the VRF proof and value commitment for all versions that may appear
 	// in a binary ladder for any version in `versions`.
+	//
+	// If `req.Start` is nil, or no version of the label exists at `req.Start`,
+	// then `versions` is empty and `greatestAtStart` is -1. This results in a
+	// binary ladder for only version 0 with no commitment. The prefix tree is
+	// not searched in this case, so the value of `start` is unused.
 	greatestAtStart, start := int64(-1), uint64(0)
 	if req.Start != nil {
 		greatestAtStart, start = state.GreatestVersionAt(*req.Start), *req.Start
 	}
-	binaryLadder, _, err := t.getBinaryLadder(
+	binaryLadder, vrfOutputs, err := t.getBinaryLadder(
 		req.Label,
 		allLadderVersions(versions),
 		greatestAtStart,
@@ -185,7 +181,7 @@ func (t *Tree) OwnerInit(
 		return nil, err
 	}
 
-	fth, combinedProof, err := op.finish()
+	fth, combinedProof, err := op.finish(vrfOutputs)
 	if err != nil {
 		return nil, err
 	}
@@ -208,11 +204,11 @@ func (t *Tree) OwnerMonitor(
 	}
 
 	// Verify `Entries` is acceptable.
-	if err := verifyEntries(req.Entries, op.index, op.n); err != nil {
+	if err := verifyEntries(req.Entries, op.index, t.n()); err != nil {
 		return nil, err
 	}
 	// Verify that `Start` is either absent or less than the size of the tree.
-	if req.Start != nil && *req.Start >= op.n {
+	if req.Start != nil && *req.Start >= t.n() {
 		return nil, errors.New("advertised starting position is greater than tree size")
 	}
 	// Verify that `GreatestVersion` is either absent, or less than or equal to
@@ -257,7 +253,7 @@ func (t *Tree) OwnerMonitor(
 		return nil, err
 	}
 
-	fth, combinedProof, err := op.finish()
+	fth, combinedProof, err := op.finish(nil)
 	if err != nil {
 		return nil, err
 	}
