@@ -35,14 +35,14 @@ func makeAuditor(t *testing.T) (
 
 	for range 10 {
 		// Generate random labels to insert.
-		added := make([]transparency.LabelValue, 5)
+		added := make([]transparency.LabelUpdate, 5)
 		for j := range added {
 			label := make([]byte, 16)
 			rand.Read(label)
 
-			added[j] = transparency.LabelValue{
-				Label: label,
-				Value: structs.UpdateValue{Value: []byte("value")},
+			added[j] = transparency.LabelUpdate{
+				Label:  label,
+				Values: []structs.UpdateValue{{Value: []byte("value")}},
 			}
 		}
 
@@ -165,14 +165,14 @@ func TestAuditorRetainsRecentInsertions(t *testing.T) {
 	checked := 0
 
 	for range 10 {
-		added := make([]transparency.LabelValue, 2)
+		added := make([]transparency.LabelUpdate, 2)
 		for j := range added {
 			label := make([]byte, 16)
 			rand.Read(label)
 
-			added[j] = transparency.LabelValue{
-				Label: label,
-				Value: structs.UpdateValue{Value: []byte("value")},
+			added[j] = transparency.LabelUpdate{
+				Label:  label,
+				Values: []structs.UpdateValue{{Value: []byte("value")}},
 			}
 		}
 

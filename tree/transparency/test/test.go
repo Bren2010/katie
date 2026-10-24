@@ -65,6 +65,23 @@ func ConfigWithAuditor(t *testing.T) (structs.PrivateConfig, suites.SigningPriva
 	return config, auditorKey
 }
 
+func ConfigWithManager(t *testing.T) (structs.PrivateConfig, suites.SigningPrivateKey) {
+	config := Config(t)
+
+	rawLeafKey, err := hex.DecodeString("5a6c3a5e8e1f2b7d9c0d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := config.Suite.ParseSigningPrivateKey(rawLeafKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Mode = structs.ThirdPartyManagement
+	config.LeafPublicKey = leafKey.Public()
+
+	return config, leafKey
+}
+
 type searchLadder struct {
 	pos  uint64
 	vers []uint32

@@ -31,7 +31,7 @@ func auditedTree(t *testing.T) (*Tree, db.TransparencyStore, *auditor.Auditor) {
 
 // auditedMutate adds a new log entry to the tree, has the auditor process it,
 // and returns a copy of the auditor's new tree head.
-func auditedMutate(t *testing.T, tree *Tree, a *auditor.Auditor, add []LabelValue) structs.AuditorTreeHead {
+func auditedMutate(t *testing.T, tree *Tree, a *auditor.Auditor, add []LabelUpdate) structs.AuditorTreeHead {
 	update, err := tree.Mutate(add, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -51,8 +51,8 @@ func TestSetAuditorTreeHead(t *testing.T) {
 
 	var heads []structs.AuditorTreeHead
 	for i, label := range labels {
-		heads = append(heads, auditedMutate(t, tree, a, []LabelValue{
-			{Label: label, Value: structs.UpdateValue{Value: []byte{byte(i)}}},
+		heads = append(heads, auditedMutate(t, tree, a, []LabelUpdate{
+			{Label: label, Values: []structs.UpdateValue{{Value: []byte{byte(i)}}}},
 		}))
 	}
 

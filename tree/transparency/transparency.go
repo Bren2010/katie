@@ -14,11 +14,20 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/wire"
 )
 
-// LabelValue is a request to add a new version of a label to the tree, given as
-// input to Tree.Mutate. Version counters are assigned automatically.
-type LabelValue struct {
+// LabelUpdate is a request to add new versions of a label to the tree, given as
+// input to Tree.Mutate.
+type LabelUpdate struct {
 	Label []byte
-	Value structs.UpdateValue
+
+	// StartingVersion is the version that must be assigned to the first element
+	// of `Values`. It may only be set in Third-Party Management mode, and has
+	// the same semantics as UpdateRequest.StartingVersion. If nil, version
+	// counters are assigned automatically.
+	StartingVersion *uint32
+
+	// Values contains the values for the new label versions, in the order that
+	// version counters should be assigned.
+	Values []structs.UpdateValue
 }
 
 // UpdateRequest represents a request create some new versions of a label. When
@@ -35,10 +44,10 @@ type UpdateRequest struct {
 	// StartingVersion is the version that should be assigned to the first
 	// element of `Values`, if any. This is used in Third-Party Management mode
 	// to align version counters assigned by the Service Operator and the
-	// Manager. If this is less than what would be assigned naturally, empty or
-	// tombstone versions need to be sequenced such that they match. If this is
-	// greater than what would be assigned, an error condition has occured and
-	// the request should be rejected.
+	// Manager. If this is greater than what would be assigned naturally, dummy
+	// versions need to be sequenced such that they match. If this is less than
+	// what would be assigned, an error condition has occured and the request
+	// should be rejected.
 	StartingVersion *uint32
 
 	// Values contains the values for the new label versions, in the order that

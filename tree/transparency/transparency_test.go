@@ -21,11 +21,11 @@ func generateRandomTree(t *testing.T) (*Tree, [][]byte) {
 		t.Fatal(err)
 	}
 	for i := range 7 {
-		add := make([]LabelValue, len(labels))
+		add := make([]LabelUpdate, len(labels))
 		for j, label := range labels {
-			add[j] = LabelValue{
-				Label: label,
-				Value: structs.UpdateValue{Value: []byte{byte(i)}},
+			add[j] = LabelUpdate{
+				Label:  label,
+				Values: []structs.UpdateValue{{Value: []byte{byte(i)}}},
 			}
 		}
 		if _, err := tree.Mutate(add, nil); err != nil {

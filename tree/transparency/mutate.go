@@ -13,14 +13,16 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
 
-// Mutate takes as input a set of new label-value pairs to insert, and a set of
-// existing labels to remove. Version counters are automatically assigned. Both
-// `add` and `remove` may be empty, in which case a new log entry is added
-// without modifying the prefix tree.
+// Mutate takes as input a set of new label versions to insert, and a set of
+// existing labels to remove. Each label may appear at most once in `add`.
+// Version counters are automatically assigned, unless a starting version is
+// given in Third-Party Management mode, in which case dummy versions are
+// sequenced as necessary to skip to it. Both `add` and `remove` may be empty,
+// in which case a new log entry is added without modifying the prefix tree.
 //
 // It returns the AuditorUpdate structure for the Third-Party Auditor, if any.
 // If an error is returned, no changes are made to the tree.
-func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate, error) {
+func (t *Tree) Mutate(add []LabelUpdate, remove [][]byte) (*structs.AuditorUpdate, error) {
 	if err := t.checkWritable(); err != nil {
 		return nil, err
 	}
@@ -113,57 +115,82 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 type labelMutation struct {
 	label  []byte
 	index  []uint64
-	add    []structs.UpdateValue
-	remove bool
+	skip   uint32                // The number of dummy versions to sequence
+	add    []structs.UpdateValue // New versions of label to create
+	remove bool                  // Whether to remove existing versions of label
 }
 
 // groupByLabel takes the full set of requested additions and removals and
 // organizes them by label. This function also handles looking up the index for
-// all of the affected labels.
-func (t *Tree) groupByLabel(add []LabelValue, remove [][]byte) ([]labelMutation, error) {
-	allLabels := make(map[string][]byte)
+// all of the affected labels, and determining how many dummy versions need to
+// be sequenced for each.
+func (t *Tree) groupByLabel(add []LabelUpdate, remove [][]byte) ([]labelMutation, error) {
+	out := make([]labelMutation, 0, len(add)+len(remove))
+	startVers := make([]*uint32, 0, len(add))
+	byLabel := make(map[string]int, len(add)+len(remove)) // Position of each label in `out`.
 
-	// Group adds and removes by label.
-	groupedAdds := make(map[string][]structs.UpdateValue)
-	for _, pair := range add {
-		labelStr := fmt.Sprintf("%x", pair.Label)
-		allLabels[labelStr] = pair.Label
-		groupedAdds[labelStr] = append(groupedAdds[labelStr], pair.Value)
+	for _, update := range add {
+		if len(update.Values) == 0 {
+			return nil, fmt.Errorf("no values given for new versions of label: %s", update.Label)
+		} else if update.StartingVersion != nil && t.config.Mode != structs.ThirdPartyManagement {
+			return nil, errors.New("starting version may only be given in third party management mode")
+		} else if _, ok := byLabel[string(update.Label)]; ok {
+			return nil, fmt.Errorf("multiple update requests for same label: %s", update.Label)
+		}
+		byLabel[string(update.Label)] = len(out)
+		startVers = append(startVers, update.StartingVersion)
+		out = append(out, labelMutation{label: update.Label, add: update.Values})
 	}
 
-	groupedRemoves := make(map[string]struct{})
 	for _, label := range remove {
-		labelStr := fmt.Sprintf("%x", label)
-		allLabels[labelStr] = label
-		groupedRemoves[labelStr] = struct{}{}
-	}
-
-	// Extract the full set of labels / labels converted to strings.
-	labelStrs := make([]string, 0, len(allLabels))
-	labels := make([][]byte, 0, len(allLabels))
-	for labelStr, label := range allLabels {
-		labelStrs = append(labelStrs, labelStr)
-		labels = append(labels, label)
+		i, ok := byLabel[string(label)]
+		if ok && out[i].remove {
+			return nil, fmt.Errorf("multiple remove requests for same label: %s", label)
+		} else if ok {
+			out[i].remove = true
+		} else {
+			byLabel[string(label)] = len(out)
+			out = append(out, labelMutation{label: label, remove: true})
+		}
 	}
 
 	// Batch lookup the index for each label.
+	labels := make([][]byte, len(out))
+	for i, mut := range out {
+		labels[i] = mut.label
+	}
 	indices, err := t.batchGetIndex(labels)
 	if err != nil {
 		return nil, err
 	}
-
-	// Combine into slice where each entry is one label's mutation information.
-	out := make([]labelMutation, len(labelStrs))
-	for i, labelStr := range labelStrs {
-		_, ok := groupedRemoves[labelStr]
-		out[i] = labelMutation{
-			label:  labels[i],
-			index:  indices[i],
-			add:    groupedAdds[labelStr],
-			remove: ok,
+	for i := range out {
+		out[i].index = indices[i]
+		if i < len(add) {
+			out[i].skip, err = skippedVersions(out[i], startVers[i])
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
+
 	return out, nil
+}
+
+// skippedVersions returns the number of dummy versions that need to be
+// sequenced before the new versions in `mut`, such that the first new version
+// is assigned the requested starting version, if any.
+func skippedVersions(mut labelMutation, startVer *uint32) (uint32, error) {
+	if startVer == nil {
+		return 0, nil
+	}
+	next := int64(len(mut.index))
+	if mut.remove {
+		next = 0
+	}
+	if int64(*startVer) < next {
+		return 0, fmt.Errorf("starting version %d of label is less than next version %d: %s", *startVer, next, mut.label)
+	}
+	return uint32(int64(*startVer) - next), nil
 }
 
 // checkMutationSize returns an error if the requested mutations would produce
@@ -184,7 +211,7 @@ func (t *Tree) groupByLabel(add []LabelValue, remove [][]byte) ([]labelMutation,
 func (t *Tree) checkMutationSize(mutations []labelMutation) error {
 	var added, removed uint64
 	for _, mut := range mutations {
-		added += uint64(len(mut.add))
+		added += uint64(mut.skip) + uint64(len(mut.add))
 		if mut.remove {
 			removed += uint64(len(mut.index))
 		}
@@ -199,7 +226,7 @@ func (t *Tree) checkMutationSize(mutations []labelMutation) error {
 }
 
 // mutateLabel performs the requested additions and removals for a single label.
-// Version counters are assigned sequentially.
+// Version counters are assigned sequentially, starting with any dummy versions.
 func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]prefix.Entry, [][]byte, error) {
 	var (
 		add    []prefix.Entry
@@ -208,6 +235,7 @@ func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]pref
 		label, index = mut.label, mut.index
 	)
 
+	// If requested, delete all existing versions of the label.
 	if mut.remove && len(index) > 0 {
 		// The label is not eligible for deletion if it has been modified since
 		// the last distinguished log entry was created.
@@ -237,6 +265,23 @@ func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]pref
 		index = index[:0]
 	}
 
+	// Sequence dummy versions, which map the VRF output of each skipped
+	// label-version pair to an all-zero commitment. No value is stored for
+	// these versions.
+	for range mut.skip {
+		ver := uint32(len(index))
+
+		vrfOutput, _, err := t.computeVrfOutput(mut.label, ver)
+		if err != nil {
+			return nil, nil, err
+		}
+		commitment := make([]byte, t.config.Suite.HashSize())
+
+		add = append(add, prefix.Entry{VrfOutput: vrfOutput, Commitment: commitment})
+		index = append(index, n)
+	}
+
+	// Add new versions of the label to the tree.
 	for _, value := range mut.add {
 		ver := uint32(len(index))
 
@@ -256,7 +301,7 @@ func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]pref
 		if err := t.putIndex(mut.label, index); err != nil {
 			return nil, nil, err
 		}
-	} // TODO: Sequence dummy versions if necessary.
+	}
 
 	return add, remove, nil
 }
