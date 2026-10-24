@@ -14,9 +14,9 @@ import (
 )
 
 // Mutate takes as input a set of new label-value pairs to insert, and a set of
-// existing label-version pairs to remove. Version counters are automatically
-// assigned/unassigned. Both `add` and `remove` may be empty, in which case a
-// new log entry is added without modifying the prefix tree.
+// existing labels to remove. Version counters are automatically assigned. Both
+// `add` and `remove` may be empty, in which case a new log entry is added
+// without modifying the prefix tree.
 //
 // It returns the AuditorUpdate structure for the Third-Party Auditor, if any.
 // If an error is returned, no changes are made to the tree.
@@ -29,7 +29,6 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 	defer t.tx.Rollback()
 
 	n := t.n()
-
 	handle := algorithms.NewProducedProofHandle(t.config.Suite, t.tx, nil)
 	provider := algorithms.NewDataProvider(t.config.Suite, handle)
 
@@ -114,7 +113,7 @@ func (t *Tree) Mutate(add []LabelValue, remove [][]byte) (*structs.AuditorUpdate
 type labelMutation struct {
 	label  []byte
 	index  []uint64
-	add    []LabelValue
+	add    []structs.UpdateValue
 	remove bool
 }
 
@@ -125,11 +124,11 @@ func (t *Tree) groupByLabel(add []LabelValue, remove [][]byte) ([]labelMutation,
 	allLabels := make(map[string][]byte)
 
 	// Group adds and removes by label.
-	groupedAdds := make(map[string][]LabelValue)
+	groupedAdds := make(map[string][]structs.UpdateValue)
 	for _, pair := range add {
 		labelStr := fmt.Sprintf("%x", pair.Label)
 		allLabels[labelStr] = pair.Label
-		groupedAdds[labelStr] = append(groupedAdds[labelStr], pair)
+		groupedAdds[labelStr] = append(groupedAdds[labelStr], pair.Value)
 	}
 
 	groupedRemoves := make(map[string]struct{})
@@ -193,7 +192,7 @@ func (t *Tree) checkMutationSize(mutations []labelMutation) error {
 
 	maxDepth := 8 * uint64(t.config.Suite.HashSize())
 	maxEntries := uint64(math.MaxUint32) / maxDepth
-	if added > maxEntries || removed > maxEntries || added+2*removed > maxEntries {
+	if added+2*removed > maxEntries {
 		return fmt.Errorf("too many changes to fit in an auditor update: %d added, %d removed", added, removed)
 	}
 	return nil
@@ -238,14 +237,14 @@ func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]pref
 		index = index[:0]
 	}
 
-	for _, pair := range mut.add {
+	for _, value := range mut.add {
 		ver := uint32(len(index))
 
-		vrfOutput, _, err := t.computeVrfOutput(pair.Label, ver)
+		vrfOutput, _, err := t.computeVrfOutput(mut.label, ver)
 		if err != nil {
 			return nil, nil, err
 		}
-		commitment, err := t.putVersion(pair.Label, ver, pair.Value)
+		commitment, err := t.putVersion(mut.label, ver, value)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -254,10 +253,10 @@ func (t *Tree) mutateLabel(n uint64, prevDLE *uint64, mut labelMutation) ([]pref
 		index = append(index, n)
 	}
 	if len(mut.add) > 0 {
-		if err := t.putIndex(mut.add[0].Label, index); err != nil {
+		if err := t.putIndex(mut.label, index); err != nil {
 			return nil, nil, err
 		}
-	}
+	} // TODO: Sequence dummy versions if necessary.
 
 	return add, remove, nil
 }

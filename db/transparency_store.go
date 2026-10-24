@@ -163,15 +163,8 @@ func (ts TransparencyStore) Commit() error {
 			batch[key] = value
 		}
 	}
-
 	if treeHead == nil {
-		temp, _, err := ts.GetTreeHead()
-		if err != nil {
-			return err
-		} else if temp == nil {
-			return errors.New("no tree head currently or previously written")
-		}
-		treeHead = temp
+		return errors.New("no tree head written")
 	}
 
 	return ts.kv.Commit(ts.ctx, batch, treeHead)
