@@ -89,6 +89,15 @@ func (t *Tree) GetBatch(entries []uint64, n uint64, nP, m *uint64) ([][]byte, er
 	return t.fetchSpecific(math.BatchCopath(entries, n, nP, m))
 }
 
+// GetFullSubtrees returns the full subtree values of the log of size `n`. The
+// output can be passed to Root to compute the root hash.
+func (t *Tree) GetFullSubtrees(n uint64) ([][]byte, error) {
+	if n == 0 || n > math.MaxTreeSize {
+		return nil, errors.New("invalid value for tree size")
+	}
+	return t.fetchSpecific(math.FullSubtrees(math.Root(n), n))
+}
+
 // Append adds a new element to the end of the log and returns the new full
 // subtrees. n is the current value; after this operation is complete, methods
 // to this class should be called with n+1.

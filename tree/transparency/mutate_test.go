@@ -3,6 +3,7 @@ package transparency
 import (
 	"bytes"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -359,5 +360,29 @@ func TestMutateFailedCommit(t *testing.T) {
 		t.Fatal(err)
 	} else if reloaded.n() != 2 {
 		t.Fatal("unexpected tree size")
+	}
+}
+
+func TestCheckMutationSize(t *testing.T) {
+	tree, err := NewTree(test.Config(t), test.MemStore(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxEntries := uint64(math.MaxUint32) / (8 * uint64(tree.config.Suite.HashSize()))
+
+	// Removed entries count twice, since each may also move a leaf.
+	ok := []labelMutation{{remove: true, index: make([]uint64, maxEntries/2)}}
+	if err := tree.checkMutationSize(ok); err != nil {
+		t.Fatal(err)
+	}
+	tooMany := []labelMutation{{remove: true, index: make([]uint64, maxEntries/2+1)}}
+	if err := tree.checkMutationSize(tooMany); err == nil {
+		t.Fatal("expected oversized mutation to be rejected")
+	}
+
+	// Only labels being removed count towards removals.
+	notRemoved := []labelMutation{{index: make([]uint64, maxEntries/2+1)}}
+	if err := tree.checkMutationSize(notRemoved); err != nil {
+		t.Fatal(err)
 	}
 }
