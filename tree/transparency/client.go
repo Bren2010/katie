@@ -1,6 +1,7 @@
 package transparency
 
 import (
+	"bytes"
 	"errors"
 	"time"
 
@@ -8,6 +9,12 @@ import (
 	"github.com/Bren2010/katie/tree/transparency/math"
 	"github.com/Bren2010/katie/tree/transparency/structs"
 )
+
+// ErrStateChanged is returned when verifying a response if the client's stored
+// state changed after the corresponding request was created, for example
+// because the response to a concurrent request was verified first. Nothing is
+// committed, and the request should be created and sent again.
+var ErrStateChanged = errors.New("client state changed since request was created")
 
 // VerifyFunc is a function returned by one of the methods on Client, used for
 // verifying a response to a specific request. The function is tied to the
@@ -79,6 +86,41 @@ func (c *Client) getStaleLabel(terminal uint64) ([]byte, *structs.ClientLabelSta
 	return label, state, nil
 }
 
+// checkState returns ErrStateChanged if the stored global state is no longer
+// `state`, the state that a request was created from.
+func (c *Client) checkState(state *structs.ClientState) error {
+	raw, err := c.tx.GetState()
+	if err != nil {
+		return err
+	}
+	var expected []byte
+	if state != nil {
+		if expected, err = structs.Marshal(state); err != nil {
+			return err
+		}
+	}
+	if !bytes.Equal(raw, expected) {
+		return ErrStateChanged
+	}
+	return nil
+}
+
+// checkLabelState returns ErrStateChanged if the stored state specific to
+// `label` is no longer `labelState`, the state that a request was created from.
+func (c *Client) checkLabelState(label []byte, labelState *structs.ClientLabelState) error {
+	raw, err := c.tx.GetLabelState(label)
+	if err != nil {
+		return err
+	}
+	expected, err := marshalLabelState(labelState)
+	if err != nil {
+		return err
+	} else if !bytes.Equal(raw, expected) {
+		return ErrStateChanged
+	}
+	return nil
+}
+
 func (c *Client) putState(updated *structs.ClientState) error {
 	raw, err := structs.Marshal(updated)
 	if err != nil {
@@ -97,12 +139,9 @@ func (c *Client) putLabelState(
 	if err != nil {
 		return err
 	}
-	var rawLabel []byte
-	if len(updatedLabel.Contact) > 0 || updatedLabel.Owner != nil {
-		rawLabel, err = structs.Marshal(updatedLabel)
-		if err != nil {
-			return err
-		}
+	rawLabel, err := marshalLabelState(updatedLabel)
+	if err != nil {
+		return err
 	}
 	return c.tx.PutLabelState(raw, label, rawLabel, terminal)
 }
@@ -142,6 +181,9 @@ func (c *Client) search(
 	req *structs.SearchRequest,
 ) VerifyFunc[*structs.SearchResponse] {
 	return func(res *structs.SearchResponse) error {
+		if err := c.checkState(state); err != nil {
+			return err
+		}
 		v, err := newVerifier(c.config, state, res.FullTreeHead, res.Search)
 		if err != nil {
 			return err
@@ -223,8 +265,36 @@ func (c *Client) search(
 	}
 }
 
+// OwnerInitAlways returns an OwnerInitRequest for the requested `label` and a
+// function to verify the corresponding OwnerInitResponse. Label ownership
+// starts at the Transparency Log's genesis.
+func (c *Client) OwnerInitAlways(label []byte) (
+	*structs.OwnerInitRequest,
+	VerifyFunc[*structs.OwnerInitResponse],
+	error,
+) {
+	state, err := c.getState()
+	if err != nil {
+		return nil, nil, err
+	}
+	labelState, err := c.getLabelState(label)
+	if err != nil {
+		return nil, nil, err
+	} else if labelState.Owner != nil {
+		return nil, nil, errors.New("label is already owned")
+	}
+
+	req := &structs.OwnerInitRequest{Last: getLast(state), Label: label}
+	return req, c.ownerInit(state, labelState, req), nil
+}
+
 // OwnerInit returns an OwnerInitRequest for the requested `label` and a
-// function to verify the corresponding OwnerInitResponse.
+// function to verify the corresponding OwnerInitResponse. Label ownership
+// starts at the rightmost distinguished log entry, based on the user's
+// currently retained state.
+//
+// Users must have made a recent request to the Transparency Log to ensure their
+// state contains a recently issued distinguished log entry.
 func (c *Client) OwnerInit(label []byte) (
 	*structs.OwnerInitRequest,
 	VerifyFunc[*structs.OwnerInitResponse],
@@ -237,7 +307,7 @@ func (c *Client) OwnerInit(label []byte) (
 	labelState, err := c.getLabelState(label)
 	if err != nil {
 		return nil, nil, err
-	} else if labelState != nil && labelState.Owner != nil {
+	} else if labelState.Owner != nil {
 		return nil, nil, errors.New("label is already owned")
 	}
 	start, err := getDistinguished(c.config, state)
@@ -255,6 +325,11 @@ func (c *Client) ownerInit(
 	req *structs.OwnerInitRequest,
 ) VerifyFunc[*structs.OwnerInitResponse] {
 	return func(res *structs.OwnerInitResponse) error {
+		if err := c.checkState(state); err != nil {
+			return err
+		} else if err := c.checkLabelState(req.Label, labelState); err != nil {
+			return err
+		}
 		v, err := newVerifier(c.config, state, res.FullTreeHead, res.Init)
 		if err != nil {
 			return err
@@ -364,6 +439,10 @@ func (c *Client) contactMonitor(
 		res, ok := marsh.(*structs.ContactMonitorResponse)
 		if !ok {
 			return errors.New("expected contact monitor response, unexpected value received")
+		} else if err := c.checkState(state); err != nil {
+			return err
+		} else if err := c.checkLabelState(req.Label, labelState); err != nil {
+			return err
 		}
 
 		// Verify the proof.
@@ -409,6 +488,10 @@ func (c *Client) ownerMonitor(
 		res, ok := marsh.(*structs.OwnerMonitorResponse)
 		if !ok {
 			return errors.New("expected owner monitor response, unexpected value received")
+		} else if err := c.checkState(state); err != nil {
+			return err
+		} else if err := c.checkLabelState(req.Label, labelState); err != nil {
+			return err
 		}
 
 		// Verify the proof.
@@ -541,7 +624,18 @@ func (sv *StreamVerifier) verifyValues(
 
 // Verify processes the given UpdateResponse. If it returns an error, the
 // StreamVerifier is invalidated and should no longer be used.
+//
+// Verify returns ErrStateChanged if the client's state was changed by anything
+// other than this StreamVerifier since the request was created. Note that the
+// values in the request may have been created regardless, so the label should
+// be monitored before the request is retried.
 func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
+	if err := sv.client.checkState(sv.state); err != nil {
+		return err
+	} else if err := sv.client.checkLabelState(sv.req.Label, sv.labelState); err != nil {
+		return err
+	}
+
 	var (
 		startVer    uint32
 		commitments map[uint32][]byte

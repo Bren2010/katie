@@ -29,7 +29,7 @@ func newVerifier(
 	fth structs.FullTreeHead,
 	proof structs.CombinedTreeProof,
 ) (*verifier, error) {
-	if fth.TreeHead == nil && state == nil {
+	if state == nil && fth.TreeHead == nil {
 		return nil, errors.New("no tree head found")
 	}
 
@@ -72,11 +72,13 @@ func (v *verifier) m() *uint64 {
 func (v *verifier) addLabelState(
 	state *structs.ClientLabelState,
 	manual map[uint32][]byte,
-) error {
+) error { // TODO: Review
 	for _, entry := range state.Versions {
-		commitment := entry.Commitment
-		if commitment == nil {
-			commitment = manual[entry.Version]
+		commitment, ok := manual[entry.Version]
+		if !ok {
+			commitment = entry.Commitment
+		} else if entry.Commitment != nil {
+			return errors.New("manually computed commitment found in binary lader")
 		}
 		err := v.handle.AddVersion(entry.Version, entry.VrfOutput, commitment)
 		if err != nil {
@@ -94,7 +96,7 @@ func (v *verifier) processLadder(
 	ladder []structs.BinaryLadderStep,
 	vers []uint32,
 	manual map[uint32][]byte,
-) error {
+) error { // TODO: Review
 	if len(ladder) != len(vers) {
 		return errors.New("incorrect number of binary ladder steps provided")
 	}
@@ -125,7 +127,8 @@ func (v *verifier) processLadder(
 }
 
 func (v *verifier) updateView(now uint64) error {
-	if err := algorithms.UpdateView(v.config, v.n(), v.m(), v.provider); err != nil {
+	err := algorithms.UpdateView(v.config, v.n(), v.m(), v.provider)
+	if err != nil {
 		return err
 	}
 	return algorithms.VerifyFreshness(v.config, v.n(), now, v.provider)
@@ -147,15 +150,15 @@ func (v *verifier) rightmostDistinguished() (*uint64, error) {
 	return algorithms.RightmostDistinguished(v.config, v.n(), v.provider)
 }
 
-// TODO: What about monitoring?
-
 func (v *verifier) verifyTreeHead(root, rootP []byte) error {
 	if v.fth.TreeHead == nil {
 		if v.state == nil {
 			return errors.New("same tree head not allowed when client has no state")
 		}
-		// Note: Verifying that the rightmost timestamp is within the bounds set
-		// by MaxAhead and MaxBehind is done in updateView().
+		// - Verifying that the rightmost timestamp is within the bounds set by
+		//   MaxAhead and MaxBehind is done in updateView().
+		// - Verifying that the computed root hash matches the retained root
+		//   hash happens when the log tree inclusion proof is evaluated.
 		return nil
 	}
 
@@ -270,6 +273,8 @@ func getLast(state *structs.ClientState) *uint64 {
 	return &state.TreeHead.TreeSize
 }
 
+// getDistinguished returns the rightmost distinguished log entry, based on the
+// user's retained state.
 func getDistinguished(config *structs.PublicConfig, state *structs.ClientState) (uint64, error) {
 	if state == nil {
 		return 0, errors.New("unable to make request with no state")
@@ -497,4 +502,13 @@ func updateRetainedVersions(
 	state.Versions = retained
 
 	return nil
+}
+
+// marshalLabelState returns the serialized label-specific state, or nil if
+// there is nothing that needs to be stored.
+func marshalLabelState(labelState *structs.ClientLabelState) ([]byte, error) {
+	if len(labelState.Contact) == 0 && labelState.Owner == nil {
+		return nil, nil
+	}
+	return structs.Marshal(labelState)
 }
