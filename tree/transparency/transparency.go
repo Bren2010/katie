@@ -277,6 +277,11 @@ func (t *Tree) Search(
 	if err := t.addRequiredVersions(handle, req.Label, vrfOutputs); err != nil {
 		return nil, err
 	}
+	for i, ver := range ladder {
+		if ver == target {
+			steps[i].Commitment = nil
+		}
+	}
 
 	// Assemble response.
 	var version *uint32

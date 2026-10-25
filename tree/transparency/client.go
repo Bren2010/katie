@@ -39,12 +39,11 @@ func NewClient(config *structs.PublicConfig, tx db.ClientStore) (*Client, error)
 		return nil, errors.New("invalid configuration given")
 	}
 
-	return &Client{
-		config: config,
-		tx:     tx,
-		now:    time.Now,
-	}, nil
+	return &Client{config: config, tx: tx, now: time.Now}, nil
 }
+
+// timestamp returns the current time in milliseconds since the Unix epoch.
+func (c *Client) timestamp() uint64 { return uint64(c.now().UnixMilli()) }
 
 func (c *Client) getState() (*structs.ClientState, error) {
 	raw, err := c.tx.GetState()
@@ -60,18 +59,20 @@ func (c *Client) getLabelState(label []byte) (*structs.ClientLabelState, error) 
 	raw, err := c.tx.GetLabelState(label)
 	if err != nil {
 		return nil, err
+	} else if raw == nil {
+		return &structs.ClientLabelState{}, nil
 	}
-	return parseLabelState(c.config, raw)
+	return structs.UnmarshalWith(raw, structs.NewClientLabelState, c.config.Suite)
 }
 
-func (c *Client) getStaleLabel(cutoff uint64) ([]byte, *structs.ClientLabelState, error) {
-	label, raw, err := c.tx.GetStaleLabel(cutoff)
+func (c *Client) getStaleLabel(terminal uint64) ([]byte, *structs.ClientLabelState, error) {
+	label, raw, err := c.tx.GetStaleLabel(terminal)
 	if err != nil {
 		return nil, nil, err
 	} else if label == nil {
 		return nil, nil, nil
 	}
-	state, err := parseLabelState(c.config, raw)
+	state, err := structs.UnmarshalWith(raw, structs.NewClientLabelState, c.config.Suite)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -117,7 +118,7 @@ func (c *Client) GreatestVersionSearch(label []byte) (
 	if err != nil {
 		return nil, nil, err
 	}
-	req := &structs.SearchRequest{Last: getLast(state), Label: label, Version: nil}
+	req := &structs.SearchRequest{Last: getLast(state), Label: label}
 	return req, c.search(state, req), nil
 }
 
@@ -141,7 +142,7 @@ func (c *Client) search(
 	req *structs.SearchRequest,
 ) VerifyFunc[*structs.SearchResponse] {
 	return func(res *structs.SearchResponse) error {
-		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Search)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, res.Search)
 		if err != nil {
 			return err
 		}
@@ -153,9 +154,8 @@ func (c *Client) search(
 		} else if res.Version != nil {
 			target = *res.Version
 		} else {
-			// This will never happen if the SearchResponse was properly
-			// decoded, but it might not have been.
-			return errors.New("unexpected error occurred")
+			// This will never happen if the response was properly decoded.
+			panic("unreachable")
 		}
 
 		// If a Third-Party Manager is being used, verify `value`.
@@ -179,7 +179,7 @@ func (c *Client) search(
 		}
 
 		// Verify the proof.
-		if err := v.updateView(); err != nil {
+		if err := v.updateView(c.timestamp()); err != nil {
 			return err
 		}
 		var terminal uint64
@@ -211,10 +211,10 @@ func (c *Client) search(
 		labelState, err := c.getLabelState(req.Label)
 		if err != nil {
 			return err
-		} else if err := v.addLabelState(labelState); err != nil {
+		} else if err := v.addLabelState(labelState, nil); err != nil {
 			return err
 		}
-		if err := updateContactState(labelState, terminal, v.n, target); err != nil {
+		if err := updateContactState(labelState, terminal, v.n(), target); err != nil {
 			return err
 		} else if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
@@ -255,7 +255,7 @@ func (c *Client) ownerInit(
 	req *structs.OwnerInitRequest,
 ) VerifyFunc[*structs.OwnerInitResponse] {
 	return func(res *structs.OwnerInitResponse) error {
-		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Init)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, res.Init)
 		if err != nil {
 			return err
 		}
@@ -280,7 +280,7 @@ func (c *Client) ownerInit(
 		}
 
 		// Verify the proof.
-		if err := v.updateView(); err != nil {
+		if err := v.updateView(c.timestamp()); err != nil {
 			return err
 		}
 		monitor, err := v.monitor()
@@ -298,7 +298,7 @@ func (c *Client) ownerInit(
 
 		// Update the global and label-specific state.
 		labelState.Owner = monitor.Owner.Struct()
-		if err := v.addLabelState(labelState); err != nil {
+		if err := v.addLabelState(labelState, nil); err != nil {
 			return err
 		} else if err := updateRetainedVersions(labelState, v.handle); err != nil {
 			return err
@@ -367,12 +367,12 @@ func (c *Client) contactMonitor(
 		}
 
 		// Verify the proof.
-		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Monitor)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, res.Monitor)
 		if err != nil {
 			return err
-		} else if err := v.addLabelState(labelState); err != nil {
+		} else if err := v.addLabelState(labelState, nil); err != nil {
 			return err
-		} else if err := v.updateView(); err != nil {
+		} else if err := v.updateView(c.timestamp()); err != nil {
 			return err
 		}
 		monitor, err := v.monitor()
@@ -412,12 +412,12 @@ func (c *Client) ownerMonitor(
 		}
 
 		// Verify the proof.
-		v, err := newVerifier(c.config, state, res.FullTreeHead, c.now(), req.Last, res.Monitor)
+		v, err := newVerifier(c.config, state, res.FullTreeHead, res.Monitor)
 		if err != nil {
 			return err
-		} else if err := v.addLabelState(labelState); err != nil {
+		} else if err := v.addLabelState(labelState, nil); err != nil {
 			return err
-		} else if err := v.updateView(); err != nil {
+		} else if err := v.updateView(c.timestamp()); err != nil {
 			return err
 		}
 		monitor, err := v.monitor()
@@ -570,10 +570,10 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 	}
 
 	// Verify the binary ladder and the proof.
-	v, err := newVerifier(sv.client.config, sv.state, res.FullTreeHead, sv.client.now(), getLast(sv.state), res.Update)
+	v, err := newVerifier(sv.client.config, sv.state, res.FullTreeHead, res.Update)
 	if err != nil {
 		return err
-	} else if err := v.addLabelState(sv.labelState); err != nil {
+	} else if err := v.addLabelState(sv.labelState, nil); err != nil {
 		return err
 	}
 	err = v.processLadder(sv.req.Label, res.BinaryLadder, ladder, commitments)
@@ -582,7 +582,7 @@ func (sv *StreamVerifier) Verify(res *structs.UpdateResponse) error {
 	}
 
 	// Verify the proof.
-	if err := v.updateView(); err != nil {
+	if err := v.updateView(sv.client.timestamp()); err != nil {
 		return err
 	}
 	monitor, err := v.monitor()

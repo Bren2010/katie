@@ -160,12 +160,12 @@ func (v *verifier) verifyTreeHead(root, rootP []byte) error {
 	}
 
 	// Verify the size and signature on the tree head.
-	if v.m != nil && v.n <= *v.m {
+	if v.m() != nil && v.n() <= *v.m() {
 		return errors.New("provided tree size is not greater than advertised")
 	}
 	tbs, err := structs.Marshal(&structs.TreeHeadTBS{
 		Config:   v.config,
-		TreeSize: v.n,
+		TreeSize: v.n(),
 		Root:     root,
 	})
 	if err != nil {
@@ -186,7 +186,7 @@ func (v *verifier) verifyTreeHead(root, rootP []byte) error {
 			return errors.New("previous auditor tree size does not cover new auditor start position")
 		}
 	}
-	rightmost, err := v.provider.GetTimestamp(v.n - 1)
+	rightmost, err := v.provider.GetTimestamp(v.n() - 1)
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func (v *verifier) verifyTreeHead(root, rootP []byte) error {
 		return errors.New("auditor timestamp is greater than rightmost log entry timestamp")
 	} else if rightmost-auditorTreeHead.Timestamp > v.config.MaxAuditorLag {
 		return errors.New("auditor timestamp is too far behind rightmost log entry timestamp")
-	} else if auditorTreeHead.TreeSize > v.n {
+	} else if auditorTreeHead.TreeSize > v.n() {
 		return errors.New("auditor tree size is greater than transparency log tree size")
 	}
 
@@ -219,21 +219,21 @@ func (v *verifier) verifyTreeHead(root, rootP []byte) error {
 // finish computes the final tree root, verifies the transparency log's
 // signature over it, and returns the new state for the client to retain.
 func (v *verifier) finish() (*structs.ClientState, error) {
-	result, err := v.provider.Finish(v.n, v.nP, v.m)
+	result, err := v.provider.Finish(v.n(), v.nP(), v.m())
 	if err != nil {
 		return nil, err
 	}
 
 	// Compute a candidate root value for the tree and, if needed, the subtree
 	// signed by the auditor.
-	root, err := log.Root(v.config.Suite, v.n, result.FullSubtrees)
+	root, err := log.Root(v.config.Suite, v.n(), result.FullSubtrees)
 	if err != nil {
 		return nil, err
 	}
 
 	var rootP []byte
-	if v.nP != nil {
-		rootP, err = log.Root(v.config.Suite, *v.nP, result.Additional)
+	if nP := v.nP(); nP != nil {
+		rootP, err = log.Root(v.config.Suite, *nP, result.Additional)
 		if err != nil {
 			return nil, err
 		}
@@ -335,13 +335,6 @@ func labelTerminal(state *structs.ClientLabelState) uint64 {
 		terminal = min(terminal, entry.Position)
 	}
 	return terminal
-}
-
-func parseLabelState(config *structs.PublicConfig, raw []byte) (*structs.ClientLabelState, error) {
-	if raw == nil {
-		return &structs.ClientLabelState{}, nil
-	}
-	return structs.UnmarshalWith(raw, structs.NewClientLabelState, config.Suite)
 }
 
 // verifyUpdateValue checks that, if Third-Party Management is used, that the
