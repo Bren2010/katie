@@ -71,6 +71,13 @@ func (ml *ManagedLog) OwnerMonitor(
 	return ml.log.OwnerMonitor(ctx, req)
 }
 
+func (ml *ManagedLog) WalkDistinguished(
+	ctx context.Context,
+	req *structs.DistinguishedRequest,
+) (*structs.DistinguishedResponse, error) {
+	return ml.log.WalkDistinguished(ctx, req)
+}
+
 func (ml *ManagedLog) Update(
 	ctx context.Context,
 	req *structs.UpdateRequest,

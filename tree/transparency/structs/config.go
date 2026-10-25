@@ -31,7 +31,23 @@ type Config struct {
 	MaxBehind                  uint64
 	ReasonableMonitoringWindow uint64
 	MaximumLifetime            uint64 // Set to 0 if there is not one.
+
+	// Recent is the application's definition of a "recent" distinguished log
+	// entry, used when walking distinguished log entries. It is not part of
+	// the serialized config, but must be the same for the Transparency Log and
+	// its users. Walking distinguished log entries is not supported if nil.
+	Recent RecentFunc
 }
+
+// RecentFunc returns whether a distinguished log entry meets the application's
+// definition of "recent". `x` and `timestamp` are the position and timestamp of
+// the log entry, `rightmost` is the timestamp of the rightmost log entry, and
+// `count` is the number of recent distinguished log entries that have already
+// been found, all of which are to the right of `x`.
+//
+// The definition must be monotonic: if a distinguished log entry is not
+// recent, then no distinguished log entry to its left is recent either.
+type RecentFunc func(x, timestamp, rightmost uint64, count int) bool
 
 func (c *Config) IsExpired(ts, rightmost uint64) bool {
 	if c.MaximumLifetime == 0 {

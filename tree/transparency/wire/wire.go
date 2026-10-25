@@ -17,6 +17,7 @@ type Interface interface {
 	OwnerInit(ctx context.Context, req *structs.OwnerInitRequest) (*structs.OwnerInitResponse, error)
 	OwnerMonitor(ctx context.Context, req *structs.OwnerMonitorRequest) (*structs.OwnerMonitorResponse, error)
 	Update(ctx context.Context, req *structs.UpdateRequest) (<-chan UpdateResponse, error)
+	WalkDistinguished(ctx context.Context, req *structs.DistinguishedRequest) (*structs.DistinguishedResponse, error)
 }
 
 // ManagerInterface is the interface implemented by a Third-Party Manager.

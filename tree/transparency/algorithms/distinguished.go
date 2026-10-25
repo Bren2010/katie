@@ -10,14 +10,8 @@ import (
 )
 
 // RecentFunc returns whether a distinguished log entry meets the application's
-// definition of "recent". `x` and `timestamp` are the position and timestamp of
-// the log entry, `rightmost` is the timestamp of the rightmost log entry, and
-// `count` is the number of recent distinguished log entries that have already
-// been found, all of which are to the right of `x`.
-//
-// The definition must be monotonic: if a distinguished log entry is not
-// recent, then no distinguished log entry to its left is recent either.
-type RecentFunc func(x, timestamp, rightmost uint64, count int) bool
+// definition of "recent". See structs.RecentFunc.
+type RecentFunc = structs.RecentFunc
 
 // RecentCount returns a RecentFunc where a distinguished log entry is recent if
 // it is one of the `n` rightmost.

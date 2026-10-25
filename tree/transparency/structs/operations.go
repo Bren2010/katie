@@ -3,6 +3,8 @@ package structs
 import (
 	"bytes"
 	"io"
+
+	"github.com/Bren2010/katie/crypto/suites"
 )
 
 type SearchRequest struct {
@@ -550,4 +552,23 @@ func (dr *DistinguishedResponse) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 	return dr.Distinguished.Marshal(buf)
+}
+
+// DistinguishedHead contains the root value of the log tree at each point where
+// one of the recent distinguished log entries was the rightmost log entry, in
+// left-to-right order. It is exchanged between users to detect forks.
+type DistinguishedHead struct {
+	Heads [][]byte
+}
+
+func NewDistinguishedHead(cs suites.CipherSuite, buf *bytes.Buffer) (*DistinguishedHead, error) {
+	heads, err := readByteSlice[uint8](buf, cs.HashSize())
+	if err != nil {
+		return nil, err
+	}
+	return &DistinguishedHead{heads}, nil
+}
+
+func (dh *DistinguishedHead) Marshal(buf *bytes.Buffer) error {
+	return writeByteSlice[uint8](buf, dh.Heads, "distinguished head")
 }
