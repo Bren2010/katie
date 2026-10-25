@@ -141,9 +141,9 @@ func (t *Tree) n() uint64 {
 	return 0
 }
 
-func (t *Tree) nP() *uint64 {
-	if t.auditorHead != nil {
-		return &t.auditorHead.TreeSize
+func nP(fth *structs.FullTreeHead) *uint64 {
+	if fth.AuditorTreeHead != nil {
+		return &fth.AuditorTreeHead.TreeSize
 	}
 	return nil
 }
@@ -290,7 +290,7 @@ func (t *Tree) Search(
 	if req.Version == nil {
 		version = &target
 	}
-	combinedProof, err := provider.Output(t.n(), t.nP(), req.Last)
+	combinedProof, err := provider.Output(t.n(), nP(fth), req.Last)
 	if err != nil {
 		return nil, err
 	}

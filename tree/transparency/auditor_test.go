@@ -62,7 +62,7 @@ func TestSetAuditorTreeHead(t *testing.T) {
 		t.Fatal(err)
 	} else if err := tree.SetAuditorTreeHead(&heads[2]); err != nil {
 		t.Fatal(err)
-	} else if tree.nP() == nil || *tree.nP() != 3 {
+	} else if tree.auditorHead == nil || tree.auditorHead.TreeSize != 3 {
 		t.Fatal("auditor tree head not applied")
 	}
 	err := tree.SetAuditorTreeHead(&heads[1])
@@ -74,7 +74,7 @@ func TestSetAuditorTreeHead(t *testing.T) {
 	reloaded, err := NewTree(tree.config, store, nil)
 	if err != nil {
 		t.Fatal(err)
-	} else if reloaded.nP() == nil || *reloaded.nP() != 3 {
+	} else if reloaded.auditorHead == nil || reloaded.auditorHead.TreeSize != 3 {
 		t.Fatal("auditor tree head not persisted")
 	}
 }
@@ -108,7 +108,7 @@ func TestSetAuditorTreeHeadInvalid(t *testing.T) {
 			t.Fatalf("%s: expected error containing %q, got: %v", tc.name, tc.err, err)
 		}
 	}
-	if tree.nP() != nil {
+	if tree.auditorHead != nil {
 		t.Fatal("invalid auditor tree head was applied")
 	}
 }
@@ -148,5 +148,45 @@ func TestFullTreeHeadRequiresAuditorTreeHead(t *testing.T) {
 		t.Fatal(err)
 	} else if res.FullTreeHead.AuditorTreeHead == nil {
 		t.Fatal("no auditor tree head provided")
+	}
+}
+
+// TestSameHeadLaggingAuditor checks that a client can verify a response that
+// reuses its tree head when the auditor tree head is behind the log.
+func TestSameHeadLaggingAuditor(t *testing.T) {
+	tree, _, a := auditedTree(t)
+	labels := test.RandomLabels(3)
+	var head structs.AuditorTreeHead
+	for i, label := range labels {
+		head = auditedMutate(t, tree, a, []LabelUpdate{
+			{Label: label, Values: []structs.UpdateValue{{Value: []byte{byte(i)}}}},
+		})
+	}
+	if err := tree.SetAuditorTreeHead(&head); err != nil {
+		t.Fatal(err)
+	}
+	auditedMutate(t, tree, a, []LabelUpdate{
+		{Label: labels[0], Values: []structs.UpdateValue{{Value: []byte{3}}}},
+	})
+
+	client, err := NewClient(tree.config.Public(), db.NewMemoryClientStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.now = tree.now
+
+	for i, label := range labels {
+		req, verify, err := client.GreatestVersionSearch(label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := tree.Search(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		} else if sameHead := res.FullTreeHead.TreeHead == nil; sameHead != (i > 0) {
+			t.Fatalf("search %d: unexpected value for same head: %v", i, sameHead)
+		} else if err := verify(res); err != nil {
+			t.Fatalf("search %d: %v", i, err)
+		}
 	}
 }

@@ -95,7 +95,7 @@ func (t *Tree) startMonitor(last *uint64, label []byte) (*monitorOp, error) {
 			if err := t.addRequiredVersions(handle, label, vrfOutputs); err != nil {
 				return nil, nil, err
 			}
-			proof, err := provider.Output(t.n(), t.nP(), last)
+			proof, err := provider.Output(t.n(), nP(fth), last)
 			if err != nil {
 				return nil, nil, err
 			}

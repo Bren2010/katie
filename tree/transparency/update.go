@@ -284,7 +284,7 @@ func (u *updater) next(withValues bool) (*structs.UpdateResponse, error) {
 	if err := t.addRequiredVersions(handle, u.label, vrfOutputs); err != nil {
 		return nil, err
 	}
-	proof, err := provider.Output(t.n(), t.nP(), u.last)
+	proof, err := provider.Output(t.n(), nP(fth), u.last)
 	if err != nil {
 		return nil, err
 	}
