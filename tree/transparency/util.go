@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/Bren2010/katie/crypto/commitments"
+	"github.com/Bren2010/katie/crypto/suites"
 	"github.com/Bren2010/katie/tree/prefix"
 	"github.com/Bren2010/katie/tree/transparency/algorithms"
 	"github.com/Bren2010/katie/tree/transparency/structs"
@@ -122,16 +123,7 @@ func (t *Tree) putVersion(label []byte, ver uint32, value structs.UpdateValue) (
 	}
 	t.tx.PutVersion(label, ver, labelValue)
 
-	// Serialize the data that will be committed to and compute the commitment.
-	commitmentValue, err := structs.Marshal(&structs.CommitmentValue{
-		Label:   label,
-		Version: ver,
-		Update:  value,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return commitments.Commit(t.config.Suite, opening, commitmentValue), nil
+	return computeCommitment(t.config.Suite, opening, label, ver, value)
 }
 
 // computeVrfOutput returns the VRF output for the requested label-version pair
@@ -231,19 +223,47 @@ func (t *Tree) addRequiredVersions(
 	return nil
 }
 
-// verifyServiceSignature verifies a leaf signature from the Service Operator.
-// This method is only used in Third-Party Management mode.
-func (t *Tree) verifyServiceSignature(label []byte, signedVer uint32, val structs.UpdateValue) error {
-	tbs, err := structs.Marshal(&structs.UpdateTBS{
-		Config:  t.config.Public(),
+// computeCommitment returns the commitment to `val` as version `ver` of
+// `label`, using the commitment opening `opening`.
+func computeCommitment(
+	cs suites.CipherSuite,
+	opening, label []byte,
+	ver uint32,
+	val structs.UpdateValue,
+) ([]byte, error) {
+	commitmentValue, err := structs.Marshal(&structs.CommitmentValue{
 		Label:   label,
-		Version: signedVer,
+		Version: ver,
+		Update:  val,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return commitments.Commit(cs, opening, commitmentValue), nil
+}
+
+// verifyLeafSignature verifies the Service Operator's signature on `val` as
+// version `ver` of `label`. It does nothing unless Third-Party Management is
+// used, in which case the signature is required.
+func verifyLeafSignature(
+	config *structs.PublicConfig,
+	label []byte,
+	ver uint32,
+	val structs.UpdateValue,
+) error {
+	if config.Mode != structs.ThirdPartyManagement {
+		return nil
+	}
+	tbs, err := structs.Marshal(&structs.UpdateTBS{
+		Config:  config,
+		Label:   label,
+		Version: ver,
 		Value:   val.Value,
 	})
 	if err != nil {
 		return err
 	}
-	ok := t.config.LeafPublicKey.Verify(tbs, val.Signature)
+	ok := config.LeafPublicKey.Verify(tbs, val.Signature)
 	if !ok {
 		return errors.New("leaf signature verification failed")
 	}
