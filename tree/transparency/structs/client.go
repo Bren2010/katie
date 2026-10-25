@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"maps"
+	"slices"
 
 	"github.com/Bren2010/katie/crypto/suites"
 )
@@ -89,9 +91,11 @@ func (cs *ClientState) Marshal(buf *bytes.Buffer) error {
 		return err
 	}
 
+	// Log entries are written in order of position so that the encoding is
+	// deterministic.
 	entrySlice := make([]IndexedLogEntry, 0, len(cs.LogEntries))
-	for pos, entry := range cs.LogEntries {
-		entrySlice = append(entrySlice, IndexedLogEntry{Position: pos, LogEntry: entry})
+	for _, pos := range slices.Sorted(maps.Keys(cs.LogEntries)) {
+		entrySlice = append(entrySlice, IndexedLogEntry{Position: pos, LogEntry: cs.LogEntries[pos]})
 	}
 	return writeMarshalSlice[uint8](buf, entrySlice, "log entry")
 }

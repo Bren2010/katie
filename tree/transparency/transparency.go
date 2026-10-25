@@ -176,6 +176,8 @@ func (t *Tree) fullTreeHead(last *uint64) (*structs.FullTreeHead, error) {
 		} else if *last > t.n() {
 			return nil, errors.New("tree size advertised by user is greater than current tree size")
 		}
+	} else if t.config.Mode == structs.ThirdPartyAuditing && t.auditorHead == nil {
+		return nil, errors.New("can not provide tree head before an auditor tree head has been set")
 	}
 	return &structs.FullTreeHead{TreeHead: t.treeHead, AuditorTreeHead: t.auditorHead}, nil
 }

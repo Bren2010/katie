@@ -1,6 +1,7 @@
 package transparency
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -122,5 +123,30 @@ func TestSetAuditorTreeHeadWrongMode(t *testing.T) {
 	err = tree.SetAuditorTreeHead(&structs.AuditorTreeHead{TreeSize: 1})
 	if err == nil || !strings.Contains(err.Error(), "third party auditing") {
 		t.Fatalf("expected error about mode, got: %v", err)
+	}
+}
+
+func TestFullTreeHeadRequiresAuditorTreeHead(t *testing.T) {
+	tree, _, a := auditedTree(t)
+	label := test.RandomLabels(1)[0]
+	head := auditedMutate(t, tree, a, []LabelUpdate{
+		{Label: label, Values: []structs.UpdateValue{{Value: []byte{0}}}},
+	})
+
+	// No tree head is provided until an auditor tree head has been set.
+	req := &structs.SearchRequest{Label: label}
+	_, err := tree.Search(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "auditor tree head") {
+		t.Fatalf("expected error about auditor tree head, got: %v", err)
+	}
+
+	if err := tree.SetAuditorTreeHead(&head); err != nil {
+		t.Fatal(err)
+	}
+	res, err := tree.Search(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	} else if res.FullTreeHead.AuditorTreeHead == nil {
+		t.Fatal("no auditor tree head provided")
 	}
 }
